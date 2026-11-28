@@ -17,6 +17,7 @@ from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval, production_merge
 from ndf.progress import command, invoke, lane, model, plan, run, stages, store
+from ndf.progress.gate import design
 from ndf.progress.gate.asking import (
     ORGANIZER_ANSWERS,
     DESIGN_GATE,
@@ -99,7 +100,10 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
         if pull is not None:
             seen = Target(pull.head_sha, body=text_sha256(pull.body), title=text_sha256(pull.title))
         if not material:
-            return seen
+            if pull is None or q.gate != DESIGN_GATE:
+                return seen
+            # マージ先は同じ 1 回の取得で分かる（承認の記録と比べるのに使う。#3702）
+            return replace(seen, repo=get_hub().repo, pr=pull.number, base=pull.base_ref)
         path = material_path(root, replace(q, target=Target(seen.head)))
         seen = replace(seen, material=material_sha256(path) if path.exists() else None)
         if pull is None or found is None:
@@ -145,6 +149,14 @@ def _answered_with_key(v: run.View, key: str) -> Optional[model.Event]:
     return None
 
 
+class _Outdated(Exception):
+    """待っている質問の承認の記録が今の PR に当てられない（回答を書かず、工程の先頭へ戻す）。"""
+
+    def __init__(self, q: Question, why: str) -> None:
+        super().__init__(why)
+        self.q, self.why = q, why
+
+
 def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = None) -> tuple[Question, Target]:
     """回答を受けられるかを確かめ、待っている質問と、照らした対象を返す。断るなら `model.Refused`（行は待ちのまま残る）。
 
@@ -163,6 +175,9 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
     if a.drop:
         _kept(v, a.drop)
     now = observe(q)
+    why = design.outdated(v, q, now)
+    if why is not None:
+        raise _Outdated(q, why)
     changed = now.differs(a.seen)
     if changed:
         raise model.Refused(f"回答した後に対象が変わった。待ちへ戻すので、今の対象を見て回答し直す: {' / '.join(changed)}")
@@ -303,31 +318,48 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
         held = _answered_with_key(v, a.key)
         if held is not None:
             return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
-        q, seen = _refusal(v, a, observe, st.root)
-        # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
-        q = replace(q, target=seen)
-        by = _trail_by(conn, q, a, seen)
-        if by is not None:
-            _post_trail(q, a, seen, by, post)
-        carried = _carry(conn, machine_id, a.drop, a.reason)
-        rejected = _reject_release(conn, q, a)
-        extra = {
-            "gate_id": q.id,
-            "gate": q.gate,
-            "by": a.by,
-            "key": a.key,
-            "seen": seen.as_dict(),
-            "dropped": list(a.drop),
-            "carried_row": carried,
-            "release_request": rejected,
-        }
-        draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
-        drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
-        seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0)
+        try:
+            q, seen = _refusal(v, a, observe, st.root)
+        except _Outdated as exc:
+            # 戻した事象は書き終えてから断る（トランザクションの中で投げると書いた分が戻る）
+            outdated: Optional[str] = exc.why
+            store.append_events(conn, machine_id, design.reset(v, exc.q, exc.why), v.events[-1].seq)
+        else:
+            outdated = None
+            # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
+            q = replace(q, target=seen)
+            seqs, carried = _record(conn, v, q, a, text, post)
+    if outdated is not None:
+        raise model.Refused(f"{outdated}。回答は書かず、{design.RESTARTED}")
     summary = f"工程 {q.stage} へ回答 {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"machine_id": machine_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
     out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
     return command.with_warnings(out, after=record_answer(v, q, a, rejections_path))
+
+
+def _record(conn: Any, v: run.View, q: Question, a: Answer, text: Optional[str], post: Post) -> tuple[list[int], Optional[str]]:
+    """照らし終えた回答 `a` の証跡と事象を書き、（事象の番号, 外した課題を入れたレーンの行）を返す。`q.target` は照らした対象。"""
+    # 課題を外せない形の回答は、証跡を書く前に断る
+    record = design.answer_extra(v, q, a.value, a.drop)
+    by = _trail_by(conn, q, a, q.target)
+    if by is not None:
+        _post_trail(q, a, q.target, by, post)
+    carried = _carry(conn, v.machine_id, a.drop, a.reason)
+    rejected = _reject_release(conn, q, a)
+    extra = {
+        "gate_id": q.id,
+        "gate": q.gate,
+        "by": a.by,
+        "key": a.key,
+        "seen": q.target.as_dict(),
+        "dropped": list(a.drop),
+        "carried_row": carried,
+        "release_request": rejected,
+        **record,
+    }
+    draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
+    drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
+    return store.append_events(conn, v.machine_id, drafts, v.events[-1].seq if v.events else 0), carried
 
 
 # 承認ゲートの回答だけが文脈へ書くキー（工程の定義の outputs には置かない）。まとめたリリースのリリース記録の PR は
@@ -470,6 +502,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     文脈の `issues` を回答の前へ戻し、外した課題を入れたレーンの行を取り消す（回答し直しで同じ課題を外せる）。
     設計 PR に結び付けずに記録した設計の承認（#4495 の直しの前のバージョンの承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
     待ちへ戻す（`_unbound_approval`・`_reopen_unbound`。#4495）。
+    承認の記録を持つ工程の却下は比べない（`design.stops_regardless`）。
     """
     v = run.read(st, machine_id)
     if _unbound_approval(v) is not None:
@@ -478,11 +511,16 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
         return None
     p = run.event_payload(m.event)
-    if "gate_id" not in p:
+    if "gate_id" not in p or design.stops_regardless(v, m.stage, p):
         return None
     q = question(v, replace(m, action=run.Action.GATE))
     # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）。本文と題は head と同じ 1 回の取得で比べる（#4446）
     seen, now = Target.from_dict(p.get("seen")), observe(q, material=False)
+    stale = design.moved_after_answer(v, q, p, now)
+    if stale is not None:
+        why = f"回答した後に対象が変わった: {stale}"
+        _take_back(st, machine_id, m.event, lambda at: design.reset(at, q, why), why)
+        return why
     texts = replace(now, head=None, material=None).differs(seen)
     if p.get("by") == model.MVV_SERVICE:
         moved = _judged_elsewhere(p, q, seen, now)
@@ -497,9 +535,22 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     if not changed:
         return None
     why = "回答した後に対象が変わった: " + " / ".join(changed)
-    draft = _no_report_draft(v, m.stage.name, m.step.id, "waiting", m.progress.generation, why)
-    # 比べた後に回答が読まれていれば（同じ回答の事象が今も読む回答でなければ）書かない
-    answered, stage = m.event, m.stage.name
+    stage, step, generation = m.stage.name, m.step.id, m.progress.generation
+
+    def wait(at: run.View) -> list[model.EventDraft]:
+        return [_no_report_draft(at, stage, step, "waiting", generation, why), *_reading_reset(at, stage, q.gate)]
+
+    _take_back(st, machine_id, m.event, wait, why)
+    return why
+
+
+def _take_back(
+    st: store.Store, machine_id: str, answered: model.Event, back: Callable[[run.View], list[model.EventDraft]], why: str
+) -> None:
+    """読む前の回答 `answered` を取り消す。`back` の事象と、回答が外した課題を戻す事象・入れたレーンの行の取り消しを 1 回で書く。
+
+    比べた後に回答が読まれていれば（同じ回答の事象が今も読む回答でなければ）何も書かない。"""
+    stage = str(answered.draft.row_key)
     undo: list[bool] = []
 
     def build(now: run.View) -> list[model.EventDraft]:
@@ -507,14 +558,13 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
         if not _still(now, answered):
             return []
         undo.append(True)
-        return [draft, *_reading_reset(now, stage, q.gate), *_undropped(now, stage, answered)]
+        return [*back(now), *_undropped(now, stage, answered)]
 
     def after(conn: Any) -> None:
         if undo:
-            _uncarry(conn, machine_id, p.get("carried_row"), why)
+            _uncarry(conn, machine_id, run.event_payload(answered).get("carried_row"), why)
 
     run.append(st, machine_id, build, after)
-    return why
 
 
 # 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）

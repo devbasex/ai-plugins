@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Optional
 
 from ndf import contracts
 from ndf.adapters.git import Git, GitError
 from ndf.core.plan import units_decide as ud
+from ndf.core.plan import runner as plan_runner
 from ndf.core.plan import units_files
 from ndf.progress import folding, invoke, model, run_view, stages
 
@@ -23,6 +24,8 @@ TARGET_KEY = "design_target"
 REVIEW_STAGE_ID, GATE = "document-review", "design"
 IMPLEMENT_DEFINITION = PurePosixPath("workflow/stages/implement.json")
 _RESPLIT = "変更を求めて実装計画を分け直す"
+# `approval_stale` で止まったら、工程の先頭から流し直すステップ
+STALE_STEPS = (*stages.CARRIED_STEPS.values(), "docs-ci", "design-mvv", "design-merge-approved")
 
 
 def _stage_by_id(snap: stages.Snapshot, stage_id: str) -> Optional[stages.StageDef]:
@@ -38,6 +41,17 @@ def required(snap: stages.Snapshot) -> bool:
     """工程「ドキュメントレビュー」が、そのモードで設計承認ゲートのステップを持つか。"""
     stage = _stage_by_id(snap, REVIEW_STAGE_ID)
     return stage is not None and stage.gate_index(GATE) is not None
+
+
+def applies(snap: stages.Snapshot, stage: stages.StageDef) -> bool:
+    """工程 `stage` が、承認の記録を組んで照らす工程か。"""
+    return stage.id == REVIEW_STAGE_ID and required(snap)
+
+
+def from_steps(stage: stages.StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """工程の済んだステップの出力から記録を組む（`build`）。"""
+    held = stages.carried_values(stage, done)
+    return build(held.get("reviewed"), held.get("design_units"))
 
 
 def build(reviewed: Optional[Mapping[str, Any]], design_units: Optional[Mapping[str, Any]]) -> dict[str, Any]:
@@ -72,6 +86,59 @@ def stale(record: Mapping[str, Any], repo: str, pr: int, head: str, base: str) -
     now = {"repo": repo, "pr": pr, "head": head, "base": base}
     approved = record["review"]
     return [f"{k} が違う（記録 {approved[k]}、今 {value}）" for k, value in now.items() if approved[k] != value]
+
+
+def reviewed_pr(stage: stages.StageDef, done: Mapping[str, Mapping[str, Any]]) -> Optional[int]:
+    """工程の済んだステップがレビューした PR の番号。まだ無ければ None。"""
+    held = stages.carried_values(stage, done).get("reviewed")
+    return held["pr"] if held else None
+
+
+def moved(record: Mapping[str, Any], repo: Any, pr: Any, head: Any, base: Any) -> Optional[str]:
+    """`stale` の違いを 1 つの理由にする。違いが無ければ None。"""
+    found = stale(record, repo, pr, head, base)
+    return f"承認の対象がレビューの結果と違う: {' / '.join(found)}" if found else None
+
+
+def mvv_extra(
+    v: run_view.View, stage: stages.StageDef, done: Mapping[str, Mapping[str, Any]], held: Mapping[str, Any]
+) -> tuple[dict[str, Any], list[model.EventDraft]]:
+    """MVV 判定 `held` で人の承認を省く回答に添える値と、省かずにレビューへ戻す事象（どちらかが空）。
+
+    記録を組めないか、判定が読んだ PR の承認の対象（`target`）が記録と 1 つでも違うか欠ければ戻す。
+    """
+    if not applies(v.snap, stage):
+        return {}, []
+    target = held["target"] if isinstance(held.get("target"), Mapping) else {}
+    try:
+        record = from_steps(stage, done)
+    except model.Refused as exc:
+        return {}, reset_drafts(v, stage, exc.reason)
+    why = moved(record, *(target.get(k) for k in ("repo", "pr", "head", "base")))
+    return ({}, reset_drafts(v, stage, why)) if why else ({TARGET_KEY: record}, [])
+
+
+def stale_step_drafts(v: run_view.View, stage: stages.StageDef, step: str, kind: Optional[str], why: str) -> list[model.EventDraft]:
+    """ステップ `step` が `approval_stale` で止まったときの、工程の先頭へ戻す事象（当たらなければ空）。"""
+    if kind != plan_runner.APPROVAL_STALE or step not in STALE_STEPS or not applies(v.snap, stage):
+        return []
+    return reset_drafts(v, stage, why)
+
+
+def narrowed(record: Mapping[str, Any], drop: Sequence[int], root: Path) -> dict[str, Any]:
+    """課題を外す回答の記録。承認の記録の単位が持つファイルを記録の HEAD から読んで `without_issues` に渡す。"""
+    head = record["review"]["head"]
+    if not _fetched(Git(root), head):
+        raise model.Refused(f"記録の HEAD {head} が手元に無く、取得もできないので課題を外せない")
+    # 実装計画を省いた課題の単位は `file` が空。記録に無いファイル（古い単位のファイルなど）は読まない
+    paths = sorted({u["file"] for u in record["units"] if u["file"]})
+    try:
+        # 本文はまとめて読む（git の起動をファイル数に比例させない）
+        texts = units_files.Tree(root, head).read_all(paths)
+        files = [units_files.parse_text(path, texts[path]) for path in paths]
+    except (units_files.UnitsFileError, GitError) as exc:
+        raise model.Refused(f"記録の HEAD の単位のファイルを読めないので課題を外せない: {exc}") from None
+    return without_issues(record, drop, files)
 
 
 def reset_drafts(v: run_view.View, stage: stages.StageDef, why: str) -> list[model.EventDraft]:
@@ -134,7 +201,7 @@ def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mappi
     head = record["review"]["head"]
     if not _fetched(Git(tree.root), head):
         return [*found, f"記録の HEAD {head} が手元に無く、取得もできないので照らせない"]
-    found += _file_mismatches(units_files.Tree(tree.root, head), tree, issues)
+    found += _file_mismatches(units_files.Tree(tree.root, head), tree, targets)
     found += _handling_mismatches(targets["handling"], tree, issues)
     excluded = {int(n) for n, h in targets["handling"].items() if h["handling"] in units_files.EXCLUDED_HANDLINGS}
     held = context["plan_omitted"] if "plan_omitted" in context else []
@@ -157,15 +224,23 @@ def _fetched(g: Git, head: str) -> bool:
     return False
 
 
-def _file_mismatches(approved: units_files.Tree, now: units_files.Tree, issues: Sequence[int]) -> list[str]:
+def _file_mismatches(approved: units_files.Tree, now: units_files.Tree, targets: Mapping[str, Any]) -> list[str]:
+    """単位のファイルの違い。ファイルの増減は記録の全課題で見る。重複と中身は、記録を組むときに読む課題（実装計画を省かず、
+    独立した単位を持つ課題）のファイルだけを見る。"""
+    issues = targets["issues"]
+    handled = targets["handling"]
+    unread = {int(n) for n, h in handled.items() if h["handling"] in units_files.EXCLUDED_HANDLINGS} | set(targets["omitted"])
+    read = [n for n in issues if n not in unread]
     try:
-        before = set(units_files.find(approved, issues).values())
-        after = set(units_files.find(now, issues).values())
+        old_names, new_names = approved.names(), now.names()
+        old_read = set(units_files.find(approved, read, old_names).values())
+        new_read = set(units_files.find(now, read, new_names).values())
     except units_files.UnitsFileError as exc:
         return [str(exc)]
+    before, after = units_files.paths_naming(old_names, issues), units_files.paths_naming(new_names, issues)
     found = [f"{path}: 承認した単位のファイルが無い" for path in sorted(before - after)]
     found += [f"{path}: 承認の時点に無い単位のファイルがある" for path in sorted(after - before)]
-    common = sorted(before & after)
+    common = sorted(old_read & new_read)
     try:
         # 読み取りは側ごとに 1 回にまとめる（git の起動をファイル数に比例させない）
         old, new = approved.read_all(common), now.read_all(common)

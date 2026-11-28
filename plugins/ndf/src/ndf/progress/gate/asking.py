@@ -22,7 +22,8 @@ from filelock import FileLock
 from ndf import cli
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
-from ndf.progress import lane, model, plan, run, stages
+from ndf.core.plan import units_files
+from ndf.progress import design_record, lane, model, plan, run, stages
 from ndf.progress.run_view import MATERIAL_DIR
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
@@ -162,6 +163,9 @@ def question(v: run.View, m: run.Move, *, repo: Optional[str] = None, target: Ta
     ctx = _waiting_context(v, m.stage, m.progress)
     key = stages.DESIGN_PR if m.step.gate == DESIGN_GATE else "pr"
     number = ctx[key] if isinstance(ctx.get(key), int) else None
+    if m.step.gate == DESIGN_GATE and design_record.applies(v.snap, m.stage):
+        # 承認の記録を持つ工程の質問の PR は、レビューした PR にする
+        number = design_record.reviewed_pr(m.stage, m.progress.done) or number
     qid = question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
     return Question(qid, v.machine_id, m.stage.name, m.step.id, m.step.gate, tuple(run.choices(m)), number, pr_url(repo, number), target)
 
@@ -406,8 +410,39 @@ def material(v: run.View, q: Question, *, private: bool = True) -> str:
     step = model.MVV_GATE_STEPS.get(q.gate) if q.gate else None
     if step is not None and any(s.id == step for s in v.snap.stage(q.stage).steps):
         lines += ["", "## MVV 判定", "", *mvv_lines(_judged(v, q.stage, step), q.gate, q.pr, q.target.head, private=private)]
+    lines += _unit_sections(v, q)
     lines += ["", "## 回答", "", *[f"- {c}" for c in q.choices]]
     return "\n".join(lines) + "\n"
+
+
+# --- 承認資料の「レビューの単位」の欄（#3702） --------------------------------------------------------
+
+
+def _unit_sections(v: run.View, q: Question) -> list[str]:
+    """承認の記録を持つ工程の承認資料の、単位の表・確かめの警告・実装計画を省いた課題。ほかの質問は空。"""
+    stage = v.snap.stage(q.stage)
+    if q.gate != DESIGN_GATE or not design_record.applies(v.snap, stage):
+        return []
+    done = run.step_progress(v, q.stage).done
+    record = design_record.from_steps(stage, done)
+    report = done["units-check"]
+    warnings = report["warnings"] if isinstance(report.get("warnings"), list) else []
+    return [
+        "",
+        "## レビューの単位",
+        "",
+        *units_files.item_table(record["units"]),
+        "",
+        "マージの順は、同時にマージの準備ができた単位のうち、どれを先にマージするかの順です。",
+        "",
+        "## 単位の確かめの警告",
+        "",
+        *bullets(map(str, warnings)),
+        "",
+        "## 実装計画を省いた課題（行数は確かめていない）",
+        "",
+        *bullets(f"#{n}" for n in record["targets"]["omitted"]),
+    ]
 
 
 def _judged(v: run.View, stage: str, step: str) -> Optional[Mapping[str, Any]]:

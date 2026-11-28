@@ -290,6 +290,25 @@ def test_without_narrows_the_record_so_that_it_still_matches(work, drop, left):
     assert _mismatches(work, narrowed, context) == []
 
 
+def test_narrowed_record_matches_while_stale_files_of_an_omitted_issue_remain(tmp_path, monkeypatch):
+    _put(tmp_path, "issue-7-plan.units.json", _unit_doc(7))
+    _put(tmp_path, "issue-8-plan.units.json", _unit_doc(8))
+    # 実装計画を省いた #9 に、承認の記録に載らない古い単位のファイルが残っている（壊れていて、2 つある）
+    _put(tmp_path, "issue-9-plan.units.json", "壊れた")
+    _put(tmp_path, "issue-9-10-plan.units.json", "壊れた")
+    tree = uf.Tree(tmp_path)
+    report = uf.check(tree, CONTEXT["issues"], CONTEXT["plan_omitted"], LIMITS, {7: 0, 8: 0, 9: 0}, docs=False)
+    record = dr.converted("o/r", "a" * 40, "sprint/7", CONTEXT, LIMITS, report)
+    # コミットの代わりに作業場所を読む
+    monkeypatch.setattr(dr, "_fetched", lambda g, head: True)
+    monkeypatch.setattr(uf, "Tree", lambda root, head: tree)
+
+    narrowed = dr.narrowed(record, [8], tmp_path)
+
+    assert narrowed["targets"]["issues"] == [7, 9]
+    assert dr.mismatches(narrowed, tree, {"issues": [7, 9], "plan_omitted": [9]}) == []
+
+
 def test_without_refuses_to_split_a_file_of_two_issues(work):
     doc = _unit_doc(7)
     both = {**doc, "issues": [7, 8], "tasks": [{**doc["tasks"][0], "issue": 7}]}

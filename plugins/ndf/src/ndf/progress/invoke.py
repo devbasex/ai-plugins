@@ -851,7 +851,7 @@ def script_argv(argv: Sequence[Any]) -> list[str]:
 
 
 def _call_script(run: StageRun, cwd: Path, runner: Runner) -> StageResult:
-    env = run.env({INPUT_ENV: json.dumps(run.inputs, ensure_ascii=False)})
+    env = run.env({**run.env_extra, INPUT_ENV: json.dumps(run.inputs, ensure_ascii=False)})
     return _from_process(run, runner(script_argv(run.args["argv"]), cwd, env))
 
 

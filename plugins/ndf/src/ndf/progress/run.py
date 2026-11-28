@@ -35,7 +35,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import command, definition, invoke, issue_values, model, stages, store
+from ndf.progress import command, definition, design_record, invoke, issue_values, model, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
 from ndf.progress.run_view import (
@@ -423,8 +423,9 @@ def _start_once(d: Drive, v: View, s: stages.StageDef) -> Optional[dict[str, Any
     if off is not None:
         d.write(model.EventDraft("skipped", ACTOR, s.name, reason=f"条件 {off} が偽", payload={"when": off}, rev=v.rev))
         return None
+    prog = step_progress(v, s.name)
     try:
-        inputs = invoke.resolve_inputs(s, v.context())
+        inputs = invoke.resolve_inputs(s, stages.carried_inputs(s, v.context(), {} if prog.redo else prog.done))
     except invoke.StageInputError as exc:
         return result.stopped(TOOL, exc.kind, str(exc), items=exc.items, metrics=_metrics(v, m))
     failed = _prepare(d, v, s, inputs)
@@ -507,8 +508,11 @@ def _consume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
             return report(v, waiting)
         qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
         payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
-        d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
-        summary = f"{reason}。回答は検証を通してから読むので next を打つ"
+        extra, back = design_record.mvv_extra(v, m.stage, m.progress.done, held)
+        answered = model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload={**payload, **extra}, rev=v.rev)
+        d.write(*(back or [answered]))
+        why = f"承認ゲートを省かずレビューへ戻した（{back[0].payload['reason']}）" if back else f"{reason}。回答は検証を通してから読む"
+        summary = f"{why}。続きは next を打つ"
         return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", d.machine_id))
     if event_payload(m.event)["answer"] == APPROVED:
         rep = gate_report(m.step, m.event)
@@ -722,7 +726,10 @@ def _step_draft(v: View, s: stages.StageDef, step: stages.StepDef, prog: StepPro
     """
     if res.status == result.STOPPED:
         cause = res.cause if res.cause is not None else causes.cause("unknown", "作業が理由なく止まった")
-        return [_failed_with(s, step.id, v.rev, cause)]
+        # 未了に戻す事象は実行中の行にしか書けないので、失敗の事象より先に置く
+        why = f"ステップ {step.id} が {APPROVAL_STALE} で止まったので、レビューから流し直す"
+        back = design_record.stale_step_drafts(v, s, step.id, causes.kind_of(cause), why)
+        return [*back, _failed_with(s, step.id, v.rev, cause)]
     errs = definition.validate_io(step.output_ref, res.report) if step.output_ref and res.status == result.OK else []
     if errs:
         return [_failed(s, step.id, v.rev, "bad_report", f"ステップ {step.id} の出力が規約に合わない: {'; '.join(errs)}")]
@@ -814,7 +821,8 @@ def approved_seen(v: View, stage: str, root: Path) -> Optional[dict[str, Any]]:
             carried = None
             if seen.get("production") is False and gate_id:
                 carried = read_accepted_head(work_root(root, v.machine_id), str(gate_id))
-            return {**seen, "head": carried} if carried else dict(seen)
+            record = {k: p[k] for k in (design_record.TARGET_KEY,) if isinstance(p.get(k), dict)}
+            return {**seen, **({"head": carried} if carried else {}), **record}
     return None
 
 
@@ -825,11 +833,13 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if skipped is not None:
         return skipped
     try:
-        inputs = invoke.resolve_inputs(s, v.context())
+        inputs = invoke.resolve_inputs(s, stages.carried_inputs(s, v.context(), prog.done))
     except invoke.StageInputError as exc:
         return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
     approved = approved_seen(v, s.name, d.st.root)
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved)
+    if run.kind == invoke.SCRIPT:
+        run = replace(run, env_extra={"NDF_MACHINE_ID": v.machine_id})
     waited = prog.waiting is not None and prog.waiting["step"] == step.id
     ans = prog.answer_value() if waited else None
     work_dir = step_dir(d, v, s, step)

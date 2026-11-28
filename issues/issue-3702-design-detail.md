@@ -52,7 +52,7 @@ contracts/
 | パス | 種類 | 役割 | 依存する先 | 最上位の関数 |
 | --- | --- | --- | --- | --- |
 | `src/ndf/core/plan/units_decide.py` | 新設 | 実行順・導く値・違反・警告・分け方の案を返す | `graphlib` | `parse`・`judge`・`split`・`single` |
-| `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイル・実装計画・上限を読み、表を作る | 上・`inputs_decide`・`git`・`contracts` | `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`differs` |
+| `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイル・実装計画・上限を読み、表を作る | 上・`inputs_decide`・`git`・`contracts` | `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`item_table`・`differs` |
 | `src/ndf/core/plan/cli.py` | 変更 | `ndf plan units render`・`check`（`--design-gate`） | `units_files` | `_cmd_units` |
 | `src/ndf/core/plan/inputs_decide.py` | 変更 | 「設計の結果」の表の「扱い」と「統合先」の列を読む。`design_gaps` を消す | — | `design_handlings`（新設） |
 | `src/ndf/core/plan/queue_decide.py` | 変更 | `RESUME_ALWAYS` に `guard` を足す | — | — |
@@ -70,6 +70,9 @@ contracts/
 | `src/ndf/progress/definition.py` | 変更 | そのモードに判定のステップが無い工程の出力から `mvv_gate` を外す | — | `_stage_def`（変更） |
 | `src/ndf/progress/store.py` | 変更 | リポジトリのスプリントの一覧を読む | — | `read_machines`（新設） |
 | `src/ndf/progress/gate/entry.py`・`answering.py` | 変更 | 資料を出す前と回答の確定の前に記録と照らす | `design_record` | `present`・`answer`・`recheck`（変更） |
+| `src/ndf/progress/gate/design.py` | 新設 | 承認ゲートで記録を今の PR と比べ、承認の回答に添える値を作る | `design_record`・`asking` | `outdated`・`reset`・`moved_after_answer`・`answer_extra` |
+| `src/ndf/progress/gate/asking.py` | 変更 | 質問の PR をレビューした PR にし、承認資料に単位の表・警告・省いた課題を載せる | `design_record`・`units_files` | `question`・`material`（変更） |
+| `src/ndf/progress/stage_inputs.py` | 変更 | `ndf records mvv gate --machine` の入力を同じ工程の済んだステップから組む | `folding`・`stages` | `stage_inputs_of`（変更） |
 | `src/ndf/ci_cli.py` | 変更 | `ndf ci merge --verify-merged`・`ndf ci watch --head` | — | `_merge_pull`・`_watch`（変更） |
 | `src/ndf/adapters/git.py` | 変更 | push の URL を読み、解析し、git がもう一度書き換えるかを返す | — | `github_target`・`Git.push_urls`・`Git.rewrites_again` |
 | `src/ndf/adapters/github.py` | 変更 | `pulls` に REST への読み替えを止める指定 | — | `pulls`（変更） |
@@ -298,7 +301,7 @@ contracts/
 | --- | --- |
 | `gate/entry.present` | 設計承認ゲートで `required` なら、`carried` の値から `build` して `stale` を見る。違いがあれば資料を出さず、`reset_drafts` を書いて `ndf progress next` を案内する。合えば承認資料に単位の表・警告・省いた課題を足す。質問の PR は `review.pr` にする |
 | `gate/answering.answer` | 回答の確定の前に、同じ値から `build` して `stale` を見る。違いがあれば回答を書かず、`reset_drafts` を書く。承認なら payload に `design_target` を足す。工程「実装」の再承認（決定 10 の変換で求める承認。下の「この変更より前のスプリントの変換」）の回答では、その承認の待ちを返した `gate` の結果の `report.design_target` を payload に足す。設計 PR の照合ではないので `stale` は見ない |
-| `gate/answering.recheck` | 回答の後に head かマージ先が変わっていれば、待ちへ戻すかわりに `reset_drafts` を書く |
+| `gate/answering.recheck` | 承認の回答の後に head かマージ先が変わっていれば、待ちへ戻すかわりに `reset_drafts` を書く。承認の記録を扱う工程「ドキュメントレビュー」で、次に読み取る設計承認ゲートの回答が却下なら、`recheck` は PR の照合もイベントの追記もせずに戻る。続いて `run._consume` が却下を読み、工程の失敗を記録する。再開するかは利用者が決める。変更の要求は回答した時点でレビューへ戻るので、`recheck` では扱わない |
 | `run._start`・`_run_step` | 入力を `stages.carried_inputs` で組む。`_run_step` は工程の script のステップの子へ `NDF_MACHINE_ID`（`StageRun.env_extra`。`invoke._call_script` も渡す）を足し、`design-sync` が読む |
 | `run._consume` | MVV 判定が人の承認を省いて作る回答にも `design_target` を足す。判定の結果が持つ承認の対象（出力 `mvv_gate.target` の `repo`・`pr`・`base`・`head`。判定が読んだ PR の値）を、記録の `review` の 4 つと比べる。1 つでも違うか欠ければ、人の承認を省く回答を作らず、`reset_drafts` を書いてレビューへ戻す |
 | `run._step_draft` | `units-check`・`docs-ci`・`design-mvv`・`design-merge-approved` のどれか（`design-pr-review` は下の「異常系の処理」）が `approval_stale` で止まれば、`reset_drafts` の後に失敗のイベントを同じ書き込みで書く（未了に戻すイベントは、工程が実行中の状態のときしか書けないので、失敗のイベントより先に書く）。`retry` と `next` で `design-pr-review` から流れる |
@@ -321,6 +324,8 @@ contracts/
 `mismatches` は、最初にスプリントの課題を比べる。文脈の今の `issues`（`--drop` があれば外した後の値）の全体が、記録の `targets.issues` と同じでなければ違いにする。承認の後に課題を追加しても、見落とさないためである。
 
 扱い・統合先と省いた課題の比較は、記録の `targets.issues` の課題に絞る。今の `_dropped` は文脈の `issues` だけを変えるので、文脈の `plan_omitted` と設計書の「設計の結果」の表には外した課題が残るためである。`collect` と `lineup_from_files` も、記録の課題だけを読む。
+
+単位のファイルの比較の規則（比べる対象と、違いとするもの）は、設計書の決定 11 に従う。`mismatches` は、パスの集合を `units_files.paths_naming` で、読み込むファイルを `units_files.find` で選ぶ。`paths_naming` は同じ課題のファイルが 2 つあっても止めない。`find` には読み込む対象の課題の番号だけを渡すので、読み込まないファイルの重複では止まらない。たとえば、#9 の実装計画を省き、#10 がスプリントの対象外なら、`issue-9-10-plan.units.json` はパスの集合には入るが、読み込まない。
 
 ### 異常系の処理
 

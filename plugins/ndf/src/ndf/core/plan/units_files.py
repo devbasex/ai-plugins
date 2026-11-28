@@ -209,6 +209,12 @@ def find(tree: Tree, issues: Sequence[int], names: Optional[Sequence[str]] = Non
     return out
 
 
+def paths_naming(names: Sequence[str], issues: Sequence[int]) -> set[str]:
+    """ファイル名の番号の並びに `issues` のどれかを持つ単位のファイル。`find` と違い、同じ課題のファイルが 2 つあっても止めない。"""
+    wanted = set(issues)
+    return {path for path in names if _numbers_in(_UNITS_PATH, path) & wanted}
+
+
 def load(tree: Tree, path: str) -> ud.UnitFile:
     """スキーマとパスを検査して読む。名前が単位のファイルの形なら、名前の番号と中の `issues` の一致も確かめる。"""
     return parse_text(path, tree.read(path))
@@ -514,6 +520,34 @@ def render_tables(plan: str, views: Sequence[ud.View], file: Optional[str] = Non
         _markdown_table(_PARALLEL_HEAD, _parallel_rows(mine, views)),
         review_units_decide.UNITS_HEADING,
     )
+
+
+def item_table(items: Sequence[Mapping[str, Any]]) -> list[str]:
+    """`unit_items` の単位の、承認資料の表の行（「レビューの単位」の表から「実際の行数」の列を除いたもの）。
+
+    別のファイルの依存先と、複数のファイルにある名前の単位は、名前にそのファイルの最小の課題の番号を添える。
+    """
+    issue = {(u["file"], u["name"]): min(u["issues"], default=0) for u in items}
+    count = Counter(name for _, name in issue)
+
+    def name(file: str, unit: str, other: bool = False, note: str = "") -> str:
+        marked = other or count[unit] > 1
+        notes = ([f"#{issue[(file, unit)]}"] if marked else []) + ([note] if note else [])
+        return f"{unit}（{'。'.join(notes)}）" if notes else unit
+
+    rows = [
+        [
+            name(u["file"], u["name"]),
+            _JOIN.join(f"{t['id']}（#{t['issue']}）" for t in u["tasks"]),
+            "・".join(u[ud.CRITERIA_KEY]) or _NONE,
+            _NONE if u["lines"] is None else str(u["lines"]),
+            str(u["order"]),
+            _JOIN.join(name(a["file"], a["unit"], a["file"] != u["file"], a["reason"]) for a in u["after"]) or _NONE,
+            str(u["merge"]),
+        ]
+        for u in items
+    ]
+    return _markdown_table(_UNITS_HEAD[:-1], rows)
 
 
 def _newlines(text: str) -> str:
