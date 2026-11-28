@@ -185,6 +185,14 @@ def test_an_unregistered_sprint_branch_is_stopped(repo, st, make):
     assert found and SPRINT in found[0]
 
 
+def test_an_unregistered_sprint_branch_is_stopped_even_when_an_issue_meets_another_sprint(repo, st, make):
+    make(approval=False, branch="sprint/other")
+
+    found = _guard(repo, st)
+
+    assert found and SPRINT in found[0]
+
+
 def test_a_finished_sprint_and_another_repository_are_not_read(repo, st, make):
     tid = make(approval=True)
     assert command.main(["cancel", tid, "--reason", "やめた"]) == 0

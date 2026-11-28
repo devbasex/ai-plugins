@@ -117,19 +117,18 @@ def guard(st: store.Store, repo: str, issues: Collection[int], base: str, branch
     """プランを通さない理由。空なら通す。指示のファイルを読めなければ `Unreadable`。
 
     `issues` は実装の対象の全課題。承認が要るスプリントの起動の記録と一致し、レビューが読む指示も同じ中身なら通す。
-    通せず、当たるスプリントのどれかが承認を要るなら止める。当たるスプリントが無く、マージ先がスプリントブランチなら、
-    承認が要るかを判定できないので止める。
+    通せず、当たるスプリントのどれかが承認を要るなら止める。承認が要るスプリントが当たらず、マージ先がスプリントブランチで、
+    そのブランチのスプリントが無ければ、課題の重なる別のスプリントがあっても、承認が要るかを判定できないので止める。
     """
     # 当たるスプリントが無くても、渡された指示を読めないプランは通さない
     digest = _instruction_hash(instructions.plan)
     found = _sprints(st, repo, issues, base)
-    if not found:
-        if not base.startswith(model.branch_prefix("sprint")):
-            return []
-        return [f"マージ先 {base} のスプリントが状態の保存先に無く、分け方の承認が要るかを判定できない"]
     gated = [v for v in found if design_record.required(v.snap)]
     if not gated:
-        return []
+        registered = any("branch" in c and c["branch"] == base for c in (v.context() for v in found))
+        if registered or not base.startswith(model.branch_prefix("sprint")):
+            return []
+        return [f"マージ先 {base} のスプリントが状態の保存先に無く、分け方の承認が要るかを判定できない"]
     if _instruction_hash(instructions.review) != digest:
         return [
             f"分け方の承認が要るスプリントで、レビューが読む指示（環境変数 {units_invoke.UNIT_FILE_ENV}）が --unit-file と違う。"
