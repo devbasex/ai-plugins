@@ -28,7 +28,9 @@ def _revoker(cwd: Path) -> reopening.Revoke:
             merge_approval.write_revocations(hub, revocations, hub.viewer())
         except (merge_approval.TrailError, GitHubError, GitError) as exc:
             numbers = "・".join(f"#{n}" for n in sorted({r.target.number for r in revocations}))
-            raise model.Refused(f"PR {numbers} の承認の取り消しとマージキューからの取り外しを終えられないので、開き直さない: {exc}") from None
+            raise model.Refused(
+                f"PR {numbers} の承認の取り消しとマージキューからの取り外しを終えられないので、開き直さない: {exc}"
+            ) from None
 
     return revoke
 
