@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
 import subprocess
@@ -815,11 +816,53 @@ def test_the_commands_of_units_run_keep_the_target_repository_from_another_direc
     assert gate.progress_main(wait[2:]) == 0, capsys.readouterr().out
 
 
+def test_the_commands_after_wait_and_a_reapproval_answer_keep_the_target_repository(repo, st, flow, capsys, tmp_path, monkeypatch):
+    tid = _ready(capsys, repo, tmp_path)
+    routes = {"approved": result.command("plan", "next", "x"), "rejected": None}
+    flow.script["implement"] = [lambda r: invoke.StageResult(result.result("plan", "gate", "再承認が要る", routes=routes), {})]
+    units_cli.run_implement(st, tid, repo, flow.env)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    target = ["--cwd", str(repo.resolve())]
+    capsys.readouterr()
+
+    gate.progress_main(["wait", tid, *target])
+    waited = last_result(capsys.readouterr().out)
+    assert waited["status"] == "gate", waited
+    approved = waited["routes"]["approved"]["argv"]
+    assert approved[-2:] == target
+    assert gate.progress_main([*approved[2:], "--reason", "人が回答した"]) == 0
+    assert last_result(capsys.readouterr().out)["next"]["argv"] == ["ndf", "progress", "next", tid, *target]
+
+
+def test_the_target_repository_is_added_only_to_the_commands_that_take_it(tmp_path, capsys):
+    routes = {"approved": result.command("answer", "m1", "--gate", "q"), "rejected": result.command("plan", "next", "x")}
+
+    def dispatch(a, cwd):
+        return result.result("progress", result.GATE, "回答を待つ", routes=routes)
+
+    parser = argparse.ArgumentParser()
+    command.add_cwd([parser])
+    command.run_main(parser, dispatch, ["--cwd", str(tmp_path)])
+    got = last_result(capsys.readouterr().out)["routes"]
+    assert got["approved"]["argv"][-2:] == ["--cwd", str(tmp_path.resolve())]
+    assert got["rejected"]["argv"] == ["ndf", "plan", "next", "x"]
+    given = [*got["approved"]["argv"][2:], "--result", "approved", "--reason", "r", "--by", "human", "--key", "k"]
+    assert gate.entry.parser().parse_args(given).cwd == tmp_path.resolve()
+
+
 def test_units_run_repeated_after_success_returns_the_same_result_without_running(repo, st, flow, capsys, tmp_path):
     tid = _ready(capsys, repo, tmp_path)
-    first = units_cli.run_implement(st, tid, repo, flow.env)
-    again = units_cli.run_implement(st, tid, repo, flow.env)
+
+    def unwritable(cwd):
+        raise github.GitHubError("届かない")
+
+    env = replace(flow.env, records=unwritable)
+    first = units_cli.run_implement(st, tid, repo, env)
+    again = units_cli.run_implement(st, tid, repo, env)
     assert again == first and again["status"] == "ok", again
+    assert any("届かない" in w for w in again["warnings"]), again
     assert [step for step, _ in flow.calls] == ["implement", "gathered"]
 
 

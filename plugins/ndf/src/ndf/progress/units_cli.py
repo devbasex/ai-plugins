@@ -5,7 +5,6 @@ ndf progress units run <ステートマシンの ID> [--cwd <作業場所>]
 `run` は工程「実装」だけを、`ndf progress next` と同じ処理（`run.decide`・`run.play_move`）で流し、同じ工程のイベントを書く。
 別の流し方を持つと、失敗や回答の待ちが記録に残らず、開始前の検査も抜ける。`next` との違いは、別のプロセスを起動せず
 その場で流すことと、工程「実装」の外へ進まないことの 2 つである。承認した HEAD や、承認が要らないという指定は引数で受けない。
-`--cwd` で対象を指定したときは、結果の後続コマンド（`next`・`routes`）にも同じ指定を足し、別の場所からそのまま打てるようにする。
 
 サブコマンドの引数は `add_parsers` が `ndf progress` の解析器へ足し、エントリポイント（`ndf.progress.gate`）が `dispatch` へ渡す。
 """
@@ -18,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from ndf.contracts import result
-from ndf.progress import command, design_record, model, run, store
+from ndf.progress import command, design_record, model, run, stages, store
+from ndf.progress.folding import step_progress
 
 _PLAYABLE = (run.Action.START, run.Action.RESUME)
 
@@ -32,19 +32,7 @@ def add_parsers(sub: Any) -> None:
 
 def dispatch(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     """`a.env` は `ndf progress next` と同じ外との接点。今のサブコマンドは `run` だけである。"""
-    out = run_implement(st, a.machine_id, cwd, a.env)
-    if a.cwd is not None:
-        _carry_cwd(out, cwd)
-    return out
-
-
-def _carry_cwd(out: dict[str, Any], cwd: Path) -> None:
-    """結果の後続コマンド（どれも `ndf progress`）へ、対象のリポジトリの指定を足す。"""
-    routes = list(out["routes"].values()) if "routes" in out else []
-    nxt = [out["next"]] if "next" in out else []
-    for cmd in [*nxt, *routes]:
-        if cmd is not None:
-            cmd["argv"] = [*cmd["argv"], "--cwd", str(cwd)]
+    return run_implement(st, a.machine_id, cwd, a.env)
 
 
 def run_implement(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
@@ -85,7 +73,26 @@ def _flow(d: run.Drive) -> dict[str, Any]:
     if played is not None:
         return _done(v, played.name)
     ended = _ended_stage(v)
-    return _done(v, ended) if ended is not None else _not_next(v, m)
+    if ended is None:
+        return _not_next(v, m)
+    _restore_warnings(d, v, ended)
+    return _done(v, ended)
+
+
+def _restore_warnings(d: run.Drive, v: run.View, name: str) -> None:
+    """前の実行が工程を終えたときの警告を、工程を流さずに `d.warnings` へ戻す。
+
+    捨てた出力のキーは保存したステップの結果から求める。進捗記録は書き直し（何度打っても同じ本文になる）を打ち直し、
+    今も書けなければ理由を警告に載せる。飛ばした工程は初回も進捗記録を書かないので、何もしない。
+    """
+    last = _end_event(v, name)
+    assert last is not None
+    if last.kind != run.FINISHED:
+        return
+    s = next(s for s in v.snap.stages if s.name == name)
+    merged = stages.step_outputs(s, step_progress(v, name).done)
+    d.warnings.extend(stages.outputs_draft(s, v.rev, merged, run.ACTOR)[1])
+    d.synced()
 
 
 def _end_event(v: run.View, stage: str) -> model.EventDraft | None:
