@@ -18,20 +18,18 @@ from pathlib import PurePosixPath
 from ndf.contracts import facts
 from ndf.domains.crossrefactor.tests_decide import TABLE as TEST_TABLE
 
-LANGUAGES = "languages"
 # 設定のテストの置く場所のうち、範囲に数えないもの（リポジトリ全体）
 WHOLE = frozenset({".", "", "./"})
 
 
 def _code_suffixes() -> tuple[str, ...]:
-    exts = [e for r in facts.rows(LANGUAGES, code=True) for e in r["extensions"]]
-    return tuple(sorted(exts, key=len, reverse=True))
+    return tuple(e for r in facts.rows("languages", code=True) for e in r["extensions"])
 
 
 def is_code(path: str) -> bool:
     """`path` がコードのファイルか（拡張子が表 `languages` の `code` の言語のもの）。"""
     name = PurePosixPath(path).name
-    return any(name.endswith(e) for e in _code_suffixes())
+    return name.endswith(_code_suffixes())
 
 
 def test_dir_names() -> frozenset[str]:

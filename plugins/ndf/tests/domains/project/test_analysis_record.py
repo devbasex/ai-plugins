@@ -25,10 +25,9 @@ OLD_CI = {
     "workflows": [{"path": ".github/workflows/ci.yml", "jobs": 1, "wall_seconds": 9.0}],
     "required_checks": ["pytest"],
 }
-OLD_LANGUAGES = [{"name": "python", "frameworks": [], "files": 9, "version": "3.11"}, {"name": "shell", "frameworks": [], "files": 2}]
 OLD_DOC = {
     "version": 1,
-    "languages": OLD_LANGUAGES,
+    "languages": [{"name": "python", "frameworks": [], "files": 9}],
     "test_duration": {"measured": [{"seconds": 1.0}]},
     "ci": OLD_CI,
     "analysis": {"analyzer": 3, "at": "2026-11-19T01:44:55+00:00", "inputs": {}, "branches": {}, "written": {"languages": "x"}},
@@ -38,30 +37,21 @@ OLD_DOC = {
 # ---------------------------------------------------------------- strip_item
 
 
-def test_strip_item_takes_the_files_out_of_each_language_row():
-    got, names = analysis_record.strip_item("languages", OLD_LANGUAGES)
-    assert got == [{"name": "python", "frameworks": [], "version": "3.11"}, {"name": "shell", "frameworks": []}]
-    assert names == ["languages[].files"]
-    assert OLD_LANGUAGES[0]["files"] == 9  # 入力を書き換えない
-
-
 def test_strip_item_takes_the_workflows_and_the_provider_out_of_ci():
     got, names = analysis_record.strip_item("ci", OLD_CI)
     assert got == {"required_checks": ["pytest"]}
     assert names == ["ci.provider", "ci.workflows"]
-    assert "provider" in OLD_CI
+    assert "provider" in OLD_CI  # 入力を書き換えない
 
 
 @pytest.mark.parametrize(
     "key,value",
     [
-        ("languages", [{"name": "python", "frameworks": []}]),
-        ("languages", []),
-        ("languages", {"unknown": "測れない"}),
         ("ci", {"required_checks": ["pytest"]}),
         ("ci", {"unknown": "時間切れ"}),
         ("ci", "形の違う値"),
-        ("checks", {"tools": [], "files": 3}),
+        ("test", {"suites": [], "workflows": []}),
+        ("materials", [{"files": 3}]),
     ],
 )
 def test_strip_item_leaves_values_without_old_keys(key, value):
@@ -75,11 +65,11 @@ def test_strip_item_keeps_an_empty_ci_when_the_old_ci_had_no_required_checks():
 # ---------------------------------------------------------------- strip_legacy
 
 
-def test_strip_legacy_takes_the_four_kinds_of_old_keys_out():
+def test_strip_legacy_takes_the_old_keys_out():
     before = copy.deepcopy(OLD_DOC)
     got, names = analysis_record.strip_legacy(OLD_DOC)
     assert names == [
-        "languages[].files",
+        "languages",
         "test_duration",
         "ci.provider",
         "ci.workflows",
@@ -88,17 +78,19 @@ def test_strip_legacy_takes_the_four_kinds_of_old_keys_out():
         "analysis.inputs",
         "analysis.branches",
     ]
-    assert got == {
-        "version": 1,
-        "languages": [{"name": "python", "frameworks": [], "version": "3.11"}, {"name": "shell", "frameworks": []}],
-        "ci": {"required_checks": ["pytest"]},
-        "analysis": {"written": {"languages": "x"}},
-    }
+    assert got == {"version": 1, "ci": {"required_checks": ["pytest"]}, "analysis": {"written": {"languages": "x"}}}
     assert OLD_DOC == before
 
 
+def test_strip_legacy_takes_the_six_unread_items_out_even_when_their_shape_is_wrong():
+    keys = ["languages", "services", "issues", "checks", "ndf_policies", "instructions"]
+    got, names = analysis_record.strip_legacy({"version": 1, **{k: "形の違う値" for k in keys}})
+    assert (got, names) == ({"version": 1}, keys)
+    assert contracts.schema_errors(got, check.SCHEMA) == []
+
+
 def test_strip_legacy_leaves_a_new_settings_as_it_is():
-    new = {"version": 1, "languages": [{"name": "python", "frameworks": []}], "ci": {}, "analysis": {"written": {}}}
+    new = {"version": 1, "test": {"suites": []}, "ci": {}, "materials": {"unknown": "回答が無い"}, "analysis": {"written": {}}}
     got, names = analysis_record.strip_legacy(new)
     assert names == [] and got == new
 
@@ -166,9 +158,9 @@ def _doc(written: dict, **rest) -> dict:
 
 
 def test_written_digest_does_not_depend_on_the_key_order():
-    a = _doc({"languages": "1", "ci": "2"})
-    b = _doc({"ci": "2", "languages": "1"})
-    assert analysis_record.written_digest(a) == analysis_record.written_digest(b) == value_digest({"languages": "1", "ci": "2"})
+    a = _doc({"test": "1", "ci": "2"})
+    b = _doc({"ci": "2", "test": "1"})
+    assert analysis_record.written_digest(a) == analysis_record.written_digest(b) == value_digest({"test": "1", "ci": "2"})
 
 
 @pytest.mark.parametrize("doc", [None, {"version": 1}, {"version": 1, "analysis": {}}, {"version": 1, "analysis": "x"}])
@@ -177,10 +169,10 @@ def test_written_digest_without_written_is_the_one_of_an_empty_object(doc):
 
 
 def test_written_digest_ignores_values_outside_written():
-    a = _doc({"languages": "1"}, checks={"tools": []})
-    b = _doc({"languages": "1"}, checks={"tools": [{"name": "ruff"}]}, branch_strategy={"kind": "trunk"})
+    a = _doc({"test": "1"}, materials={})
+    b = _doc({"test": "1"}, materials={"failures": ["x"]}, branch_strategy={"kind": "trunk"})
     assert analysis_record.written_digest(a) == analysis_record.written_digest(b)
 
 
 def test_written_digest_changes_with_one_written_value():
-    assert analysis_record.written_digest(_doc({"languages": "1"})) != analysis_record.written_digest(_doc({"languages": "2"}))
+    assert analysis_record.written_digest(_doc({"test": "1"})) != analysis_record.written_digest(_doc({"test": "2"}))

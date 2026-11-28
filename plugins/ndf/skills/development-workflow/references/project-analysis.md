@@ -7,9 +7,9 @@
 ## 例: carmo-system-console で手順 0 を通す
 
 1. `ndf project check` が 3 で終わる（`.ndf/project.json` が無い）
-2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。言語（PHP 8.3・Laravel 10）・必須のチェック・
-   compose の `mysql` を「測った値」として、テストの走らせ方・課題の SSOT・
-   NDF の方針の検査を「質問」として、候補と根拠を付けて返す
+2. conductor が `ndf project measure --out "$TMP/measure.json"` を打つ。必須のチェックを「測った値」として、
+   テストの走らせ方（候補に compose の `mysql` などのサービス名が載る）と棚卸しで調べる素材（`materials`）を「質問」として、
+   候補と根拠を付けて返す
 3. conductor が質問に回答する。`AGENTS.md` の `docker compose exec app ./vendor/bin/phpunit` の行を根拠にテストを
    「PHPUnit・`app` のコンテナ越し」と決め、回答のファイルを書く
 4. `ndf project write` が `.ndf/project.json` を作る。書いた差分と、項目ごとの出所（測った / 判断した / 不明 / 手の値を保った）が出る
@@ -28,7 +28,9 @@
 | 1 | 手順 1 へ進む | `解析: 判定できない（<理由>）` |
 
 `設定:` の行は `設定: <worktree の結果>。解析: <解析の結果>` の形にする。解析が失敗した・時間を超えたときも工程を止めない。
-書き出した設定はコミットしない限り取り消せるので、承認を求めない。
+承認は求めない。書き出した設定は、コミットしない限りチームに届かないためである。
+ただし、書き出しが取り除く 6 項目と旧いキー（`test_duration` など。下の「`.ndf/` の追跡」）に手で加えてコミットしていない編集は、
+書き出すと取り消せない。設定を git で追跡していなければ、取り除いた値はどれも戻せない。
 
 ## 3 手
 
@@ -50,9 +52,10 @@ ndf project write --measure "$TMP/measure.json" --answers "$TMP/answers.json"; e
 `measure` の締め切りは 120 秒（`--budget`）で、`gh` の 1 回の呼び出しは残りと 30 秒の小さい方で打ち切る。
 `measure` が書くのは `--out` だけで、リポジトリの中へは置けない。`gh` へは読む要求（`gh api --method GET`）だけを渡す。
 
-**CI について測るのは、既定ブランチの必須のチェック（`ci.required_checks`）だけである。**
-`gh` で呼ぶ API は、必須のチェック（`rules/branches`）・閉じた PR（`pulls`）・課題（`issues`）の 3 つだけである。
-CI の実行時間・JUnit の合計・ワークフローの一覧・言語ごとのファイル数は、読む仕組みが無いので測らない。
+**解析が測って書く項目は、`test`・`ci`・`materials` の 3 つである。** 読む仕組みの無い値は測らない。
+CI について測るのは、既定ブランチの必須のチェック（`ci.required_checks`）だけで、`gh` で呼ぶ API は
+必須のチェック（`rules/branches`）の 1 つだけである。
+棚卸しで調べる素材（`materials`）は質問（`status: question`）になる。
 テストの走らせ方（`test`）は、手がかりがあれば質問（`status: question`）になり、無ければ回答の要らない値になる。
 質問のときは、suite を次の順で決めて回答する。
 指示書・README にテストの走らせ方が書かれていれば、その記述に従う。
@@ -73,8 +76,6 @@ CI の実行時間・JUnit の合計・ワークフローの一覧・言語ご�
 | 項目 | 回答の `value` の形 | 決め方 |
 | --- | --- | --- |
 | `test`（P2） | `{"strategy"?, "ci"?: {"check"?, "junit_artifacts"?}, "suites": [{"name", "runner", "command", "scope_command"?, "junit"?, "container"?: {"service", "compose_files"}, "needs", "paths", "kind"?, "ci_jobs"?}]}` | 指示書・README の走らせ方の行を正とする。コンテナ越しなら `container` を書き、`scope_command` の `{paths}`（引用の外の、空白で区切った 1 語）にシェルの引用で守った範囲のパスの並びが入る。入るパスの種類は場所で違い、cross-refactoring の改修の範囲テストではテストのファイルのパス（計画の `test_targets` の `::` より前）、全体テストを CI に任せる戦略の着手前のテストでは `--scope` のテストの置く場所（ディレクトリかファイル）、静的解析の suite では変更したファイルのパスが入る。テストの `scope_command` はテストのファイルのパスを受けるコマンドで書く。ディレクトリしか受けないランナーは、範囲テストをファイルで受ける形と全体テストをディレクトリで走らせる形に分ける（unittest なら `scope_command` を `python3 -m unittest {paths}`、`command` を `python3 -m unittest discover -s <テストのディレクトリ>` にする。`python3 -m unittest tests/test_x.py tests/test_y.py` と `discover -s tests` はどちらも終了コード 0、`discover -s tests/test_x.py` は 1、テストの無いディレクトリを渡した `discover -s scripts/storylib` は 5 で終わる）。ファイルを受けない `scope_command` は、cross-refactoring の `init` がテストのファイルを入れた試走で見分けて改修の前に止める。`command` と `scope_command` はシェルで走らせる。`kind` は suite の種別で、`test`（既定）か `lint`（静的解析。整形の検査を含む）。静的解析の suite は変更したファイルのうち `paths` に当たるものにかかり、`paths` の要素には接頭辞のほかに glob（`*.sh` など）を書ける。`junit` はコマンドが JUnit XML を書く相対パス（pytest は `-o junit_family=xunit1 --junitxml=<パス>` をコマンドに書く。無ければ落ちたテストの見分けが全体の走らせ直しへ落ちる）。`strategy` は `local-full`（全体テストを手元で走らせる）/ `local-scoped-ci-whole`（範囲は手元、全体は CI に任せる。`ci.check` に待つチェック、`ci.junit_artifacts` に JUnit の成果物の名前の glob）/ `round-only`（パスでテストを選べない。suite の `command` をそのまま走らせる）。解析はテストの所要時間を測らないので、`strategy` は指示書・README に書かれたテストの方針から選ぶ。既定は、`scope_command` が無ければ `round-only`、あれば `local-full` である。`local-scoped-ci-whole` を選ぶのは、全体テストを CI に任せる方針が指示書・README に書かれているときだけで、その行を回答の `evidence` に挙げる。CI のテストに時間がかかると分かっただけでは選ばない。方針が所要時間を理由にしているときは、所要時間を確かめた出所（指示書の記述や CI の実行の画面）も `evidence` に挙げる。方針を確かめられないときは、既定のままにする。`ci_jobs` は suite と同じ検査を走らせる CI のジョブ（`<ワークフローのファイル>#<job id>` か `<ワークフローのファイル>`）で、ワークフローのファイルから回答する。CI テストの設定（`ci.only`）は回答しない。書き出しが、テストの suite の `ci_jobs` のファイルがリポジトリにあれば `true` を書き、条件を満たさなくなれば解析が書いた値を消す（人が書いた値は変えない）。設定が `true` なら、`strategy` が `local-scoped-ci-whole` でも手元では範囲テストも走らせず、合否を PR の CI の結果で決める。そのため、`ci_jobs` を書くと、手元で範囲テストを走らせる方針のリポジトリでも手元のテストが止まる。その方針を守るときは、書き出しの後に人が `.ndf/project.json` の `test.ci.only` に `false` を書く。書き出しは `false` を書き換えない。ただし、書き出しは `test` を `ci.only` も含めた 1 つの値として、解析が書いた値かどうかを見分ける。そのため `false` を書いた後は `test` 全体が人の書いた値になり、解析をやり直しても suite やコマンドは更新されない（食い違いは出力に `設定 <値> / 解析 <値>` の行で出る）。テストの走らせ方を変えたときは、`test` を人が書き直す |
-| `issues`（P8） | `{"primary", "others"}`。名前は `github`・`markdown`・`redmine`・`external` など | 名前だけを書き、URL や識別子を書かない |
-| `ndf_policies`（P9） | `{"doc_lint": bool, "reject_md_wording_tests": bool}` | 指示書に NDF の文体の規則・`.md` の文言テストを退ける方針があるときだけ `true`。無ければ両方 `false` |
 | `materials` | `{"product"?: {"kind", "users"?}, "needs"?: {"usage", "market"}, "seeds"?: {"libraries", "environment"}, "deferred_milestones", "cause_types"?, "code_measures"?, "failures"?}` | 棚卸しの見直しと大整理が読む材料の設定（`backlog-refinement` の `references/research.md`）。候補は README の冒頭と直接の依存から出る。調べる依存（`seeds.libraries`）は候補から人が残すものだけにする。利用の記録（`needs.usage`）の読むコマンドと範囲（`scope.aggregate_only`・`days`・`mask`）・市場と競合・周辺環境・後回しのマイルストーンは人が書く。決められなければ `{"unknown": "<理由>"}` と書き、見直しはすべての側面を飛ばす |
 
 回答のファイルの例:
@@ -112,7 +113,8 @@ CI の実行時間・JUnit の合計・ワークフローの一覧・言語ご�
 - 設定の `analysis` には、項目ごとの書いた値の指紋（`analysis.written`）だけが残る。
   この指紋は、次の `write` が項目を前の `write` の値のままか、人が書き換えたかを見分けるためにある。設定と一緒にコミットする
 - `ndf project check` が読む解析の記録は、設定とは別のファイル（メインディレクトリの `.ndf/analysis/project.json`）に書く。
-  中身は、解析器のバージョン・入力のファイルのハッシュ・ブランチの構成・記録に対応する設定の指紋である。
+  中身は、解析器のバージョン（測定の結果の `analyzer`。書き出すときの値ではなく、測ったときの値）・
+  入力のファイルのハッシュ・ブランチの構成・記録に対応する設定の指紋である。
   このファイルはコミットしない（下の「`.ndf/` の追跡」）
 - 出力に差分が出るのは、`.ndf/project.json` を変えたときだけである。解析の記録とその `.gitignore` は、差分を出さず、書き込みごとに
   `書いた: <パス>（<要約>）` の 1 行を出す。前の記録を書き換えるときは、書き出しの途中のマーカーを付ける書き込みと最後の記録の書き込みで、同じパスの行が 2 回出る
@@ -131,13 +133,51 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 | 実行時の出力（`.ndf/handoff/` など） | コミットしない。`handoff/` は `.gitignore` にも書かない（[handoff.md](handoff.md)） |
 
 **旧い形の設定は、最初の `ndf project write` で新しい形へ移り、その差分を確かめてコミットする。**
-旧い形とは、解析の記録を設定の中に持っていた形である。`.ndf/project.json` に `analysis` の `written` 以外のキー・`test_duration`・
-`languages[].files`・`ci.workflows`・`ci.provider` のどれかが残っていると、`ndf project check` は `旧い形の値が設定にある` を理由に 3 で終わる。
+旧い形とは、解析の記録か、読む仕組みの無い項目を設定の中に持つ形である。`.ndf/project.json` に次のキーのどれかが残っていると、
+`ndf project check` は `旧い形の値が設定にある` を理由に 3 で終わる。
+ただし、これらのキーを取り除いた残りの設定がスキーマに合わなければ、2（設定が壊れている）で終わる。
+
+| 残っているキー | 中身 |
+| --- | --- |
+| `analysis` の `written` 以外のキー・`test_duration`・`ci.workflows`・`ci.provider` | 解析の記録と、読む仕組みの無い計測値 |
+| `languages`・`services`・`issues`・`checks`・`ndf_policies`・`instructions` の 6 項目 | 読む仕組みの無い項目 |
+
 手順 0 の 3 手を通すと、`write` は次のように移す。
 
 1. 設定から旧い形のキーを取り除く。各項目を人が書いたか解析が書いたかの見分けは、移す前と変わらない
 2. `analysis.written` の指紋を、取り除いた後の値で書き直す
 3. 解析の記録を `.ndf/analysis/project.json` へ書き、`.ndf/analysis/.gitignore` が無ければ作る
+
+**`write` は、6 項目とその指紋を、人が直した値も含めて取り除く。取り除く前の値のバックアップは自動で作らない。**
+
+- `write` が出す差分は、取り除く 6 項目の値とその指紋を `（伏せた）` にする。取り除くキーの名前は差分に出る。
+  ほかの旧いキー（`test_duration` など）の値は、秘密の形に当たる行を伏せるだけで、差分に出る
+- Git の差分（`git diff`・`git diff --cached`・`git diff HEAD`）には、値がそのまま表示される
+- コミットしていない手の編集は、取り除いた後に戻せない
+- 設定を git で追跡していなければ（`.gitignore` が `.ndf/` を外しているなど）、取り除いたどの値も戻せない。
+  残したい値があれば、書き出す前にファイルをコピーする
+- 旧い値には認証情報が入っていることがある。値の入った Git の差分を見るのは、利用者本人が自分だけが見る端末で打つ場合に限り、
+  AI には打たせない。書き写した値やファイルのコピーは、リポジトリの外の、本人だけが読める場所に置く。
+  コミット済みの値は、git の履歴と移行の Pull Request の差分に残る
+- 古い NDF で書き出すと 6 項目が書き戻るので、チームで NDF のバージョンをそろえる
+
+書き換える前に、移行の対象と差分を確かめられる。順 1〜4 が確かめで、順 5 が書き換えである。
+
+| 順 | コマンド | 分かること・起きること |
+| --- | --- | --- |
+| 1 | `ndf project check` | 対象。終了コード 3 の理由に、残っている旧いキーが出る |
+| 2 | `git diff --cached -- .ndf/project.json` と `git diff -- .ndf/project.json`（どちらもメインディレクトリ） | コミットしていない手の編集の有無。前者はステージした変更、後者はステージしていない変更を出す。どちらも値を表示するので、利用者本人が自分だけが見る端末で打つ。残したい値はここで、リポジトリの外の本人だけが読める場所に書き写す |
+| 3 | `ndf project measure --out <ファイル>` | リポジトリと CI を測る。設定は変わらない |
+| 4 | `ndf project write --measure <ファイル> --dry-run` | 差分。取り除くキーが出る（6 項目の値は伏せる）。何も書かない |
+| 5 | `ndf project write --measure <ファイル>` | 移行する。リンクされた worktree から打っても、設定はメインディレクトリへ書く |
+
+- 順 2 で 2 つのコマンドを打つのは、`git diff HEAD` が作業ファイルと最後のコミットしか比べないためである。
+  手の編集をステージした後に作業ファイルだけを元に戻すと、差分は空になる
+- 設定を git で追跡していないリポジトリでは、順 2 の差分が出ない。残したい値があれば、順 5 の前に、
+  リポジトリの外の本人だけが読める場所へファイルをコピーする
+- 移行だけなら回答（`--answers`）は要らない。回答が無くても、質問の項目に今の値があれば残る。
+  回答するときは、順 4 と 5 に同じ `--answers` を渡す
+- 手順 0 は `check`・`measure`・`write` の順に打ち、順 2 と 4 は挟まない。`write` の後の差分をコミットの前に確かめる
 
 **移行の後は、書き出しの結果をメインディレクトリで確かめ、コミットは移行用のブランチをチェックアウトした作業ディレクトリで行う。**
 移行用のブランチとは、設定の変更を Pull Request にするために作る、既定ブランチ以外のブランチである。
@@ -149,7 +189,13 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 先に `.ndf/` をまとめてステージすると、追跡済みの記録や除外されていない記録が、設定と一緒にコミットされるためである。
 追跡と除外は `git status` の表示では判定しない。未追跡のファイルがディレクトリ名にまとめて出る場合や、追跡済みのファイルに差分が無い場合を見落とすためである。
 
-1. メインディレクトリで、`.ndf/project.json` の差分を確かめる。差分には、旧い形のキーの削除・指紋の書き直し・解析で変わった項目が出る
+1. 値を表示せずに、書き出しの結果を確かめる
+   - 今回の書き出しで設定が変わったかと、変わった内容は、`write` が出す `.ndf/project.json` の差分で確かめる。
+     `write` が成功して差分が出なければ、設定は変わっていない
+   - 旧いキーが残っていないことは `ndf project check` で確かめる。設定が無い・壊れている・判定できないと示された場合は、
+     確認を中断する。設定を検査できた結果の理由に旧いキーが出なければ、削除を確認できたとする
+   - `git diff --stat HEAD -- .ndf/project.json` は、追跡している設定と最後のコミットとの差の規模（行数）を確かめるときに使う。
+     今回の書き出しで変わったかの判断には使わない
 2. メインディレクトリの `.ndf/project.json` を、移行用のブランチの作業ディレクトリへコピーする。解析の記録はコピーしない。
    ここから後の git コマンドは、すべて移行用のブランチの作業ディレクトリのルートで打つ
 3. `git ls-files -- .ndf/analysis/project.json` が何か出力したら、記録はこのブランチで追跡されている。`git rm --cached -- .ndf/analysis/project.json` で、

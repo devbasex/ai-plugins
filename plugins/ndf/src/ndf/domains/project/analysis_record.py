@@ -2,7 +2,8 @@
 
 記録は、判定（`check.judge`）が読む値だけを持つ: 形のバージョン・解析器のバージョン・入力のファイルのハッシュ・ブランチの構成・
 記録に対応する設定の指紋（`written_digest`）・書き出しの途中のマーカー（`pending`）。記録のディレクトリは中に置いた `.gitignore` で
-git から外す。旧い形のキーは、`analysis` の `written` 以外・`test_duration`・`languages[].files`・`ci.workflows`・`ci.provider` である。
+git から外す。旧い形のキーは、`analysis` の `written` 以外・`test_duration`・読み手の無い 6 項目（`UNREAD_ITEMS`。#4521）・
+`ci.workflows`・`ci.provider` である。
 """
 
 from __future__ import annotations
@@ -19,30 +20,18 @@ RECORD_VERSION = 1
 # 記録のディレクトリを git から外す `.gitignore` の中身
 IGNORE_TEXT = "# NDF の解析が書く記録。コミットしない\n*\n"
 SCHEMA = contracts.schema_path("internal/project-analysis")
-# 項目の中の旧い形のキー（`<項目>[].<キー>` は配列の各行の中、`<項目>.<キー>` は object の中）
-_OLD_IN_ITEMS = ("languages[].files", "ci.workflows", "ci.provider")
+# 項目の中の旧い形のキー（`<項目>.<キー>`）
+_OLD_IN_ITEMS = ("ci.workflows", "ci.provider")
+# 読み手が無いので解析が書くのをやめた項目（#4521）
+UNREAD_ITEMS = ("languages", "services", "issues", "checks", "ndf_policies", "instructions")
 # 項目ごと消す旧い形のキー
-OLD_ITEMS = ("test_duration",)
-
-
-def _old_keys(prefix: str) -> tuple[str, ...]:
-    """`_OLD_IN_ITEMS` のうち、`prefix`（`<項目>[]` か `<項目>`）の中のキー。"""
-    head = f"{prefix}."
-    return tuple(name.removeprefix(head) for name in _OLD_IN_ITEMS if name.startswith(head))
+OLD_ITEMS = ("test_duration", *UNREAD_ITEMS)
 
 
 def strip_item(key: str, value: Any) -> tuple[Any, list[str]]:
     """設定の 1 項目の値から旧い形のキーを取り除いた値と、取り除いたキーの名前。入力を書き換えない。"""
-    if isinstance(value, list):
-        old = _old_keys(f"{key}[]")
-        found = [k for k in old if any(isinstance(row, dict) and k in row for row in value)]
-        if not found:
-            return value, []
-        rows = [{k: v for k, v in row.items() if k not in old} if isinstance(row, dict) else row for row in value]
-        return rows, [f"{key}[].{k}" for k in found]
     if isinstance(value, dict):
-        old = _old_keys(key)
-        found = [k for k in value if k in old]
+        found = [k for k in value if f"{key}.{k}" in _OLD_IN_ITEMS]
         if found:
             return {k: v for k, v in value.items() if k not in found}, [f"{key}.{k}" for k in found]
     return value, []
