@@ -18,7 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf.adapters.git import HEADS, Git, github_target, mask_urls, repo_of_url
+from ndf.adapters.git import HEADS, Git, mask_urls, repo_of_url
 from ndf.contracts import result
 from ndf.core import route
 from ndf.core.plan import files as plan_files
@@ -290,11 +290,14 @@ def _new_tree(r: _Run, commit: str) -> Path:
 
 
 def _sprint_repo(job: Job) -> str:
-    """ステートマシンの `repo` を解析した `<所有者>/<リポジトリ>`。"""
-    machine = github_target(job.machine_repo())
-    if machine is None:
+    """ステートマシンの `repo` が指す `<所有者>/<リポジトリ>`。
+
+    保存値は取得の URL からユーザー名を除いたものなので、送り先の URL の形は求めず `repo_of_url` で読む。
+    """
+    repo = repo_of_url(job.machine_repo())
+    if repo is None:
         raise UnitsStopped("refused", "スプリントのリポジトリを解析できないので、変換しない")
-    return machine.repo
+    return repo
 
 
 def check_fetch(job: Job, git: Git, remote: Optional[str] = None) -> None:
@@ -302,9 +305,7 @@ def check_fetch(job: Job, git: Git, remote: Optional[str] = None) -> None:
 
     取得は送り先と違い、GitHub の接続の形（SSH を 443 番で使う `ssh.github.com` を含む）をどれも受ける（`repo_of_url`）。
     """
-    expected = repo_of_url(job.machine_repo())
-    if expected is None:
-        raise UnitsStopped("refused", "スプリントのリポジトリを解析できないので、変換しない")
+    expected = _sprint_repo(job)
     actual = repo_of_url(git.remote_url(remote))
     if actual is None or actual.casefold() != expected.casefold():
         now = "解析できない" if actual is None else actual
@@ -530,10 +531,9 @@ def _record_conversion(r: _Run, commit: str, approval: Mapping[str, Any]) -> Non
 
 
 def _converted_record(r: _Run, commit: str, report: units_files.Report) -> dict[str, Any]:
-    machine = github_target(r.job.machine_repo())
-    assert machine is not None, "送り先の確かめ（`checked_url`）か保存したステートマシンが先に確かめる"
+    repo = _sprint_repo(r.job)
     limits = units_files.limits_of(units_files.project_of(units_files.Tree(r.root, commit)))
-    return design_record.converted(machine.repo, commit, r.request.branch, {"issues": list(r.issues)}, limits, report)
+    return design_record.converted(repo, commit, r.request.branch, {"issues": list(r.issues)}, limits, report)
 
 
 def _push_conversion(r: _Run, url: str, tip: str, send: str, report: units_files.Report, approval: Mapping[str, Any]) -> None:

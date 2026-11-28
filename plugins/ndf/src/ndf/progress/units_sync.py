@@ -17,7 +17,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters import github
-from ndf.adapters.git import REGULAR_MODES, Git, github_target, mask_urls, parse_status_z
+from ndf.adapters.git import REGULAR_MODES, Git, github_target, mask_urls, parse_status_z, repo_of_url
 from ndf.contracts import result
 from ndf.core import branch_strategy
 from ndf.core.plan import files as plan_files
@@ -77,9 +77,9 @@ def destination_errors(
     """
     repo = str(record["review"]["repo"])
     checked, errors = push_url(git, repo, url)
-    machine = github_target(machine_repo)  # 送らない値なので、認証情報の有無は問わない
-    if machine is None or machine.repo.casefold() != repo.casefold():
-        now = "解析できない" if machine is None else machine.repo
+    machine = repo_of_url(machine_repo)  # 送らない値（取得の URL からユーザー名を除いた保存値）なので、送り先の形は求めない
+    if machine is None or machine.casefold() != repo.casefold():
+        now = "解析できない" if machine is None else machine
         errors.append(f"スプリントのリポジトリが違う（承認 {repo}、今 {now}）")
     branch = record["sprint_branch"] if "sprint_branch" in record else None
     if not branch:

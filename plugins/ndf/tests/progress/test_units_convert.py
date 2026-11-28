@@ -685,22 +685,29 @@ UNREADABLE = UnitsStopped("precondition", "送り先を読めない")
 
 
 @pytest.mark.parametrize(
-    ("fetch", "push", "accepted"),
+    ("stored", "fetch", "push", "accepted"),
     [
-        pytest.param(URL, URL, True, id="同じ"),
-        pytest.param(URL, OTHER, False, id="push の URL が別"),
-        pytest.param(OTHER, URL, False, id="取得の URL が別"),
-        pytest.param("ssh://git@ssh.github.com:443/o/r.git", URL, True, id="取得は SSH の 443 番の接続先も受ける"),
+        pytest.param(URL, URL, URL, True, id="同じ"),
+        pytest.param(URL, URL, OTHER, False, id="push の URL が別"),
+        pytest.param(URL, OTHER, URL, False, id="取得の URL が別"),
+        # 保存値は、スプリントの作成の時点の取得の URL からユーザー名を除いたもの（`command.repo_id`）
+        pytest.param(
+            "ssh://ssh.github.com:443/o/r.git",
+            "ssh://git@ssh.github.com:443/o/r.git",
+            URL,
+            True,
+            id="SSH の 443 番で取得して作ったスプリント",
+        ),
     ],
 )
-def test_both_remote_urls_must_be_the_sprint_repository(fetch, push, accepted):
+def test_both_remote_urls_must_be_the_sprint_repository(stored, fetch, push, accepted):
     git = SimpleNamespace(
         remote=lambda: "origin",
         push_urls=lambda remote: [push],
         rewrites_again=lambda url: False,
         remote_url=lambda remote=None: fetch,
     )
-    job = SimpleNamespace(machine_repo=lambda: URL)
+    job = SimpleNamespace(machine_repo=lambda: stored)
 
     if accepted:
         assert units_convert.checked_url(job, git) == URL
@@ -778,13 +785,30 @@ def test_a_git_failure_of_the_route_stops_the_start_instead_of_meaning_no_units(
         raise GitError("照会に失敗")
 
     monkeypatch.setattr(units_flow, "Git", lambda path: SimpleNamespace(run=run))
+    monkeypatch.setattr(units_invoke, "Git", lambda path: pytest.fail("保存した失敗の後は git を打たない"))
     sprint = plan_runs.SprintPlan(convert=lambda *args: pytest.fail("変換しない"))
 
     routed = units_flow.by_units(StageRun("plan", "impl", {"issues": [3]}, (), "s", "i", sprint=sprint), tmp_path)
 
     with pytest.raises(GitError) as raised:
-        units_flow.read_start(None, "origin", SPRINT, [3], sprint, routed.peeked)
+        units_invoke.prepare(routed, tmp_path / "w", tmp_path)
     assert raised.value is routed.peeked
+
+
+@pytest.mark.parametrize("source", ["コミット", "作業場所"])
+def test_a_plan_that_is_not_utf8_stops_with_its_path(tmp_path, source):
+    broken = "計画".encode("cp932")
+    (tmp_path / "issues").mkdir()
+    (tmp_path / PLAN).write_bytes(broken)
+    git = SimpleNamespace(run=lambda *args: PLAN + "\0", blobs=lambda *names: [broken])
+
+    with pytest.raises(UnitsStopped, match=f"{PLAN} を UTF-8 で読めない") as raised:
+        if source == "コミット":
+            units_flow.plans_at(git, "HEAD", [3])
+        else:
+            units_flow.worktree_plans(tmp_path, [PLAN])
+
+    assert raised.value.kind == "invalid"
 
 
 def test_units_seen_at_the_fetch_url_but_not_at_the_destination_stop():

@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent import futures
@@ -29,7 +30,7 @@ from dataclasses import replace
 from graphlib import TopologicalSorter
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
 from ndf.adapters.git import HEADS, Completed, Git, GitError, mask_urls
@@ -651,14 +652,23 @@ def plans_at(g: Git, commit: str, issues: Sequence[int]) -> tuple[list[PlanDoc],
     names = [p for p in listed.split("\0") if p]
     paths = [p for p in names if is_sprint_plan(p, issues)]
     blobs = g.blobs(*(f"{commit}:{p}" for p in paths)) if paths else []
-    plans = [PlanDoc(p, plan_issues(p), b.decode("utf-8")) for p, b in zip(paths, blobs) if b is not None]
+    plans = [_plan_doc(p, functools.partial(b.decode, "utf-8")) for p, b in zip(paths, blobs) if b is not None]
     return plans, bool(units_files.paths_naming(names, issues))
 
 
 def worktree_plans(root: Path, paths: Sequence[str]) -> list[PlanDoc]:
     """worktree の `paths` にある実装計画（削除されたものは読まない）。"""
     found = (p for p in paths if plan_issues(p) and (root / p).is_file())
-    return [PlanDoc(p, plan_issues(p), (root / p).read_text(encoding="utf-8")) for p in found]
+    return [_plan_doc(p, functools.partial((root / p).read_text, encoding="utf-8")) for p in found]
+
+
+def _plan_doc(path: str, read: Callable[[], str]) -> PlanDoc:
+    """`read` で読んだ実装計画。UTF-8 で読めなければ、パスと理由を添えて止める。"""
+    try:
+        text = read()
+    except UnicodeDecodeError as exc:
+        raise UnitsStopped("invalid", f"実装計画 {path} を UTF-8 で読めない（{exc.start} バイト目: {exc.reason}）") from None
+    return PlanDoc(path, plan_issues(path), text)
 
 
 # `git ls-remote --exit-code` が、該当する ref が無いときに返す終了コード
@@ -773,17 +783,15 @@ def read_start(
     branch: Optional[str],
     issues: Sequence[int],
     sprint: SprintPlan,
-    peeked: Union[Peeked, Exception, None] = None,
+    peeked: Optional[Peeked] = None,
 ) -> Start:
     """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
 
-    取得はリモート名で行う。経路の判定が取得していれば（`peeked`）取得し直さず、判定が失敗していればその失敗を上げる。変換しうるスプリント（`sprint.destination`
+    取得はリモート名で行う。経路の判定が取得していれば（`peeked`）取得し直さない（判定の失敗は `units_invoke.prepare` が先に上げる）。変換しうるスプリント（`sprint.destination`
     がある）は、取得の前に取得の URL を確かめ、単位の欄が見つかったときだけ、確かめた送り先の URL から HEAD を読む。
     手元に欄があればリモート名では取得せず、取得先にだけあれば送り先の HEAD で読み直す。送り先から単位の欄のある実装計画を
     読めなければ止める。変換しないスプリントは送り先を使わないので、取得と push で認証の経路が違っても止まらない。
     """
-    if isinstance(peeked, Exception):
-        raise peeked
     destination = sprint.destination
     local_headings = False
     if peeked is None:

@@ -136,6 +136,8 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
             "precondition",
             "設計承認ゲートの承認の記録が無いので、実装を始めない。ndf progress restore で状態を戻すか、利用者に判断を求める",
         )
+    if isinstance(run.peeked, Exception):
+        raise run.peeked  # 経路の判定の失敗は確定しているので、git を打たずに上げる
     location = _work_location(run, cwd)
     g = Git(location)
     root = Path(g.run("rev-parse", "--show-toplevel").strip())
