@@ -35,7 +35,16 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import command, definition, design_record, invoke, issue_values, model, plan_runs, stages, store, units_guard
+from ndf.progress import (
+    command,
+    definition,
+    design_record,
+    invoke,
+    issue_values,
+    model,
+    stages,
+    store,
+)
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, SyncFailure, github_records, sync_records
 from ndf.progress.run_view import (
@@ -58,6 +67,7 @@ from ndf.progress.run_view import (
     sync_warnings,
     work_root,
 )
+from ndf.progress.units_convert import machine_repo, sprint_plan
 
 TOOL = __package__.rpartition(".")[2]
 
@@ -219,9 +229,23 @@ def choices(m: Move) -> list[str]:
     return [a for a in listed if a in known]
 
 
-def _gate_routes(machine_id: str, m: Move) -> dict[str, Any]:
+def _reapproval(m: Move) -> Optional[Mapping[str, Any]]:
+    """待っているステップの結果が承認の記録を持てば（単位の変換の再承認）、その結果。"""
+    waiting = m.progress.waiting if m.progress is not None else None
+    report = waiting["report"] if waiting is not None else None
+    return report if report is not None and design_record.TARGET_KEY in report else None
+
+
+def _gate_routes(machine_id: str, rev: int, m: Move) -> dict[str, Any]:
     assert m.stage is not None
     out = {}
+    if (held := _reapproval(m)) is not None:
+        # 再承認は回答した者と記録を残すので、`ndf answer` で返す。提示した変換のコミットと承認資料を引数に固定する
+        assert m.step is not None and m.progress is not None
+        qid = model.question_id(machine_id, rev, m.stage.name, m.step.id, m.progress.anchor)
+        seen = ("--head", held[design_record.TARGET_KEY]["review"]["head"], design_record.MATERIAL_FLAG)
+        argv = ("answer", machine_id, "--gate", qid, *seen, held[design_record.MATERIAL_KEY]["sha256"], "--result")
+        return {a: result.command(*argv, a, ask=("reason", "by", "key")) for a in choices(m)}
     for a in choices(m):
         ask = ("notes", "reason") if a == REQUEST_CHANGES else ("reason",)
         out[a] = _cmd("answer", machine_id, m.stage.name, "--answer", a, ask=ask)
@@ -288,7 +312,10 @@ def report(v: View, m: Move) -> dict[str, Any]:
     if m.action == Action.GATE:
         assert m.step is not None
         summary = f"工程 {m.stage.name} のステップ {m.step.id} が回答を待っている"
-        return result.result(TOOL, result.GATE, summary, metrics=_metrics(v, m), routes=_gate_routes(v.machine_id, m))
+        # 再承認の待ちは、承認資料のパス（`presentation…` のキー）も返す
+        held = _reapproval(m)
+        material = {} if held is None else {k: held[k] for k in held if k.startswith("presentation")}
+        return result.result(TOOL, result.GATE, summary, metrics=_metrics(v, m), routes=_gate_routes(v.machine_id, v.rev, m), **material)
     summary = f"次に流すのは工程 {m.stage.name}（{m.action}）"
     return result.result(TOOL, result.OK, summary, metrics=_metrics(v, m), next=_cmd("next", v.machine_id))
 
@@ -449,7 +476,8 @@ def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> O
     step = s.steps[0] if prog.redo else prog.next_step(s)
     if step is None or invoke.kind_of(step) != invoke.PLAN:
         return None
-    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name, d.st.root), sprint=sprint_plan(v, s, d.st.root))
+    sprint = sprint_plan(v, s, d.st.root, functools.partial(machine_repo, d.st, v.machine_id))
+    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name, d.st.root), sprint=sprint)
     if invoke.template(run.name) is None:
         return None  # テンプレートの無いプランは、流すときの _call_plan が precondition で止める
     try:
@@ -681,6 +709,8 @@ def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[st
         raise model.Refused(f"工程 {stage} は回答を待っていない")
     if invoke.is_listen(m.step) and "gate_id" not in extra:
         raise model.Refused(f"工程 {stage} は承認ゲートで、回答は ndf answer で質問の id と見た対象を添える（next の routes）")
+    if _reapproval(m) is not None and "gate_id" not in extra:
+        raise model.Refused(f"工程 {stage} は単位の分け直しの再承認を待っている。ndf answer で回答する（next の routes）")
     allowed = choices(m)
     if value not in allowed:
         raise model.Refused(f"工程 {stage} の回答は {', '.join(allowed)} のどれか（渡された値 {value}）")
@@ -800,32 +830,6 @@ def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Pat
     return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
 
 
-def sprint_plan(v: View, s: stages.StageDef, root: Path) -> Optional[plan_runs.SprintPlan]:
-    """単位ごとに流す工程の呼び出しに持たせる、承認の要否・承認の記録・省いた課題（#3702 の決定 11）。ほかの工程は None。
-
-    `root` は状態の保存先。比較の関数は、記録と今の文脈を持たせて渡す（単位を流す処理は `design_record` を import できない）。
-    """
-    if not s.per_unit:
-        return None
-    context = v.context()
-    omitted = tuple(context["plan_omitted"]) if "plan_omitted" in context else ()
-    required = design_record.required(v.snap)
-    record = design_record.approved_of(v) if required else None
-    compared = {"issues": context["issues"] if "issues" in context else [], "plan_omitted": list(omitted)}
-    work = work_root(root, v.machine_id)
-    return plan_runs.SprintPlan(
-        required=required,
-        record=record,
-        differences=None if record is None else lambda tree: design_record.mismatches(record, tree, compared),
-        omitted=omitted,
-        new_definition="plan_omitted" in s.optional_inputs,
-        work_root=work,
-        launched=None
-        if record is None
-        else functools.partial(units_guard.record_launch, work, approval=units_guard.Approval(record, design_record.approval_seq_of(v))),
-    )
-
-
 def approved_seen(v: View, stage: str, root: Path) -> Optional[dict[str, Any]]:
     """工程 `stage` の承認ゲートの最新の承認の回答が見た対象（事象の `seen`）。無ければ None（#4409 の決定 5）。
 
@@ -860,7 +864,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
         return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
     approved = approved_seen(v, s.name, d.st.root)
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved)
-    run = replace(run, sprint=sprint_plan(v, s, d.st.root))
+    run = replace(run, sprint=sprint_plan(v, s, d.st.root, functools.partial(machine_repo, d.st, v.machine_id)))
     if run.kind == invoke.SCRIPT:
         run = replace(run, env_extra={"NDF_MACHINE_ID": v.machine_id})
     waited = prog.waiting is not None and prog.waiting["step"] == step.id

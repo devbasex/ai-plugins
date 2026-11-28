@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,4 +63,8 @@ def test_an_older_definition_is_told_apart_and_other_stages_get_nothing(tmp_path
 
     assert run.sprint_plan(view, impl, tmp_path).new_definition is False
     view, impl = _view(False, ("branch",), per_unit=False)
-    assert run.sprint_plan(view, impl, tmp_path) is None
+    assert run.sprint_plan(view, replace(impl, id="plan"), tmp_path) is None
+    # `per_unit` の無い定義の工程「実装」にも、変換を持たせる
+    assert run.sprint_plan(view, impl, tmp_path).convert is not None
+    view, impl = _view(False, ("branch", "plan_omitted"))
+    assert run.sprint_plan(view, impl, tmp_path).convert is None

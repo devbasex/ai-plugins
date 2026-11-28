@@ -174,6 +174,9 @@ def _refusal(v: run.View, a: Answer, observe: Observe, root: Optional[Path] = No
         raise model.Refused("課題を外せるのは設計承認ゲートの承認だけ")
     if a.drop:
         _kept(v, a.drop)
+    bound = design.reapproval(v, q, a)
+    if bound is not None:
+        return q, bound
     now = observe(q)
     why = design.outdated(v, q, now)
     if why is not None:

@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.contracts import result
 from ndf.core import durable, route
@@ -15,6 +15,24 @@ from ndf.core.plan import runner as plan_runner
 
 # 変更要求の指摘の本文を作業へ渡す環境変数
 NOTES_ENV = "NDF_STAGE_NOTES"
+
+
+class ConvertRequest(NamedTuple):
+    """この変更より前のスプリントの変換（`units_convert.convert`）へ、単位を流す処理が渡す値。"""
+
+    run: StageRun
+    # スプリントの作業場所の根と、登録されたスプリントブランチ
+    sprint_dir: Path
+    branch: str
+    issues: tuple[int, ...]
+    # 実装計画を省いた課題
+    omitted: tuple[int, ...]
+    # 課題の受け入れ条件の数を数える
+    count: Callable[[Sequence[int]], Mapping[int, int]]
+    # 開始前の確かめが確かめて読んだ（送り先の URL, スプリントブランチの HEAD。ブランチが無ければ None）。無ければ変換が読む
+    destination: Optional[tuple[str, Optional[str]]] = None
+    # コミットの `.ndf/project.json` を読む。開始前の確かめが読んだコミットは読み直さない。無ければ変換が読む
+    project_at: Optional[Callable[[str], Mapping[str, Any]]] = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +53,16 @@ class SprintPlan:
     work_root: Optional[Path] = None
     # 単位の起動の記録を書く関数（`units_guard.record_launch`。`(branch, base, *, issues, unit_file)`）。承認の記録が無ければ None
     launched: Optional[Callable[..., None]] = None
+    # この変更より前のスプリントの変換（`units_convert.convert`。`(ConvertRequest, ports, answer)`）。新しい定義は None
+    convert: Optional[Callable[..., Any]] = None
+    # 変換の送り先を確かめて、その URL から読む（`units_convert.destination`。`(git, ブランチ)`）。新しい定義は None
+    destination: Optional[Callable[..., tuple[str, Optional[str]]]] = None
+    # 保存した単位の並びを使い直せるか（`units_convert.still_converted`。`(作業場所, 本文を読むコミット)`）。新しい定義は None
+    reusable: Optional[Callable[..., bool]] = None
+    # 文脈の branch（`per_unit` の無い定義は工程の入力に持たないことがある）
+    branch: Optional[str] = None
+    # 取得の URL がスプリントのリポジトリを指すことを、通信の前に確かめる（`units_convert.check_fetch`。`(git, リモート名)`）。新しい定義は None
+    verify_fetch: Optional[Callable[..., None]] = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +98,8 @@ class StageRun:
     start: Optional[str] = None
     # 単位ごとに流す工程だけが持つ、スプリントの保存した状態（#3702）
     sprint: Optional[SprintPlan] = None
+    # 経路の判定がリモート名の取得で読んだ中身（`units_flow.Peeked`）か、その失敗の例外。開始前の確かめは取得し直さない
+    peeked: Optional[Any] = field(default=None, compare=False)
 
     def plain(self) -> StageRun:
         """単位に分けない呼び出し。入力の `branch` は除く（残すと差し込みの `branch` になり、作業場所の今のブランチを使わない）。"""

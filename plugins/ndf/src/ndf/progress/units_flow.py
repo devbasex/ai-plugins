@@ -17,27 +17,37 @@
 - 実装計画の表から読んだ並び（依存を持たない）は、並びの順に 1 つずつ流す
 
 打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、回の記録の読み書きもここが持つ。
+開始前の確かめが読む実装計画と、手元と取得先の HEAD の読み取り（`read_start`）、承認の記録との比較（`approved_start`）もここが持つ。
 """
 
 from __future__ import annotations
 
+import functools
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent import futures
+from dataclasses import replace
 from graphlib import TopologicalSorter
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
-from ndf.contracts import result, worker_paths
+from ndf.adapters.git import HEADS, Completed, Git, GitError, mask_urls
+from ndf.contracts import facts, result, worker_paths
 from ndf.core import route
+from ndf.core.issue_docs import plan_issues
+from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan import units_files
-from ndf.core.plan.review_units_decide import Unit, unit_key
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, has_units, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
 from ndf.progress import plan_runs, units_queue
-from ndf.progress.plan_runs import StageResult, UnitsStopped
+from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
+
+# 承認した文書を送るコミットの記録（ステートマシンの作業の保存先。`{"record_head", "commit"}`）
+DESIGN_SYNC_FILE = "design-sync.json"
+
 
 # PR がキューに残りうる停止理由（待てば進むので、ほかの理由の失敗があればそちらを結果の種類にする。前ほど優先する）
 WAIT_KINDS = ("infra_wait", github_merge.MERGE_QUEUE_PENDING)
@@ -631,3 +641,224 @@ def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
     if step is not None and route.stopped_after_test(step) and moved:
         return Resume("run", True, retest)
     return Resume("run", False, None)
+
+
+# --- スプリントの実装計画の読み取り --------------------------------------------------------------
+
+
+def is_sprint_plan(path: str, issues: Sequence[int]) -> bool:
+    """スプリントの課題の実装計画のパスか（名前の番号のどれかがスプリントの課題）。"""
+    return bool(plan_issues(path) & set(issues))
+
+
+def plans_at(g: Git, commit: str, issues: Sequence[int]) -> tuple[list[PlanDoc], bool]:
+    """コミットにあるスプリントの課題の実装計画と、単位のファイルがあるか。"""
+    listed = g.run("ls-tree", "-z", "--name-only", commit, "--", f"{facts.value('locations', 'issues', 'path')}/")
+    names = [p for p in listed.split("\0") if p]
+    paths = [p for p in names if is_sprint_plan(p, issues)]
+    blobs = g.blobs(*(f"{commit}:{p}" for p in paths)) if paths else []
+    plans = [_decoded_plan(p, functools.partial(b.decode, "utf-8")) for p, b in zip(paths, blobs) if b is not None]
+    return plans, bool(units_files.paths_naming(names, issues))
+
+
+def worktree_plans(root: Path, paths: Sequence[str]) -> list[PlanDoc]:
+    """worktree の `paths` にある実装計画（削除されたものは読まない）。"""
+    found = (p for p in paths if plan_issues(p) and (root / p).is_file())
+    return [_decoded_plan(p, functools.partial((root / p).read_text, encoding="utf-8")) for p in found]
+
+
+def _decoded_plan(path: str, read: Callable[[], str]) -> PlanDoc:
+    """`read` で読んだ実装計画。UTF-8 で読めなければ、パスと理由を添えて止める。"""
+    try:
+        text = read()
+    except UnicodeDecodeError as exc:
+        raise UnitsStopped("invalid", f"実装計画 {path} を UTF-8 で読めない（{exc.start} バイト目: {exc.reason}）") from None
+    return PlanDoc(path, plan_issues(path), text)
+
+
+# `git ls-remote --exit-code` が、該当する ref が無いときに返す終了コード
+LS_REMOTE_ABSENT = 2
+
+
+class Seen(NamedTuple):
+    """コミット 1 つの、スプリントの課題の実装計画と、単位のファイルがあるか。"""
+
+    plans: list[PlanDoc]
+    unit_files: bool
+
+    def has_headings(self) -> bool:
+        """実装計画に単位の欄があるか（変換の対象）。"""
+        return any(has_units(p.text) for p in self.plans)
+
+    def has_units(self) -> bool:
+        return self.unit_files or self.has_headings()
+
+
+def seen_at(g: Git, commit: str, issues: Sequence[int]) -> Seen:
+    return Seen(*plans_at(g, commit, issues))
+
+
+class Start(NamedTuple):
+    """開始前の確かめが読む、手元と取得先の HEAD とその中身。取得先が無ければ `head` は "HEAD" で `tip` は None。
+
+    `checked_to` は、変換するスプリントで確かめて読んだ（送り先の URL, ブランチの HEAD）。送り先にブランチが無いと
+    確かめたときは HEAD が None で、変換は送り先を読み直さない。
+    """
+
+    head: str
+    tip: Optional[str]
+    at_head: Seen
+    at_tip: Seen
+    checked_to: Optional[tuple[str, Optional[str]]]
+
+
+class Peeked(NamedTuple):
+    """リモート名の取得 1 回で読んだ手元と取得先の HEAD。取得先にブランチが無ければ `head` は "HEAD" で `tip` は None。"""
+
+    head: str
+    tip: Optional[str]
+    at_head: Seen
+    at_tip: Seen
+
+
+def probe_branch(g: Git, source: str, branch: str) -> Completed:
+    """`source`（リモート名か URL）にブランチがあるかを読む。無ければ終了コードが `LS_REMOTE_ABSENT`。"""
+    return g.attempt("ls-remote", "--exit-code", "--heads", source, f"{HEADS}{branch}")
+
+
+def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
+    """手元の HEAD と、リモートから取得したブランチの HEAD の SHA（1 回の起動で解決する）。
+
+    リモートにブランチが無いと確かめられれば None、ほかの失敗は止める。
+    """
+    fetched = g.fetch_branch(remote, branch)
+    if fetched.returncode == 0:
+        head, tip = g.commits_of("HEAD", f"refs/remotes/{remote}/{branch}")
+        return head, tip
+    probe = probe_branch(g, remote, branch)
+    if probe.returncode == LS_REMOTE_ABSENT:
+        return None
+    raise UnitsStopped(
+        "precondition",
+        f"{remote} の {branch} を取得できない（開始前の確かめ）: {mask_urls(fetched.stderr.strip() or probe.stderr.strip())}",
+    )
+
+
+def peek(g: Git, remote: str, branch: Optional[str], issues: Sequence[int], here: Optional[Seen]) -> Peeked:
+    """リモート名で 1 回取得し、手元の HEAD と取得先の HEAD の中身を読む。`here` は読み終えた手元の HEAD の中身。"""
+    fetched = None if branch is None else _fetched_tip(g, remote, branch)
+    head, tip = fetched if fetched is not None else ("HEAD", None)
+    at_head = here if here is not None else seen_at(g, head, issues)
+    return Peeked(head, tip, at_head, at_head if tip is None or tip == head else seen_at(g, tip, issues))
+
+
+def branch_here(g: Git) -> Optional[str]:
+    """作業場所が今いるブランチ。ブランチに居なければ None。"""
+    name = g.run("branch", "--show-current").strip()
+    return None if name == "" else name
+
+
+def by_units(run: StageRun, location: Path) -> Optional[StageRun]:
+    """単位を流す処理へ渡す呼び出し。渡さなければ None。`per_unit` の無い定義のスプリントは、実装計画に単位の欄があるとき
+    渡す（#3702 の決定 10）。
+
+    作業場所の実装計画に欄が無ければ、取得の URL を確かめてから今いるブランチを取得し、取得先の実装計画も読む。読んだ結果は
+    返す呼び出しに持たせ、開始前の確かめは取得し直さない。確かめ・取得・読み取りに失敗した場合は、失敗を持たせた呼び出しを
+    返し、開始前の確かめがそれを上げて止まる（欄が無いと確かめずに、課題全体の実装を流さない）。
+    """
+    if run.per_unit or run.sprint is None or run.sprint.convert is None:
+        return run if run.per_unit else None
+    g = Git(location)
+    issues = sorted({int(n) for n in run.inputs["issues"]})
+    try:
+        root = Path(g.run("rev-parse", "--show-toplevel").strip())
+        changed = [p for p in g.status_paths() if is_sprint_plan(p, issues)]
+        here = seen_at(g, "HEAD", issues)
+        if any(has_units(p.text) for p in [*here.plans, *worktree_plans(root, changed)]):
+            return run
+        branch = branch_here(g)
+        if branch is None:
+            return None
+        remote = g.remote()
+        if run.sprint.verify_fetch is not None:
+            run.sprint.verify_fetch(g, remote)
+        peeked = peek(g, remote, branch, issues, here)
+    except (UnitsStopped, GitError) as exc:
+        return replace(run, peeked=exc)
+    return replace(run, peeked=peeked) if peeked.at_tip.has_headings() else None
+
+
+def read_start(
+    g: Git,
+    remote: str,
+    branch: Optional[str],
+    issues: Sequence[int],
+    sprint: SprintPlan,
+    peeked: Optional[Peeked] = None,
+    confirm: bool = True,
+) -> Start:
+    """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
+
+    取得はリモート名で行う。経路の判定が取得していれば（`peeked`）取得し直さない（判定の失敗は `units_invoke.prepare` が先に上げる）。変換しうるスプリント（`sprint.destination`
+    がある）は、取得の前に取得の URL を確かめ、単位の欄が見つかったときだけ、確かめた送り先の URL から HEAD を読む。
+    手元に欄があればリモート名では取得せず、取得先にだけあれば送り先の HEAD で読み直す。送り先から単位の欄のある実装計画を
+    読めなければ止める。変換しないスプリントは送り先を使わないので、取得と push で認証の経路が違っても止まらない。
+    `confirm` が偽（起動の前の確かめ）なら送り先を読まない。送り先との照合は、実行の時に 1 回だけ行う。
+    """
+    destination = sprint.destination
+    local_headings = False
+    if peeked is None:
+        here = None if destination is None else seen_at(g, "HEAD", issues)
+        local_headings = here is not None and here.has_headings()
+        if here is not None and local_headings:
+            peeked = Peeked("HEAD", None, here, here)
+        else:
+            if branch is not None and sprint.verify_fetch is not None:
+                sprint.verify_fetch(g, remote)
+            peeked = peek(g, remote, branch, issues, here)
+    head, tip, at_head, at_tip = peeked
+    checked_to = None
+    if confirm and destination is not None and branch is not None and (local_headings or at_tip.has_headings()):
+        url, found = destination(g, branch)
+        checked_to = (url, found)
+        if found != tip:
+            head, tip = (g.rev_parse("HEAD"), found) if found is not None else ("HEAD", None)
+            at_tip = at_head if found is None or found == head else seen_at(g, found, issues)
+        # 分割を確かめた後に欄の無い計画へ戻ると、分けた変更を 1 本で流してしまうので、手元を進める前に止める。
+        # 手元に欄があって送り先にブランチが無い場合は、変換が止める
+        lost = found is not None and not at_tip.has_units() if local_headings else not at_tip.has_headings()
+        if lost:
+            seen_in = "手元" if local_headings else "取得先"
+            raise UnitsStopped(
+                "precondition",
+                f"{seen_in}の {branch} の実装計画に単位の欄があるが、送り先の {branch} では確かめられないので、始めない",
+            )
+    return Start(head, tip, at_head, at_tip, checked_to)
+
+
+def approved_start(
+    g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str
+) -> tuple[Mapping[str, Any], str, units_files.Targets]:
+    """承認の記録・その HEAD・比較が読んだ対象。承認した文書がスプリントブランチに届き、中身が記録と同じことを確かめる。"""
+    record, differences = sprint.record, sprint.differences
+    assert record is not None and differences is not None, "prepare が先に確かめる"
+    head = str(record["review"]["head"])
+    _check_delivered(g, sprint.work_root, head, start_head)
+    compared = differences(tree)
+    if compared.differences:
+        raise UnitsStopped("refused", f"承認した分け方と今の中身が違うので、実装を始めない: {'; '.join(compared.differences)}")
+    assert compared.targets is not None, "違いが無い比較は、読んだ対象を返す"
+    return record, head, compared.targets
+
+
+def _check_delivered(g: Git, work_root: Optional[Path], record_head: str, start_head: str) -> None:
+    """記録の HEAD か、その文書を送ったコミット（`design-sync.json`）が、開始の HEAD と同じか祖先であることを確かめる。"""
+    candidates = [record_head]
+    synced = None if work_root is None else plan_files.read_json(work_root / DESIGN_SYNC_FILE)
+    if synced is not None and "record_head" in synced and synced["record_head"] == record_head and "commit" in synced:
+        candidates.append(str(synced["commit"]))
+    for commit in candidates:
+        if g.commit_or_none(commit) is not None and g.is_ancestor(commit, start_head):
+            return
+    detail = f"承認した文書（コミット {record_head}）がスプリントブランチの HEAD（{start_head}）に届いていない"
+    raise UnitsStopped("precondition", detail)

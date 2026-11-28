@@ -422,6 +422,38 @@ def lineup(plans: Sequence[PlanDoc], criteria: Mapping[int, int], issues: Sequen
     return ordered
 
 
+def lineup_with_waits(plans: Sequence[PlanDoc], criteria: Mapping[int, int], issues: Sequence[int]) -> tuple[Unit, ...]:
+    """表から流す単位に、旧い実行の規則で先に要る単位（`after`。同じ表の単位のキー）を持たせた並び。表の無い課題は含めない。
+
+    「実行順」の列があれば値がその単位より小さい単位のすべて、無ければ流す順で前にある単位のすべてである（#3702 の決定 10）。
+    読めない所があれば `lineup` と同じく `UnitsUnreadable`。
+    """
+    found = [u for u in lineup(plans, criteria, issues) if not u.supplemented]
+    orders: dict[tuple[str, str], int] = {}
+    for plan in plans:
+        if has_units(plan.text):
+            orders.update({(plan.path, row[NAME_COLUMN]): _order_cell(row) for row in _unit_rows(_parse(plan.text))})
+    out = []
+    for at, unit in enumerate(found):
+        mine = orders[(unit.plan, unit.name)]
+        # 列が無ければ値はどれも 0 で、並びの順が待ちになる
+        before = [u for u in found[:at] if u.plan == unit.plan and (mine == 0 or orders[(u.plan, u.name)] < mine)]
+        out.append(unit._replace(after=tuple(unit_key(u.issue, u.name) for u in before)))
+    return tuple(out)
+
+
+def without_sections(text: str, titles: Sequence[str]) -> str:
+    """単位の見出しのセクションと、見出しの文が `titles` のセクションを、見出しの行ごと除いた本文。
+
+    残る行は空行と行末の空白も変えない（コードブロックと改行の指定は中身である）。揃えるのは改行コードと末尾の改行だけである。
+    """
+    doc = _parse(text)
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    found = [*_unit_headings(doc), *(h for h in doc.headings if h.level >= 2 and h.title in titles)]
+    dropped = {at for h in found for at in (h.at, *range(h.at + 1, min(_section(doc, h).stop, len(lines))))}
+    return "\n".join(line for at, line in enumerate(lines) if at not in dropped).rstrip("\n")
+
+
 def acceptance_args(unit: Unit) -> list[str]:
     """単位の `ndf loop acceptance check` の引数の並び（#4369 の決定 9）。"""
     if unit.supplemented:

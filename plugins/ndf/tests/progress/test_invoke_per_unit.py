@@ -84,6 +84,30 @@ def test_a_sprint_without_review_units_runs_one_impl_plan_on_the_current_branch(
 # --- 呼び出しの追加の欄 ---------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("plan_text", "units"),
+    [(PLAN_WITHOUT_UNITS, False), (None, False), (PLAN_WITHOUT_UNITS + "\n## レビューの単位\n", True)],
+    ids=["見出しが無い", "実装計画が無い", "単位の欄がある"],
+)
+def test_a_definition_without_per_unit_goes_to_the_units_only_with_a_units_section(tmp_path, monkeypatch, plan_text, units):
+    repo = _sprint(tmp_path, plan_text)
+    sprint = plan_runs.SprintPlan(convert=lambda *a: None, branch="sprint/s1")
+    stage = definition.load_definition("standard").stage("実装")
+    context = {"issues": [3, 4], "worktree": str(repo), "mode": "standard"}
+    run = invoke.stage_run(replace(stage, per_unit=False), stage.steps[0], invoke.resolve_inputs(stage, context))
+    run = replace(run, sprint=sprint)
+    routed: list = []
+    done = invoke.StageResult(result.result("plan", result.OK, "流した"), {})
+    monkeypatch.setattr(invoke, "_units_stage", lambda r, cwd, wd, runner, answer: routed.append((r, answer)) or done)
+    monkeypatch.setattr(invoke, "_call_plan", lambda r, cwd, wd, answer, runner: routed.append((r, None)) or done)
+
+    invoke.invoke(run, repo, tmp_path / "w", "approved")
+
+    [(got, answer)] = routed
+    assert answer == ("approved" if units else None)
+    assert got.inputs.get("branch") == ("sprint/s1" if units else None)
+
+
 def test_the_stage_run_copies_per_unit_and_the_plain_run_drops_it_with_the_branch():
     stage = replace(definition.load_definition("standard").stage("実装"), per_unit=True)
     inputs = {"issues": [3], "worktree": "/w", "mode": "standard", "branch": "sprint/s1"}

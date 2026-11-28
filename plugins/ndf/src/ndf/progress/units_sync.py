@@ -17,13 +17,14 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters import github
-from ndf.adapters.git import REGULAR_MODES, Git, github_target, mask_urls, parse_status_z
+from ndf.adapters.git import REGULAR_MODES, Git, github_target, mask_urls, parse_status_z, repo_of_url
 from ndf.contracts import result
 from ndf.core import branch_strategy
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import units_files
 from ndf.progress import command, design_record, run_view, store
-from ndf.progress.units_invoke import DESIGN_SYNC_FILE, released_branches
+from ndf.progress.units_flow import DESIGN_SYNC_FILE
+from ndf.progress.units_invoke import released_branches
 
 # 反映する文書の名前（名前の番号の並びが課題）
 _DOCUMENT = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-(?:plan\.units\.json|plan\.md|requirements\.md|design\.md|design-detail\.md)$")
@@ -69,17 +70,23 @@ def push_url(git: Git, repo: str, url: Optional[str] = None) -> tuple[Optional[s
 
 
 def destination_errors(
-    git: Git, record: Mapping[str, Any], context: Mapping[str, Any], machine_repo: str, url: Optional[str] = None
+    git: Git,
+    record: Mapping[str, Any],
+    context: Mapping[str, Any],
+    machine_repo: str,
+    url: Optional[str] = None,
+    project: Optional[Mapping[str, Any]] = None,
 ) -> tuple[Optional[str], list[str]]:
     """確かめた URL と、送り先のリポジトリとブランチがゲートの記録とスプリントの状態に合わない点。合わない点があれば URL は None。
 
     `git` はスプリントの作業場所、`machine_repo` はステートマシンの `repo`（作成の時点のリモートの URL）。
+    リリース先は設定 `project`（読んだ `.ndf/project.json`）で照らす。None なら作業場所の設定を読む。
     """
     repo = str(record["review"]["repo"])
     checked, errors = push_url(git, repo, url)
-    machine = github_target(machine_repo)  # 送らない値なので、認証情報の有無は問わない
-    if machine is None or machine.repo.casefold() != repo.casefold():
-        now = "解析できない" if machine is None else machine.repo
+    machine = repo_of_url(machine_repo)  # 送らない値（取得の URL からユーザー名を除いた保存値）なので、送り先の形は求めない
+    if machine is None or machine.casefold() != repo.casefold():
+        now = "解析できない" if machine is None else machine
         errors.append(f"スプリントのリポジトリが違う（承認 {repo}、今 {now}）")
     branch = record["sprint_branch"] if "sprint_branch" in record else None
     if not branch:
@@ -90,7 +97,7 @@ def destination_errors(
         if now != branch:
             errors.append(f"送り先のブランチが違う（承認 {branch}、{label} {now or '無し'}）")
     try:
-        released = released_branches(_worktree_strategy(git).section)
+        released = released_branches(_strategy(git, project).section)
     except contracts.ContractError as exc:
         errors.append(f"ブランチ戦略の設定を読めない: {exc}")
     else:
@@ -99,9 +106,11 @@ def destination_errors(
     return (None if errors else checked), errors
 
 
-def _worktree_strategy(git: Git) -> branch_strategy.Strategy:
-    root = Path(git.run("rev-parse", "--show-toplevel").strip())
-    return branch_strategy.of_project(command.ndf_settings_in(root, command.PROJECT_FILE))
+def _strategy(git: Git, project: Optional[Mapping[str, Any]] = None) -> branch_strategy.Strategy:
+    if project is None:
+        root = Path(git.run("rev-parse", "--show-toplevel").strip())
+        project = command.ndf_settings_in(root, command.PROJECT_FILE)
+    return branch_strategy.of_project(project)
 
 
 def outgoing_errors(git: Git, tip: str, head: str, allowed: Sequence[str]) -> list[str]:
@@ -241,7 +250,7 @@ def _check_merged(s: _Sync, hub: Hub) -> None:
     if not pull.merged:
         raise _Stop("precondition", f"PR #{number} がマージされていない")
     try:
-        strategy = _worktree_strategy(s.git)
+        strategy = _strategy(s.git)
         # 設計 PR の head がスプリントブランチ自身なら、スプリントの PR と同じマージ先である
         target = strategy.pr_target("sprint") if pull.head_ref == s.branch else strategy.pr_target("doc", s.branch)
     except contracts.ContractError as exc:

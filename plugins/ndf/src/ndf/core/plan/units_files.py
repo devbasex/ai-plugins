@@ -40,7 +40,7 @@ IMPLEMENT_HANDLING = "実装する"
 
 _SYMLINK_MODE = "120000"
 _TASK_ID = re.compile(r"T[1-9][0-9]*")
-_PARALLEL_TITLE = "並列と直列"
+PARALLEL_TITLE = "並列と直列"
 _UNITS_HEAD = (
     review_units_decide.NAME_COLUMN,
     review_units_decide.TASKS_COLUMN,
@@ -595,6 +595,48 @@ def differs(a: ud.UnitFile, b: ud.UnitFile) -> bool:
     return bare(a) != bare(b)
 
 
+_TASK_LABELS = {
+    "title": "題",
+    "issue": "課題",
+    "files": "対象のファイル",
+    "lines": "見込みの行数",
+    "criteria": "満たす受け入れ条件",
+    "after": "先に要るタスク",
+}
+_UNIT_LABELS = {"tasks": "含むタスク", "after": "先に要る単位"}
+
+
+def changes(before: Optional[ud.UnitFile], after: Optional[ud.UnitFile]) -> list[str]:
+    """2 つの版の単位の定義の違いを、タスクと単位の欄ごとの行にする。None はその版にファイルが無い。実際の行数は比べない。"""
+    found: list[str] = []
+    for kind, attr, key, labels in (("タスク", "tasks", "id", _TASK_LABELS), ("単位", "units", "name", _UNIT_LABELS)):
+        was, now = ({getattr(x, key): x for x in (getattr(f, attr) if f else ())} for f in (before, after))
+        # 宣言の順は単位のマージの順に効くので、両方にあるものの順が変われば旧い順と新しい順を出す
+        if [n for n in was if n in now] != [n for n in now if n in was]:
+            found.append(f"{kind}の並び順: {_shown(tuple(was))} → {_shown(tuple(now))}")
+        for name in dict.fromkeys([*was, *now]):
+            if name in was and name in now:
+                found += [
+                    f"{kind} {name} の{label}: {_shown(getattr(was[name], field))} → {_shown(getattr(now[name], field))}"
+                    for field, label in labels.items()
+                    if getattr(was[name], field) != getattr(now[name], field)
+                ]
+                continue
+            held = now[name] if name in now else was[name]
+            detail = _JOIN.join(f"{label} {_shown(getattr(held, field))}" for field, label in labels.items())
+            found.append(f"{kind} {name} を{'足した' if name in now else '消した'}（{detail}）")
+    return found
+
+
+def _shown(value: Any) -> str:
+    if isinstance(value, ud.Edge):
+        issue = "" if value.issue is None else f"#{value.issue}。"
+        return f"{value.unit}（{issue}{value.reason}）"
+    if isinstance(value, tuple):
+        return _JOIN.join(map(_shown, value)) or _NONE
+    return _NONE if value is None else str(value)
+
+
 # --- 実装計画の表 -------------------------------------------------------------------------------
 
 
@@ -616,7 +658,7 @@ def render_tables(plan: str, views: Sequence[ud.View], file: Optional[str] = Non
     )
     return _put_table(
         text,
-        _PARALLEL_TITLE,
+        PARALLEL_TITLE,
         _PARALLEL_HEAD[:2],
         _markdown_table(_PARALLEL_HEAD, _parallel_rows(mine, views)),
         review_units_decide.UNITS_HEADING,

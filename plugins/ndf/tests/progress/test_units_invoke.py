@@ -99,9 +99,10 @@ class _Hub:
 
 @pytest.fixture
 def sprint(tmp_path, monkeypatch):
-    """ブランチ sprint/s1 に居る作業場所と、そのリモート（origin。裸のリポジトリ）。実装計画は無く、リモートへ push 済み。"""
+    """ブランチ sprint/s1 に居る作業場所と、そのリモート（origin。裸のリポジトリ）。実装計画は無く、`.ndf` ごとリモートへ push 済み。"""
     repo = sprint_fixture.sprint_repo(tmp_path, PROJECT)
-    _git(repo, "commit", "-q", "--allow-empty", "-m", "start")
+    _git(repo, "add", ".ndf")  # 手元を進めない変換の経路は、設定を取得先のコミットから読む
+    _git(repo, "commit", "-q", "-m", "start")
     remote = tmp_path / "remote.git"
     subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
     _git(repo, "remote", "add", "origin", str(remote))
@@ -255,6 +256,25 @@ def test_a_lagging_worktree_is_moved_forward_and_reads_the_units_added_on_the_re
 
     assert got is not None and [u.name for u in got.units] == ["読み手", "書き手", "issue-4"]
     assert _git(sprint, "rev-parse", "HEAD") == _git(other, "rev-parse", "HEAD")
+
+
+def test_units_only_on_the_remote_send_an_older_definition_to_the_conversion(sprint, tmp_path, git_calls):
+    other = _clone(sprint, tmp_path)
+    _commit_plan(other, PLAN_WITH_UNITS)
+    _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    asked: list[str] = []
+    git_calls.clear()
+
+    def destination(g, branch):
+        asked.append(branch)
+        return str(sprint.parent / "remote.git"), _remote_head(sprint)
+
+    plan = plan_runs.SprintPlan(convert=lambda *args: pytest.fail("起動の前は変換しない"), destination=destination, branch=BRANCH)
+    stage_run = replace(_run(sprint), per_unit=False, sprint=plan)
+    # 通常のエントリポイントの振り分け（by_units）を通り、単位に分けないプランは組まない
+    assert invoke.prepare_plan(stage_run, tmp_path / "w", sprint) is None
+    # 起動の前は経路の判定の取得だけで、送り先は実行の時に読む
+    assert asked == [] and [c[0] for c in git_calls].count("fetch") == 1
 
 
 def test_a_worktree_diverged_from_the_remote_stops(sprint, tmp_path):

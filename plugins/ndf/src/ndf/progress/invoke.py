@@ -46,7 +46,18 @@ from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, issue_values, merge_pending, model, plan_runs, rebuild_values, refactor_values, stages, units_invoke
+from ndf.progress import (
+    definition,
+    issue_values,
+    merge_pending,
+    model,
+    plan_runs,
+    rebuild_values,
+    refactor_values,
+    stages,
+    units_flow,
+    units_invoke,
+)
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
 from ndf.progress.plan_runs import StageResult, StageRun
 from ndf.testing import scoped, weight
@@ -577,6 +588,12 @@ class PreparedPlan(NamedTuple):
     local_tests: bool
 
 
+def _add_registered_branch(run: StageRun) -> StageRun:
+    """工程の入力に `branch` の無い定義の呼び出しに、文脈の `branch` を足す。"""
+    branch = run.sprint.branch if run.sprint is not None else None
+    return run if branch is None or "branch" in run.inputs else replace(run, inputs={**run.inputs, "branch": branch})
+
+
 def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> Optional[PreparedPlan]:
     """プランの差し込みを 1 回だけ組み、作業ごとの入力と作業場所を確かめて `values.json` に残す（#3908 の決定 2・4）。
 
@@ -585,10 +602,11 @@ def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> Optional[PreparedP
     単位ごとに流す工程（`per_unit`）は開始前の確かめ（`units_invoke.prepare`）を行い、単位の経路なら None（単位ごとの値は
     単位を流すときに組む）、これまでの経路なら単位に分けない呼び出し（`StageRun.plain`）で組む（#4369）。
     """
-    if run.per_unit:
-        if units_invoke.prepare(run, work_dir, cwd) is not None:
+    routed = units_flow.by_units(run, work_location(run, cwd))
+    if routed is not None:
+        if units_invoke.prepare(_add_registered_branch(routed), work_dir, cwd) is not None:
             return None
-        run = run.plain()
+        run = run.plain() if run.per_unit else run
     t = _template_of(run)
     if t is None:
         raise model.Refused(f"プランのテンプレート {run.name} が無い")
@@ -914,11 +932,12 @@ def invoke(
     `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。skill と script は、入力に
     作業場所（`worktree`）があればそこで打つ（プランは埋めたプランの作業場所で受ける）。
     """
-    if run.kind == PLAN and run.per_unit:
-        units = _units_stage(run, cwd, work_dir, runner)
+    routed = units_flow.by_units(run, work_location(run, cwd)) if run.kind == PLAN else None
+    if routed is not None:
+        units = _units_stage(_add_registered_branch(routed), cwd, work_dir, runner, answer)
         if units is not None:
             return units
-        run = run.plain()
+        run = run.plain() if run.per_unit else run
     if run.kind == PLAN:
         return _call_plan(run, cwd, work_dir, answer, runner)
     if run.kind not in (SCRIPT, SKILL):
@@ -931,13 +950,16 @@ def invoke(
     return _call_skill(run, location, call_claude)
 
 
-def _units_stage(run: StageRun, cwd: Path, work_dir: Path, runner: Runner) -> Optional[StageResult]:
+def _units_stage(run: StageRun, cwd: Path, work_dir: Path, runner: Runner, answer: Optional[str]) -> Optional[StageResult]:
     """単位ごとに流す工程を `units_invoke.run_stage` で流した結果。これまでの経路なら None（#4369）。
 
     単位のプランは単位の作業場所で組んで流し（`_call_plan`）、コマンドは `runner` で打つ。組めない例外は `plan_failure` が分ける。
     """
     ports = units_invoke.Ports(
-        lambda r, wd: _call_plan(r, work_location(r, cwd), wd, None, runner), runner, lambda exc: plan_failure(run.name, exc)
+        lambda r, wd: _call_plan(r, work_location(r, cwd), wd, None, runner),
+        runner,
+        lambda exc: plan_failure(run.name, exc),
+        answer=answer,
     )
     try:
         return units_invoke.run_stage(run, work_dir, cwd, ports)

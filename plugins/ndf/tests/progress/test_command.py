@@ -308,7 +308,7 @@ def test_new_drops_the_credentials_of_the_origin_url_from_the_machine_id(repo, c
 
 @pytest.mark.parametrize("url", ["git@example.invalid:o/r.git", "https://example.invalid/o/r.git", "/srv/o/r"])
 def test_without_userinfo_keeps_urls_without_credentials(url):
-    assert command._without_userinfo(url) == url
+    assert command.without_userinfo(url) == url
 
 
 def test_unreachable_database_stops_as_store_unreachable_without_the_password(repo, capsys, monkeypatch, last_result):
