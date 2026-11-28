@@ -220,9 +220,11 @@ def _light(f: Mapping[str, Any]) -> bool:
 
 
 def _left_label(f: Mapping[str, Any]) -> str:
-    """直さずに残した指摘の終わり方（起票の URL か、記録のみ）。"""
+    """直さずに残した指摘の終わり方（起票の URL か、記録のみ）。プロジェクト MVV に反する指摘は、その項目を添える。"""
     url = f.get(leftover_decide.Filed.URL)
-    return f"直さずに残した（起票: {url}）" if url else "直さずに残した（記録のみ）"
+    label = f"直さずに残した（起票: {url}）" if url else "直さずに残した（記録のみ）"
+    item = f.get(MVV)
+    return f"{label}・MVV の {item} に反する" if item else label
 
 
 def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
@@ -255,9 +257,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
     waiting = sum(1 for f in findings if f.get("outcome") == fin.UNRESOLVED and f.get(fin.REDLINE))
     rest = [f for f in findings if f.get("outcome") != fin.UNRESOLVED or not f.get(fin.REDLINE)]
     counts = {
-        key: sum(
-            1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not (_light(f) or f.get(leftover_decide.PARKED)))
-        )
+        key: sum(1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not (_light(f) or f.get(leftover_decide.PARKED))))
         for key in OUTCOME_LABEL
     }
     parked = sum(1 for f in rest if f.get("outcome") == fin.UNRESOLVED and f.get(leftover_decide.PARKED) and not _light(f))

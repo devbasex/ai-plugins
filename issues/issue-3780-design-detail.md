@@ -53,7 +53,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/crossreview/local_scope.py` | 新設 | `review-scope` の範囲を手元の git と状態の記録から決める | `scope_decide`・`round_scope`・`changes` | モジュール、`ScopeSettings`（Protocol）、`_LocalBase` | 変更（移動）: `decide`（今の `_local_scope`）・`_local_base`・`_local_mvv`・`_local_sections` |
 | `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`finding_kinds`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches_finding`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
-| `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`file_issues` |
+| `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`unconfirmed_target`・`file_issues` |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | 変更 | 起点の条件と、収束を使い回す条件を分ける | `store` | モジュール | 新設: `origin_record` |
 | `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `read_origin`・`line_origin` |
 | `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched_since` |

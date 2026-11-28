@@ -251,7 +251,7 @@ flowchart TD
 | 起票 | 残す major のうち（minor・nit は種類にかかわらず起票しない）、指摘の種類に `delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval` のどれかがあるもの |
 | 記録のコメント | ほかのすべて |
 
-起票は、記録のコメントを書く処理（PR ごとのロックの中）で行う。行に `issue` があれば起票しない。無ければ上の起票の記録を確かめてから起票する。失敗したら `issue_error` と警告を残して記録のコメントに載せ、次の起動か `ndf cross-review report` で打ち直す。起票するかは、メインディレクトリの `.ndf/project.json` の `issues.primary` で決める。起票先は PR のリポジトリ（状態ファイルの `target_repo`）である。`issues.others` は起票の判断に使わない。
+起票は、記録のコメントを書く処理（PR ごとのロックの中）で行う。行に `issue` があれば起票しない。無ければ上の起票の記録を確かめてから起票する。失敗したら `issue_error` と警告を残して記録のコメントに載せ、次の起動か `ndf cross-review report` で打ち直す。起票するかは、メインディレクトリの `.ndf/project.json` の `issues.primary` で決める。起票先は PR のリポジトリ（状態ファイルの `target_repo`）である。設定を読んだメインディレクトリのリモートが起票先と違うか確かめられない場合と、`--repo` が状態ファイルの対象と違う場合は起票せず、理由を警告に出す。起票を許可していないリポジトリへ、別のリポジトリの設定で公開しないためである。`issues.others` は起票の判断に使わない。
 
 | `issues.primary` | 扱い |
 | --- | --- |

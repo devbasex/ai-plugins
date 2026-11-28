@@ -24,6 +24,7 @@ def test_others_drop_our_own_record_and_thread_openings() -> None:
         prior_decide.Remark("review_comment", "ndf", OPENING, "a.py", 3),
         prior_decide.Remark("review_comment", "ndf", "直した（修正のコミット abc）", "a.py", 3),
         prior_decide.Remark("review", "bot", ""),
+        prior_decide.Remark("comment", "ndf", leftover_decide.RECORD_MARK + "\n起票の記録"),
     ]
     kept = prior_decide.others(remarks)
     assert [r.body for r in kept] == ["ここが遅い", "直した（修正のコミット abc）"]

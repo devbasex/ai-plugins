@@ -307,10 +307,15 @@ def decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> 
         if not _left(row) or not item:
             continue
         where = result_fields(row, comment_url)
+        if type(row.get("line")) is int:
+            why = "2 ラウンド目以降の、変えていない行への major"
+        else:
+            # 行が無いので変えた行と照らせない（指したファイルが変わっていないことだけを確かめた。`proceeds`）
+            why = "2 ラウンド目以降の、行を特定していない major（指したファイルは変えていない）"
         out.append(
             {
                 "decision": f"指摘 {row.get('id')} は {item} に反するが、直さずに残した",
-                "basis": f"2 ラウンド目以降の、変えていない行への major（{where['url'] if 'url' in where else '記録のコメントを書けていない'}）",
+                "basis": f"{why}（{where['url'] if 'url' in where else '記録のコメントを書けていない'}）",
             }
         )
     return out

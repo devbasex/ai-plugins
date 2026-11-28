@@ -482,10 +482,11 @@ class ReportFailed(Exception):
 
 
 class Filer(NamedTuple):
-    """直さずに残した指摘の起票の前提。起票先は `main`（メインディレクトリ）の `.ndf/project.json` で決め、`manual` は利用者が
-    打った公開（上限を超えた一覧も読み直す）。"""
+    """直さずに残した指摘の起票の前提。起票先は `locate` が返すメインディレクトリの `.ndf/project.json` で決める（`locate` は
+    起票の候補があるときだけ呼ぶ）。`repo_arg` は `--repo`、`manual` は利用者が打った公開（上限を超えた一覧も読み直す）。"""
 
-    main: Optional[Path] = None
+    locate: Callable[[], Optional[Path]] = lambda: None
+    repo_arg: Optional[str] = None
     manual: bool = False
 
 
@@ -525,7 +526,13 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
     """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
     if hub.leftovers is None or not leftover.candidates(data):
         return []
-    primary, note = leftover.primary_of(filer.main)
+    main = filer.locate()
+    primary, note = leftover.primary_of(main)
+    if primary == leftover.GITHUB and main is not None:
+        # 別のリポジトリの設定で起票を許可しない（許可する設定と起票先を同じリポジトリにする）
+        refused = leftover.unconfirmed_target(main, filer.repo_arg, data.get(store.REPO_KEY))
+        if refused is not None:
+            return [refused]
     origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
     with origin:
         save = lambda: store.write_object(ref.path, data)  # noqa: E731
@@ -533,9 +540,7 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
     return ([note] if note else []) + filed
 
 
-def _publish(
-    ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub, filer: Filer
-) -> tuple[str, list[str]]:
+def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub, filer: Filer) -> tuple[str, list[str]]:
     """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
     if warnings is None:
@@ -563,16 +568,19 @@ def _publish(
     return url, [*notes, *filing]
 
 
+def _main_of_cwd() -> Optional[Path]:
+    """打った場所のメインディレクトリ。決められなければ None（起票先の設定を読めないので起票しない）。"""
+    try:
+        return location.main_worktree(git.Git(Path.cwd()))
+    except (git.GitError, OSError):
+        return None
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     """状態ファイルの記録（ラウンド・修正・指摘）を PR へコメントする。消える前の状態ファイルから書き足すのに使う。"""
     state_dir = Path(args.state_dir)
     ref = store.state_pr(state_dir, args.pr)
     data = store.read_state(ref)
-    try:
-        main = location.main_worktree(git.Git(Path.cwd()))
-    except (git.GitError, OSError):
-        # リポジトリの外から打った。起票先の設定を読めないので起票しない
-        main = None
     try:
         url, notes = _post_report(
             state_dir,
@@ -580,7 +588,7 @@ def cmd_report(args: argparse.Namespace) -> int:
             report_decide.final_of(data),
             None,
             lambda: HUB(args.repo, store.state_repo(ref), Path.cwd()),
-            Filer(main, manual=True),
+            Filer(_main_of_cwd, args.repo, manual=True),
         )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))
@@ -677,7 +685,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     refused = _write_reviewed(args, got)
     if refused is not None:
         return refused
-    items, warnings = _report(cfg, got, hub_once)
+    items, warnings = _report(cfg, got, hub_once, args.repo)
     verdict = _with_leftovers(verdict, items, store.read_state(store.state_pr(cfg.state_dir, cfg.pr)))
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
     return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
@@ -688,7 +696,9 @@ def _write_reviewed_pr(path: Path, ident: str) -> None:
     path.write_text(f"{ident}\n", encoding="utf-8")
 
 
-def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tuple[list[dict[str, Any]], list[str]]:
+def _report(
+    cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub], repo_arg: Optional[str] = None
+) -> tuple[list[dict[str, Any]], list[str]]:
     """結果の items（指摘と記録のコメント）と注意。記録を PR へ書く。前回の収束を返した起動は、今の PR へ今と同じ状態の
     記録を公開できていれば書き直さない（PR 3944 の r2-10・r3-2。URL があるだけでは、最新のラウンドの公開に失敗した後の
     古い記録かもしれない）。"""
@@ -708,7 +718,7 @@ def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tu
         return items, warnings
     try:
         # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
-        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of, Filer(cfg.main))
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of, Filer(lambda: cfg.main, repo_arg))
         items.append({"kind": "comment", "number": cfg.pr, "url": url})
         warnings += notes
     except ReportFailed as exc:

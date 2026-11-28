@@ -2,7 +2,7 @@
 
 - 既存の指摘: インラインのレビューコメント・レビュー本文・PR コメントの 3 種（人と bot と前のラウンドの返信を含む）を、
   相手役へ信頼しない参考資料として渡す（今の差分で確かめた問題は既存のコメントにかかわらず報告させる）。cross-review 自身が書いた記録のコメントとスレッドの最初のコメント（どちらも
-  `report_decide.MARKER` で始まる）は除く（自分の指摘はジャーナルが持つ）
+  `report_decide.MARKER` で始まる）と起票の記録（`leftover_decide.RECORD_MARK`）は除く（自分の指摘はジャーナルが持つ）
 - 引き継ぐ指摘: 前の実行が開いたまま残した自分のスレッド（最初のコメントが `MARKER` で始まり、その書き手が対象リポジトリに
   今の実行の認証の login と同じで、resolve されていない）を、
   別の保存先で始めた実行が未解決の指摘として引き継ぐ。状態ファイルの `threads` が既に持つスレッドは引き継がない
@@ -92,8 +92,8 @@ def _ours(body: str) -> bool:
 
 
 def others(remarks: Iterable[Remark]) -> list[Remark]:
-    """相手役へ渡すコメント（本文があり、cross-review 自身の記録・スレッドの最初のコメントでないもの）。"""
-    return [r for r in remarks if r.body.strip() and not _ours(r.body)]
+    """相手役へ渡すコメント（本文があり、cross-review 自身の記録・起票の記録・スレッドの最初のコメントでないもの）。"""
+    return [r for r in remarks if r.body.strip() and not _ours(r.body) and not r.body.lstrip().startswith(leftover_decide.RECORD_MARK)]
 
 
 def _one_line(text: str, chars: int) -> str:

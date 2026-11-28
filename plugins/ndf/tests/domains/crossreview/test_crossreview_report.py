@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import contextlib
 import json
+import types
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
 
 import pytest
 
-from ndf.adapters import publish
+from ndf.adapters import git, publish
 from ndf.adapters.github import GitHubError, Viewer
 from ndf.contracts import result
+from ndf.core.converge import location
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import journal, leftover, report_decide, store, threads, verify_decide
+from ndf.domains.crossreview import journal, leftover, leftover_decide, report_decide, store, threads, verify_decide
 from ndf.domains.records.mvv import Snapshot
 
-from ._repos import Repos, run_cli
+from ._repos import Repos, run_cli, sh
 from .conftest import FakePort
 from .test_crossreview_leftover import _rounds, _said
 from .test_crossreview_leftover_issues import FakeGitHub
@@ -198,7 +200,32 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
     assert any("記録を書けなかった" in w and "ndf cross-review report" in w for w in got["warnings"])
 
 
-def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, hub) -> None:
+@pytest.mark.parametrize(
+    ("repo_arg", "state_repo", "own", "refused"),
+    [
+        pytest.param(None, "o/r", "O/R", False, id="same"),
+        pytest.param("o/r", "o/r", "o/r", False, id="arg-and-state-agree"),
+        pytest.param(None, None, "o/r", False, id="decided-by-the-remote"),
+        pytest.param(None, "o/r", "me/other", True, id="other-main"),
+        pytest.param("o/x", "o/r", "o/x", True, id="arg-differs-from-state"),
+        pytest.param(None, "o/r", None, True, id="main-unreadable"),
+    ],
+)
+def test_issue_3780_2_filing_needs_the_settings_of_the_target_repository(
+    repo_arg: Optional[str], state_repo: Optional[str], own: Optional[str], refused: bool
+) -> None:
+    def remote_repo() -> str:
+        if own is None:
+            raise git.GitError("リモートが無い")
+        return own
+
+    note = leftover.unconfirmed_target(Path("main"), repo_arg, state_repo, lambda p: types.SimpleNamespace(remote_repo=remote_repo))
+    assert (note is not None) is refused
+
+
+def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    # 起票の候補が無ければ、主 worktree を調べない
+    monkeypatch.setattr(location, "main_worktree", lambda g: pytest.fail("主 worktree を調べた"))
     state_dir = tmp_path / "st"
     store.write_object(state_dir / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"})
     from ndf.domains.crossreview import cli
@@ -563,13 +590,15 @@ def test_issue_3780_2_the_table_and_the_list_show_how_a_finding_was_left() -> No
     body = report_decide.comment(7, data, fin.CONVERGED)
     rows = {line.split("|")[1].strip(): line for line in body.splitlines() if line.startswith("| r2-")}
     assert url in rows["r2-1"] and "記録のみ" in rows["r2-2"]
+    assert "Value 6" in rows["r2-1"] and "MVV" not in rows["r2-2"]
     assert "未解決 0" in body
     listed = {i["id"]: (i.get("parked"), i.get("issue")) for i in report_decide.open_items(body)}
     assert listed == {"r2-1": (True, url), "r2-2": (True, None)}
 
 
 def _filing(monkeypatch, hub, repos: Repos, primary: Optional[str] = "github") -> FakeGitHub:
-    """起票先を偽の GitHub にし、打った場所をメインディレクトリにする。"""
+    """起票先を偽の GitHub にし、打った場所をメインディレクトリ（リモートは状態ファイルの対象）にする。"""
+    sh(repos.main, "remote", "set-url", "origin", "https://github.com/o/r.git")
     github = FakeGitHub()
     port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
     hub.leftovers = lambda pr: port
@@ -614,9 +643,7 @@ def test_issue_3780_2_nothing_is_filed_unless_the_primary_is_github(
     assert github.calls == [] and any("issues.primary" in w for w in got.get("warnings", ())) is noted
 
 
-def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(
-    repos: Repos, tmp_path: Path, capsys, monkeypatch, hub
-) -> None:
+def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     github = _filing(monkeypatch, hub, repos)
     locked: list[int] = []
 
@@ -648,6 +675,10 @@ def test_issue_3780_2_results_carry_how_each_finding_was_left() -> None:
     assert "残した指摘 2（起票 1）" in verdict.summary
     [decision] = verdict.decisions
     assert all(part in decision["decision"] + decision["basis"] for part in ("r2-1", "Value 6", url))
+    assert "変えていない行" in decision["basis"]
+    del data["findings"][0]["line"]
+    [decision] = leftover_decide.decisions(data["findings"], record)
+    assert "行を特定していない" in decision["basis"] and "変えていない行" not in decision["basis"]
 
 
 def test_issue_3780_2_run_results_point_a_left_finding_at_the_record(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
