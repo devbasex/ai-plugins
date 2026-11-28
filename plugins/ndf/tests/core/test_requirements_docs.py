@@ -210,6 +210,23 @@ def test_the_lines_after_a_bare_close_are_not_read_ahead(after: str, count: int,
     assert len(parsed) == count
 
 
+def test_the_lines_of_a_long_attribute_are_searched_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    searched: list[int] = []
+    pattern = inputs_decide._UNFINISHED_TAG
+
+    class Counting:
+        def search(self, text: str):
+            searched.append(len(text))
+            return pattern.search(text)
+
+    monkeypatch.setattr(inputs_decide, "_UNFINISHED_TAG", Counting())
+    body = '<!-- 注 --> <span title="説明\n' + ' a" b="説明\n' * 100 + '<!-- 記号の例">本文</span>\n\n## 後'
+    got = list(inputs_decide.outside_fences(body.split("\n")))
+
+    assert got[-1][1] == "## 後"
+    assert sum(searched) < 3 * len(body)
+
+
 def test_the_marks_of_a_paragraph_are_converted_once(monkeypatch: pytest.MonkeyPatch) -> None:
     converted: list[str] = []
     convert = inputs_decide._token_marks

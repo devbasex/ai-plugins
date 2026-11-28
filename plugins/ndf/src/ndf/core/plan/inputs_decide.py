@@ -29,8 +29,9 @@ KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
 # HTML の文を前から区切る。コメントは閉じ（無ければ末尾）まで 1 つにして中のタグを読まず、タグは改行を含めて読む
 _COMMENT_OR_TAG = re.compile(rf"<!(?=--).*?(?:-->|\Z)|({open_tag})", re.DOTALL)
-# 文の末尾で閉じていないタグ（属性の間か、引用符で始めた属性値の途中）
-_UNFINISHED_TAG = re.compile(rf"""<[A-Za-z][A-Za-z0-9\-]*{attribute}*(?:\s+{attr_name}\s*=\s*(?:"[^"]*|'[^']*)?|\s*/?)\Z""")
+# 文の末尾で閉じていないタグ（属性の間か、引用符で始めた属性値の途中）。1 つめの組は書きかけの属性の `=`、2 つめは
+# 閉じていない属性値
+_UNFINISHED_TAG = re.compile(rf"""<[A-Za-z][A-Za-z0-9\-]*{attribute}*(?:\s+{attr_name}\s*(=)\s*("[^"]*|'[^']*)?|\s*/?)\Z""")
 
 
 def _recording(rule: Callable[[StateInline, bool], bool]) -> Callable[[StateInline, bool], bool]:
@@ -162,6 +163,18 @@ def _scan_line(
     return kept, head, inside, closed
 
 
+def _unfinished_tag(text: str) -> Optional[str]:
+    """`text` が閉じていないタグで終わるとき、続きの行の判定に足りる短い書き出し。閉じていれば None。
+
+    次の行は `書き出し + "\\n" + 行` で判定する。読み終えた行を読み直さない。
+    """
+    found = _UNFINISHED_TAG.search(text)
+    if not found:
+        return None
+    equals, value = found.groups()
+    return "<a b" + (equals or "") + (value or "")[:1]
+
+
 def _breaks_block(state: StateBlock, line: int, end: int) -> bool:
     """`line` が、前の行から続く段落を markdown-it-py の段落の規則で切るか。
 
@@ -213,17 +226,20 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
 
         def read_after(at: int, tail: str, spans_of: Callable[[str], list[tuple[int, int]]]) -> None:
             nonlocal reach
-            text, stop = tail, at + 1
-            while stop < end and _UNFINISHED_TAG.search(text) and not _breaks_block(state, stop, end):
-                text += "\n" + full(stop)
+            parts, head, stop = [tail], _unfinished_tag(tail), at + 1
+            while head is not None and stop < end and not _breaks_block(state, stop, end):
+                parts.append(full(stop))
+                head = _unfinished_tag(f"{head}\n{parts[-1]}")
                 stop += 1
+            text = "\n".join(parts)
             if "<!--" not in text:
                 return
             spans = spans_of(text)
             found = _literals(text, at, spans)
             literals.update(found)
             chain = at
-            for begin, last in sorted((at + text.count("\n", 0, a), at + text.count("\n", 0, b)) for a, b in spans):
+            breaks = [m.start() for m in re.finditer("\n", text)]
+            for begin, last in sorted((at + bisect_left(breaks, a), at + bisect_left(breaks, b)) for a, b in spans):
                 if begin <= chain < last:
                     chain = last
             if any(at < n <= chain for n, _ in found):
