@@ -514,3 +514,25 @@ def test_an_mvv_approval_posted_after_a_user_rejection_does_not_merge(account, a
     found = merge_approval.merge_judgment(merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer()), target)
 
     assert (found is None) is stops
+
+
+@pytest.mark.parametrize(("approver", "stops"), [(2, False), (3, True)])
+def test_a_later_approval_withdraws_only_the_same_writers_rejection(approver, stops):
+    """別のアカウントの却下は同じ書き手の後の承認で取り下がる。その承認だけではマージを許さない。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+
+    def body(answer: str, by: str, record: str) -> str:
+        row = merge_approval.render_merge_row(merge_approval.MergeRow(answer, by, target, True, record))
+        return f"{merge_approval.MVV_NOTE_HEADING}design）\n\n{row}" if by == "mvv" else row
+
+    hub.comments_of[DESIGN_PR] = [
+        Authored("someone", "COLLABORATOR", body("rejected", "user", "a"), author_id=2),
+        Authored("someone", "COLLABORATOR", body("approved", "user", "b"), author_id=approver),
+    ]
+    rows = merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer())
+    assert merge_approval.merge_judgment(rows, target) is None
+    hub.comments_of[DESIGN_PR].append(Authored(hub.login, "OWNER", body("approved", "mvv", "c"), author_id=hub.account_id))
+    rows = merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer())
+
+    assert (merge_approval.merge_judgment(rows, target) is None) is stops
