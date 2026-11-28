@@ -496,6 +496,15 @@ def _mvv_notices(warnings: Sequence[str]) -> list[str]:
     return [w for w in drive.MVV_NOTICES if w in warnings]
 
 
+def _require_target(ref: store.StateRef, data: Mapping[str, Any], filer: Filer) -> None:
+    """起票の候補があるのに元の PR のリポジトリを確かめられない状態なら、`--repo` が何であっても何も書かずに止める（#3780）。"""
+    if not store.repo_of(data) and leftover.candidates(data, manual=filer.manual):
+        raise ReportFailed(
+            f"PR #{ref.current_pr} の記録を公開していない（起票の候補があるが、状態ファイルに対象のリポジトリ target_repo が無く、"
+            "元の PR のリポジトリを確かめられない）"
+        )
+
+
 def _post_report(
     state_dir: Path,
     pr: int,
@@ -520,12 +529,7 @@ def _post_report(
         raise ReportFailed(
             f"PR #{ref.current_pr} の記録を公開していない（--repo の {filer.repo_arg} と状態ファイルの対象 {state_repo} が違う）"
         )
-    # 起票の候補があるのに元の PR のリポジトリを確かめられない状態は、`--repo` が何であっても何も書かない（#3780）
-    if not state_repo and leftover.candidates(store.read_state(ref), manual=filer.manual):
-        raise ReportFailed(
-            f"PR #{ref.current_pr} の記録を公開していない（起票の候補があるが、状態ファイルに対象のリポジトリ target_repo が無く、"
-            "元の PR のリポジトリを確かめられない）"
-        )
+    _require_target(ref, store.read_state(ref), filer)
     try:
         hub = hub_of()
         # 同じ PR の公開のロックの中で状態ファイルを読み直す（後から取った公開は先の記録を見て二重に書かない。#4016）
@@ -569,6 +573,8 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
 def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub, filer: Filer) -> tuple[str, list[str]]:
     """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
+    # ロックを待つ間に対象が消えるか候補が増えうるので、書く前に読み直した状態で確かめ直す（#3780）
+    _require_target(ref, data, filer)
     # 接続先は公開のロックの前の状態で決めたので、読み直した状態の対象と違えば、何も書かずに止める（#3780）
     target, current = store.repo_of(data), data.get(store.CURRENT_KEY, ref.origin_pr)  # noqa: NDF502 ファイル: 巻き直していなければ今の番号は元の番号
     if (target and target.casefold() != hub.repo.casefold()) or current != ref.current_pr:

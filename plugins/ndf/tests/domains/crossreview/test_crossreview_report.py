@@ -253,6 +253,26 @@ def test_report_writes_nothing_when_the_state_read_in_the_lock_differs_from_the_
     assert (hub.comments, hub.port.opened, hub.port.resolved) == ([], [], [])
 
 
+def test_issue_3780_2_report_writes_nothing_when_the_state_read_in_the_lock_lost_the_target(
+    tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    from ndf.domains.crossreview import cli
+
+    path, changed = tmp_path / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": None}
+    store.write_object(path, _left_state())
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        store.write_object(path, changed)
+        yield
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7")
+    assert code != 0 and "target_repo" in got["cause"]["detail"]
+    assert (hub.comments, hub.port.opened, hub.port.resolved) == ([], [], [])
+    assert store.read_object(path) == changed
+
+
 def test_issue_3780_2_run_saves_the_repository_of_the_confirmed_pr(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
     monkeypatch.setattr(hub.port, "read_pr", lambda: read)
