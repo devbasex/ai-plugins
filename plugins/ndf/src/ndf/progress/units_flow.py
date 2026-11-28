@@ -30,11 +30,13 @@ from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
-from ndf.contracts import result, worker_paths
+from ndf.adapters.git import Git
+from ndf.contracts import facts, result, worker_paths
 from ndf.core import route
+from ndf.core.issue_docs import plan_issues
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan import units_files
-from ndf.core.plan.review_units_decide import Unit, unit_key
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
 from ndf.progress import plan_runs, units_queue
 from ndf.progress.plan_runs import StageResult, UnitsStopped
@@ -631,3 +633,27 @@ def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
     if step is not None and route.stopped_after_test(step) and moved:
         return Resume("run", True, retest)
     return Resume("run", False, None)
+
+
+# --- スプリントの実装計画の読み取り --------------------------------------------------------------
+
+
+def is_sprint_plan(path: str, issues: Sequence[int]) -> bool:
+    """スプリントの課題の実装計画のパスか（名前の番号のどれかがスプリントの課題）。"""
+    return bool(plan_issues(path) & set(issues))
+
+
+def plans_at(g: Git, commit: str, issues: Sequence[int]) -> tuple[list[PlanDoc], bool]:
+    """コミットにあるスプリントの課題の実装計画と、単位のファイルがあるか。"""
+    listed = g.run("ls-tree", "-z", "--name-only", commit, "--", f"{facts.value('locations', 'issues', 'path')}/")
+    names = [p for p in listed.split("\0") if p]
+    paths = [p for p in names if is_sprint_plan(p, issues)]
+    blobs = g.blobs(*(f"{commit}:{p}" for p in paths)) if paths else []
+    plans = [PlanDoc(p, plan_issues(p), b.decode("utf-8")) for p, b in zip(paths, blobs) if b is not None]
+    return plans, bool(units_files.paths_naming(names, issues))
+
+
+def worktree_plans(root: Path, paths: Sequence[str]) -> list[PlanDoc]:
+    """worktree の `paths` にある実装計画（削除されたものは読まない）。"""
+    found = (p for p in paths if plan_issues(p) and (root / p).is_file())
+    return [PlanDoc(p, plan_issues(p), (root / p).read_text(encoding="utf-8")) for p in found]

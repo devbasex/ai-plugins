@@ -209,3 +209,25 @@ def migration_drafts(v: View) -> list[model.EventDraft]:
     # 開いた PR で止まったクリーンアップは、デプロイの後に流し直すまで結果を使わない（失敗を待ちへ戻す）
     why = "クリーンアップをデプロイの後へ移したので、デプロイの後に流し直す"
     return [moved, model.EventDraft(RETRY_EVENT, CONDUCTOR, cleanup, reason=why, rev=v.rev)]
+
+
+def approved_head(v: View, kind: str, root: Optional[Path] = None) -> Optional[str]:
+    """区分 `kind` の承認ゲートで、最後に承認した回答が見た PR の head（無ければ None）。
+
+    マージの側は、これを `--expect-head` へ渡し、承認の後に進んだ head をマージしない（#2147）。変更要求の後の承認だけを読む。
+    承認の後に文書だけが加わって出し直さなかった（#3020）なら、そのときの head を返す（`root` は状態の保存先）。
+    最後の回答が数えない MVV 判定の回答（`model.mvv_answer_void`）なら、その前の回答へさかのぼらずに None を返す（#3959 の決定 3）。
+    """
+    got = [ev for ev in v.events if ev.draft.kind == ANSWERED and event_payload(ev).get("gate") == kind]
+    if not got:
+        return None
+    p = event_payload(got[-1])
+    if model.mvv_answer_void(p, kind) or p["answer"] != invoke.APPROVED:
+        return None
+    if root is not None and p.get("gate_id"):
+        carried = read_accepted_head(work_root(root, v.machine_id), str(p["gate_id"]))
+        if carried is not None:
+            return carried
+    seen = p.get("seen")
+    head = seen.get("head") if isinstance(seen, dict) else None
+    return str(head) if head else None

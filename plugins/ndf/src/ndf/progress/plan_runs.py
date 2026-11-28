@@ -6,7 +6,7 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf.contracts import result
 from ndf.core import durable, route
@@ -15,6 +15,20 @@ from ndf.core.plan import runner as plan_runner
 
 # 変更要求の指摘の本文を作業へ渡す環境変数
 NOTES_ENV = "NDF_STAGE_NOTES"
+
+
+class ConvertRequest(NamedTuple):
+    """この変更より前のスプリントの変換（`units_convert.convert`）へ、単位を流す処理が渡す値。"""
+
+    run: StageRun
+    # スプリントの作業場所の根と、登録されたスプリントブランチ
+    sprint_dir: Path
+    branch: str
+    issues: tuple[int, ...]
+    # 実装計画を省いた課題
+    omitted: tuple[int, ...]
+    # 課題の受け入れ条件の数を数える
+    count: Callable[[Sequence[int]], Mapping[int, int]]
 
 
 @dataclass(frozen=True)
@@ -35,6 +49,10 @@ class SprintPlan:
     work_root: Optional[Path] = None
     # 単位の起動の記録を書く関数（`units_guard.record_launch`。`(branch, base, *, issues, unit_file)`）。承認の記録が無ければ None
     launched: Optional[Callable[..., None]] = None
+    # この変更より前のスプリントの変換（`units_convert.convert`。`(ConvertRequest, ports, answer)`）。新しい定義は None
+    convert: Optional[Callable[..., Any]] = None
+    # 文脈の branch（`per_unit` の無い定義は工程の入力に持たないことがある）
+    branch: Optional[str] = None
 
 
 @dataclass(frozen=True)

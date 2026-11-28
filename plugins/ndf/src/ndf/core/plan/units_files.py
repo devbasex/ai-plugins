@@ -40,7 +40,7 @@ IMPLEMENT_HANDLING = "実装する"
 
 _SYMLINK_MODE = "120000"
 _TASK_ID = re.compile(r"T[1-9][0-9]*")
-_PARALLEL_TITLE = "並列と直列"
+PARALLEL_TITLE = "並列と直列"
 _UNITS_HEAD = (
     review_units_decide.NAME_COLUMN,
     review_units_decide.TASKS_COLUMN,
@@ -616,7 +616,7 @@ def render_tables(plan: str, views: Sequence[ud.View], file: Optional[str] = Non
     )
     return _put_table(
         text,
-        _PARALLEL_TITLE,
+        PARALLEL_TITLE,
         _PARALLEL_HEAD[:2],
         _markdown_table(_PARALLEL_HEAD, _parallel_rows(mine, views)),
         review_units_decide.UNITS_HEADING,

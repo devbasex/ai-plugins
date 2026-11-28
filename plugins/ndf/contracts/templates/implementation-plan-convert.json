@@ -1,0 +1,14 @@
+{
+  "template": "implementation-plan-convert",
+  "purpose": "implementation_plan_convert",
+  "summary": "単位のファイルへの変換（#3702 の決定 10）: worker の作業 implementation-plan を変換の指定（convert）で打つ。push のステップは持たず、コミットは単位を流す処理が突き合わせか再承認の後に送る",
+  "params": ["repo", "worktree", "branch", "worker", "convert"],
+  "plan": {
+    "name": "implementation-plan-{{convert}}-{{branch}}",
+    "repo": "{{repo}}",
+    "worktree": "{{worktree}}",
+    "steps": [
+      {"id": "work", "run": ["{{worker}}", "implementation-plan"]}
+    ]
+  }
+}
