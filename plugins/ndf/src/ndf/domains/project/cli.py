@@ -26,7 +26,7 @@ import argparse
 import time
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, Optional
 
 from filelock import FileLock, Timeout
 
@@ -63,13 +63,6 @@ def _gh_repo(repo: git.Git, remote: str) -> Optional[str]:
         return None
 
 
-class MeasurementContext(NamedTuple):
-    """CI の項目を測る文脈。リモートの GitHub のリポジトリとリモートの既定ブランチ。"""
-
-    gh_repo: Optional[str]
-    head: Optional[str]
-
-
 class _Steps:
     """項目ごとの測定。締め切りを越えた・失敗した項目を不明にし、1 項目の失敗で測定を止めない。"""
 
@@ -90,9 +83,9 @@ class _Steps:
         return None
 
 
-def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: MeasurementContext) -> list[str]:
+def _ci_items(tree: measure_repo.Tree, step: _Steps, gh_repo: Optional[str], head: Optional[str]) -> list[str]:
     """CI の項目を入れ、CI の注記を返す。"""
-    ci_part = step("ci", lambda: measure_ci.measure(tree, ctx.gh_repo, ctx.head, step.deadline))
+    ci_part = step("ci", lambda: measure_ci.measure(tree, gh_repo, head, step.deadline))
     if not ci_part:
         return []
     step.items["ci"] = ci_part["ci"]
@@ -109,8 +102,7 @@ def measure_project(root: Path, budget: float) -> dict[str, Any]:
     notes = measure_repo.measure(tree, step, step.items)
     decl = check.load(main)
     state = check.branch_state(repo, check.declared_branches(decl), tree.remote)
-    ctx = MeasurementContext(gh_repo=_gh_repo(repo, tree.remote), head=state["head"])
-    notes += _ci_items(tree, step, ctx)
+    notes += _ci_items(tree, step, _gh_repo(repo, tree.remote), state["head"])
     if tree.skipped:
         notes.append(f"秘密の名前のファイルを開かなかった: {'・'.join(tree.skipped[:10])}")
     return {

@@ -320,10 +320,6 @@ def test_row_line_formats_each_kind():
 # --- 現状固定: cli._ci_items（I-022。CI の項目の入れ方と注記） ---
 
 
-def _ci_ctx() -> cli.MeasurementContext:
-    return cli.MeasurementContext(gh_repo="o/r", head="abc")
-
-
 def _patch_ci(monkeypatch, ci, calls: list) -> None:
     def fake_ci(tree, gh_repo, head, deadline):
         calls.append(("ci", tree, gh_repo, head))
@@ -340,7 +336,7 @@ def test_ci_items_current_behavior_with_ci_part(monkeypatch):
     _patch_ci(monkeypatch, ci_part, calls)
     step = cli._Steps(time.monotonic() + 60)
     tree = object()
-    assert cli._ci_items(tree, step, _ci_ctx()) == ["ci の注記"]
+    assert cli._ci_items(tree, step, "o/r", "abc") == ["ci の注記"]
     assert calls == [("ci", tree, "o/r", "abc")]
     assert step.items == {"ci": ci_part["ci"]}
 
@@ -348,7 +344,7 @@ def test_ci_items_current_behavior_with_ci_part(monkeypatch):
 def test_ci_items_current_behavior_without_ci_part(monkeypatch):
     _patch_ci(monkeypatch, None, [])
     step = cli._Steps(time.monotonic() + 60)
-    assert cli._ci_items(object(), step, _ci_ctx()) == []
+    assert cli._ci_items(object(), step, "o/r", "abc") == []
     assert step.items == {}
 
 
@@ -356,7 +352,7 @@ def test_ci_items_current_behavior_past_deadline_marks_unknown(monkeypatch):
     calls: list = []
     _patch_ci(monkeypatch, {"never": True}, calls)
     step = cli._Steps(time.monotonic() - 1)
-    assert cli._ci_items(object(), step, _ci_ctx()) == []
+    assert cli._ci_items(object(), step, "o/r", "abc") == []
     assert calls == []
     assert step.items == {"ci": unknown("時間切れ")}
 
