@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -26,6 +26,20 @@ from .test_crossreview_leftover_issues import FakeGitHub
 from .test_crossreview_run import PR, Fake, _run
 
 HEAD1, HEAD2, FIX1 = "a" * 40, "b" * 40, "c" * 40
+
+
+def _left_state() -> dict:
+    """直さずに残した指摘が 2 件（起票する種類を持つものと持たないもの）の状態ファイル。"""
+    row = {"by": "codex", "round": 2, "outcome": fin.UNRESOLVED, "severity": "major", "path": "a.py", "line": 5, "parked": True}
+    return {
+        "pr": 7,
+        "target_repo": "o/r",
+        "rounds": [{"round": 2, "head": HEAD2, "verdict": fin.CONVERGED}],
+        "findings": [
+            {**row, "id": "r2-1", "text": "古い行で値を落とす", "check": {"tracks": ["delivered"]}, "mvv": "Value 6"},
+            {**row, "id": "r2-2", "text": "古い行の書き方"},
+        ],
+    }
 
 
 def _state() -> dict:
@@ -193,7 +207,7 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
 
     from ndf.domains.crossreview import cli
 
-    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort(), lambda pr: FakePort()))
+    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort(), lambda pr: FakePort(), repo="o/r"))
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
@@ -222,12 +236,17 @@ def test_issue_3780_2_filing_needs_the_settings_of_the_target_repository(
 
 
 @pytest.mark.parametrize(
-    ("target", "repo_arg"), [pytest.param("acme/repo", "acme/other", id="differs"), pytest.param(None, "o/r", id="unconfirmed")]
+    ("state", "target", "repo_arg"),
+    [
+        pytest.param(_left_state, "acme/repo", "acme/other", id="differs"),
+        pytest.param(_left_state, None, "o/r", id="unconfirmed"),
+        pytest.param(_state, None, "o/r", id="unconfirmed-without-candidates"),
+    ],
 )
 def test_issue_3780_2_report_writes_nothing_without_a_matching_target(
-    tmp_path: Path, capsys, hub, target: Optional[str], repo_arg: str
+    tmp_path: Path, capsys, hub, state: Callable[[], dict], target: Optional[str], repo_arg: str
 ) -> None:
-    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": target})
+    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**state(), "target_repo": target})
     code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7", "--repo", repo_arg)
     assert (code != 0, got["cause"]["kind"]) == (True, "precondition") and "記録を公開していない" in got["cause"]["detail"]
     assert (hub.made, hub.comments, hub.port.opened, hub.port.resolved) == (0, [], [], [])
@@ -293,16 +312,31 @@ def test_issue_3780_2_run_fills_an_unconfirmed_repository(
     assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
 
 
-def test_issue_3780_2_run_does_not_bind_saved_rounds_to_the_read_repository(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
-    """対象のリポジトリの無い保存済みのラウンドは、同じブランチと head でも別のリポジトリのものかもしれないので、結び直さずに止める。"""
+@pytest.mark.parametrize("readable", [True, False])
+def test_issue_3780_2_run_does_not_bind_saved_rounds_to_the_read_repository(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, hub, readable: bool
+) -> None:
+    """対象のリポジトリの無い保存済みのラウンドは、同じブランチと head でも別のリポジトリのものかもしれないので、PR を読めるかに
+    関係なく、結び直さずに止める。保存先は残し、別の保存先を案内する。"""
     read = threads.ReadPr(f"other/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "other/r")
-    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read if readable else None)
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     ref = store.state_pr(fake.state_dir, PR)
     store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "head": read.head}]})
     code, got = _run(capsys, monkeypatch, fake, wt)
-    assert code != 0 and got["cause"]["kind"] == "precondition" and "target_repo" in got["cause"]["detail"]
-    assert store.state_repo(ref) is None and not fake.calls and hub.comments == []
+    assert code != 0 and got["cause"]["kind"] == "precondition"
+    assert "target_repo" in got["cause"]["detail"] and "別の --state-dir" in got["cause"]["detail"]
+    assert store.state_repo(ref) is None and not fake.calls and hub.comments == [] and ref.path.is_file()
+
+
+def test_issue_3780_2_run_publishes_nothing_when_the_pr_was_not_read(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR を読めずに対象の無いまま終えた run は、起票の候補が無くても公開せず、打ち直しの report でなく別の保存先を案内する。"""
+    monkeypatch.setattr(hub.port, "read_pr", lambda: None)
+    fake = Fake(tmp_path / "st", {"codex": [["一つ目"]], "kiro": [[]]}, decide=lambda fid: None)
+    _, got = _run(capsys, monkeypatch, fake, wt, "--max-rounds", "1")
+    assert fake.calls and (hub.comments, hub.port.opened) == ([], [])
+    [warning] = [w for w in got["warnings"] if "target_repo" in w]
+    assert "別の --state-dir" in warning and "cross-review report" not in warning
 
 
 def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -649,20 +683,6 @@ def test_issue_4363_a_lowered_finding_shows_the_raised_severity_and_only_the_fix
 
 
 # --- 直さずに残した指摘（#3780） ---------------------------------------------------------------
-
-
-def _left_state() -> dict:
-    """直さずに残した指摘が 2 件（起票する種類を持つものと持たないもの）の状態ファイル。"""
-    row = {"by": "codex", "round": 2, "outcome": fin.UNRESOLVED, "severity": "major", "path": "a.py", "line": 5, "parked": True}
-    return {
-        "pr": 7,
-        "target_repo": "o/r",
-        "rounds": [{"round": 2, "head": HEAD2, "verdict": fin.CONVERGED}],
-        "findings": [
-            {**row, "id": "r2-1", "text": "古い行で値を落とす", "check": {"tracks": ["delivered"]}, "mvv": "Value 6"},
-            {**row, "id": "r2-2", "text": "古い行の書き方"},
-        ],
-    }
 
 
 def test_issue_3780_2_the_table_and_the_list_show_how_a_finding_was_left() -> None:

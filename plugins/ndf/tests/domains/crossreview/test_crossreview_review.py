@@ -341,7 +341,10 @@ def test_open_threads_keep_only_our_replies_other_than_the_first_comment() -> No
 
 def _state_dir(tmp_path: Path) -> Path:
     state_dir = tmp_path / "st"
-    store.write_object(store.state_pr(state_dir, 7).path, {"pr": 7, **_data(_finding("r1-1", 1, "a.py", 3), _finding("r1-2", 1, "a.py"))})
+    store.write_object(
+        store.state_pr(state_dir, 7).path,
+        {"pr": 7, "target_repo": "o/r", **_data(_finding("r1-1", 1, "a.py", 3), _finding("r1-2", 1, "a.py"))},
+    )
     return state_dir
 
 
@@ -367,7 +370,9 @@ def test_concurrent_reports_on_one_pr_write_each_thread_once(tmp_path: Path) -> 
             return super().open_threads()
 
     state_dir, port = _state_dir(tmp_path), Racing()
-    hub = cli.Hub(lambda pr, body, previous: "https://github.com/o/r/pull/7#issuecomment-1", port.at, port.at, publishing=publishing)
+    hub = cli.Hub(
+        lambda pr, body, previous: "https://github.com/o/r/pull/7#issuecomment-1", port.at, port.at, publishing=publishing, repo="o/r"
+    )
     runs = [threading.Thread(target=cli._post_report, args=(state_dir, 7, None, (), lambda: hub)) for _ in range(2)]
     for run in runs:
         run.start()
@@ -387,7 +392,7 @@ def test_report_is_not_written_without_the_publishing_lock(tmp_path: Path) -> No
         yield
 
     port = FakePort()
-    hub = cli.Hub(lambda pr, body, previous: "url", port.at, port.at, publishing=busy)
+    hub = cli.Hub(lambda pr, body, previous: "url", port.at, port.at, publishing=busy, repo="o/r")
     with pytest.raises(cli.ReportFailed):
         cli._post_report(_state_dir(tmp_path), 7, None, (), lambda: hub)
     assert port.opened == []
@@ -399,7 +404,8 @@ def test_report_writes_occurrences_of_older_findings_before_the_threads(tmp_path
 
     state_dir = tmp_path / "st"
     path = store.state_pr(state_dir, 7).path
-    store.write_object(path, {"pr": 7, "rounds": [{"round": 1, "head": HEAD1}], "findings": [_finding("r1-1", 1, "a.py", 3)]})
+    state = {"pr": 7, "target_repo": "o/r", "rounds": [{"round": 1, "head": HEAD1}], "findings": [_finding("r1-1", 1, "a.py", 3)]}
+    store.write_object(path, state)
     seen: list = []
 
     class Peek(FakePort):
@@ -408,6 +414,6 @@ def test_report_writes_occurrences_of_older_findings_before_the_threads(tmp_path
             return super().open_review(commit, comments)
 
     port = Peek()
-    cli._post_report(state_dir, 7, None, (), lambda: cli.Hub(lambda pr, b, p: "url", port.at, port.at))
+    cli._post_report(state_dir, 7, None, (), lambda: cli.Hub(lambda pr, b, p: "url", port.at, port.at, repo="o/r"))
     assert seen and seen[0] == store.read_object(path)["findings"][0]["occurrence"]
     assert seen[0] in port.batches[0][1][0].body

@@ -186,6 +186,15 @@ def test_issue_3780_matches_finding_needs_the_mark_and_the_url_outside_quotes() 
 
 
 @pytest.mark.parametrize(
+    ("wrap", "wanted"),
+    [("{}\n\n書き足し", True), ("> {}", False), ("```\n{}\n```", False), ("`{}`", False)],
+)
+def test_issue_3780_names_finding_ignores_a_quoted_mark(wrap: str, wanted: bool) -> None:
+    body = wrap.format(leftover_decide.issue_mark("abc"))
+    assert leftover_decide.names_finding(_listed(body), "abc", "本文") is wanted
+
+
+@pytest.mark.parametrize(
     ("author", "author_id", "association", "permission", "wanted"),
     [
         ("x", 4, "OWNER", "none", True),
