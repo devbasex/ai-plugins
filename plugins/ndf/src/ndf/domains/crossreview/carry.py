@@ -51,16 +51,16 @@ def reader(cfg: RunConfig, reader_for: Optional[ReaderFor], warnings: list[str])
 
 
 def read_prior(prs: Optional[threads.Reader], warnings: list[str]) -> Prior:
-    """引き継ぎの確かめに要るもの（PR のスレッドと PR コメント。1 回の起動で 1 回だけ読む）。読めなければ注意に載せて空。"""
+    """引き継ぎの確かめに要るもの（PR のスレッドと PR コメント。1 回の起動で 1 回だけ読む）。読めなければ注意に載せて空。
+    読んだ PR の識別は一覧の最初の応答で分かるので、一覧の続きを読めなくても返す（#3780）。"""
     if prs is None:
         return Prior()
-    read = None
     try:
         left = list(prs.open_threads())
-        read = prs.read_pr()
     except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す
         warnings.append(f"PR のスレッドを読めない（前の実行が残した未解決の指摘を引き継がない）: {exc}")
         left = []
+    read = prs.read_pr()
     try:
         comments = list(prs.comments())
     except Exception as exc:  # noqa: BLE001 ネットワーク: 読めなくてもレビューは進め、注意に残す

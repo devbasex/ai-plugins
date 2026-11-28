@@ -439,3 +439,22 @@ def test_the_port_reports_the_pull_request_read_with_the_threads() -> None:
     assert port.read_pr() is None
     port.open_threads()
     assert port.read_pr() == threads.ReadPr("o/r#9", "feat/x", "h0", "fork/r")
+
+
+def test_the_pull_request_stays_identified_when_a_later_thread_page_fails() -> None:
+    """一覧の続きを読めなくても、最初の応答で分かった PR は返し、一覧の失敗は注意にする。"""
+    page = {"pageInfo": {"hasNextPage": True, "endCursor": "c1"}, "nodes": []}
+    pull = {"baseRefName": "main", "headRefName": "feat/x", "headRefOid": "h0", "reviewThreads": page}
+    pull["headRepository"] = {"nameWithOwner": "o/r"}
+
+    def repository(query: str, variables: dict) -> dict:
+        if "c1" in variables.values():
+            raise RuntimeError("続きを読めない")
+        return {"pullRequest": pull}
+
+    port = threads.GitHubPort(SimpleNamespace(repo="o/r", repository=repository), None, 9, RuntimeError)
+    port.comments = lambda: []
+    warnings: list[str] = []
+    prior = carry.read_prior(port, warnings)
+    assert prior.pr == threads.ReadPr("o/r#9", "feat/x", "h0", "o/r") and prior.threads == []
+    assert len(warnings) == 1 and "続きを読めない" in warnings[0]
