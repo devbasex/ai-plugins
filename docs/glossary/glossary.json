@@ -8625,6 +8625,19 @@
       "context": "ndf-agent-cli",
       "meaning": "同じ失敗への 2 回目以降の起動で、モデルか effort を 1 つ上にすること",
       "source": "docs/specifications/ndf-launch-model-experiment.md"
+    },
+    {
+      "term": "消えたレーン",
+      "context": "ndf-parallel",
+      "meaning": "実行中の作業（スプリントか開発ループ）を持ち、ラッパーが動いていないと確かめられたレーン。ラッパーの一覧を読めないレーンは消えたとみなさない",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
+    },
+    {
+      "term": "再開の指示",
+      "code": "row_recovery_requested",
+      "context": "ndf-parallel",
+      "meaning": "ndf lanes start と ndf lanes run の起動し直しが、実行中の作業の記録へ書く事象。耐久ワークフローは、指示のあった作業のレーンが消えていれば 1 回だけ起動し直す",
+      "source": "plugins/ndf/skills/development-workflow/references/parallel.md"
     }
   ]
 }

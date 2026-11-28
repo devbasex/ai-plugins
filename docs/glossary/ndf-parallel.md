@@ -119,3 +119,5 @@
 | 起動の許可 | — | 耐久ワークフローが行を始める起動の前に、マシンの起動の排他の中で稼働中の数を数え、上限に収まるときだけ起動させる判定。収まらなければ起動の待ちに置く | — | — | `docs/specifications/ndf-parallel-machine-plan-limit.md` |
 | 変えたファイル | `changed_files` | 単位の PR の差分に現れたファイル。計画を進める耐久ワークフローが拾ってレーンの行に記録し、重なりの知らせだけに使う。レーンの触る場所には足さない。計画の検査（I13）では断らない | — | — | — |
 | 重なりの知らせ | `touches_overlap` | 同じ時間帯に動く 2 本のレーンの触る場所か変えたファイルが重なったことを、オーガナイザーへ伝えるリクエスト。別の計画のレーンとの重なりも含む | — | — | — |
+| 消えたレーン | — | 実行中の作業（スプリントか開発ループ）を持ち、ラッパーが動いていないと確かめられたレーン。ラッパーの一覧を読めないレーンは消えたとみなさない | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
+| 再開の指示 | `row_recovery_requested` | ndf lanes start と ndf lanes run の起動し直しが、実行中の作業の記録へ書く事象。耐久ワークフローは、指示のあった作業のレーンが消えていれば 1 回だけ起動し直す | — | — | `plugins/ndf/skills/development-workflow/references/parallel.md` |
