@@ -96,6 +96,7 @@ flowchart TB
 | I9 | スプリント実行計画 | スプリントの課題はすべて、モードで作業に書けて親がまだ終えていない種類ごとに、中止していない作業に 1 回入るか、`excluded` に理由つきで載る | `plan set` が断る。中止の後に埋まっていない課題があれば、区間を終えずに知らせる |
 | I10 | スプリント実行計画 | 依存の組み合わせは 2 つだけである。設計の作業は設計の作業を「収束」で待つ。実装の作業は設計か実装の作業を「マージ」で待つ | `plan set` と `render` が断る |
 | I11 | スプリント実行計画 | モードに無い作業は書けない。`light`・`operation` は設計の作業を持たない。`operation` の実装の作業は 1 つだけである | `plan set` が断る |
+| I12 | スプリント実行計画 | 分け方の承認が要るモードでは、実装の作業の課題はすべて、親の承認の記録か、中止していない設計の作業が持つ | `plan set` が断る |
 
 ### ドメインイベント
 
@@ -112,7 +113,7 @@ flowchart TB
 
 | 要素 | 責務 |
 | --- | --- |
-| スプリント実行計画の形と検査（新設） | `contracts/workflow/sprint-plan.schema.json` と、I1〜I4・I9〜I11 を確かめる純粋な関数 |
+| スプリント実行計画の形と検査（新設） | `contracts/workflow/sprint-plan.schema.json` と、I1〜I4・I9〜I12 を確かめる純粋な関数 |
 | 並列開発計画の形（変更） | `parallel-plan.schema.json` を `version` 2 にし、理由の欄と依存の形を持たせる |
 | 計画の描画（新設） | 2 つの計画の文書（JSON と同じ形の値）と状態から Markdown を作る純粋な関数 1 つ |
 | 計画を操作するコマンド（新設・変更） | `ndf progress plan set・show・render`、`ndf lanes render`、`ndf lanes set` の依存の理由 |
@@ -120,7 +121,7 @@ flowchart TB
 | スプリントの耐久ワークフロー（新設） | `ndf progress works`。読み直し・子の作成と起動・知らせの記録を耐久ステップで打つ |
 | 工程の定義（変更） | 工程に「作業の種類」（`design`・`impl`）の属性を持たせる。子はその工程だけを持つ |
 | 工程を流す仕組み（変更） | 親は作業の工程の区間で耐久ワークフローに任せ、`wait` は知らせで戻る。子は進捗記録を書かない |
-| 実装の単位の流し（変更） | 子はレビューの単位ごとに、ブランチを切る・実装・単位の PR・レビュー・スプリントブランチへのマージを行う。親はスプリントの PR を開き、`gathered` を記録する。開始前の確かめは、単位を読んだ直後に計画の要否を返せるようにする |
+| 実装の単位の流し（変更） | 子はレビューの単位ごとに、ブランチを切る・実装・単位の PR・レビュー・スプリントブランチへのマージを行う。親はスプリントの PR を開き、`gathered` を記録する。開始前の確かめは、単位の並びを確定した直後に計画の要否を返せるようにする。分け方の承認の照合は、親の定義と、課題を覆う承認の記録で行う |
 | 承認ゲートとレーンの接続（変更） | 子の承認ゲートから、親を辿ってレーンの行を引く |
 | 手順書と用語集（変更） | 呼び名を入れ替え、手で表を書いて起動する手順を消す |
 
@@ -196,6 +197,7 @@ flowchart LR
 | --- | --- |
 | スプリントを作るときの文書の `sprint_plan_rule`（書き手 `ndf progress new`。値は `1`） | このスプリントは実行計画の要否を判定する。この欄の無いステートマシン（更新の前に作ったもの）は、今のとおり 1 本で流し、計画を求めない |
 | スプリントの事象 `plan_set`（書き手 conductor） | 計画の文書の全体と変えた理由。今の計画は最後の `plan_set` |
+| スプリントの事象 `plan_required`（書き手 `ndf progress next`） | 計画が要って止まったときに検査した入力と結果（「計画が要るとき」） |
 | スプリントの事象 `work_started`（書き手 workflow） | 作業の名前・子のステートマシンの ID・判定に使った `plan_set` の事象の番号・「収束」で待った先の設計 PR の head |
 | スプリントの事象 `work_rereview`（書き手 workflow） | レビューを流し直す作業の名前・待った先・前の head と今の head |
 | スプリントの事象 `work_notice`（書き手 workflow） | 作業の名前（設計の承認待ちは複数）・知らせの種類（承認待ち・失敗・中止・実装の待ち・全作業の終わり）・理由・子の事象の番号 |
@@ -225,9 +227,9 @@ flowchart LR
 
 | コマンド | 引数 | 返り・失敗 |
 | --- | --- | --- |
-| `ndf progress plan set <ステートマシン> <ファイル> --reason <理由>`（新設） | 計画の JSON の全体 | 検査を通れば `plan_set` を書く。形か I1〜I4・I9〜I11 に当たれば、当たった理由を並べて断り、何も書かない |
+| `ndf progress plan set <ステートマシン> <ファイル> --reason <理由>`（新設） | 計画の JSON の全体 | 検査を通れば `plan_set` を書く。形か I1〜I4・I9〜I12 に当たれば、当たった理由を並べて断り、何も書かない |
 | `ndf progress plan show <ステートマシン>`（新設） | — | 今の計画の JSON。直して `set` へ渡せる |
-| `ndf progress plan render <ステートマシンかファイル>`（新設） | — | Markdown。文書だけで確かめられる検査（形・I1・I2・I10）に当たれば、作らずに理由を返す。スプリントの課題やモードが要る検査（I3・I4・I9・I11）は `plan set` が行う |
+| `ndf progress plan render <ステートマシンかファイル>`（新設） | — | Markdown。文書だけで確かめられる検査（形・I1・I2・I10）に当たれば、作らずに理由を返す。スプリントの課題やモードが要る検査（I3・I4・I9・I11・I12）は `plan set` が行う |
 | `ndf lanes render <計画名かファイル>`（新設） | — | Markdown。形・I7・I8 に当たれば、作らずに理由を返す。状態から作るときは I8 を当てず、理由の無い欄は「記録なし」にする |
 | `ndf lanes status <計画>`（変更） | — | 今の出力はレーンの `after` の宣言を出す。この設計では、各レーンが今待っている依存先（満たしていない `after`）を足す |
 | `ndf progress works <ステートマシン>`（新設。内部） | 下の「耐久ワークフローの起動と回復」のコマンドが切り離して起動する | 同じスプリントで 1 本に限る |
@@ -260,22 +262,46 @@ flowchart LR
 | `light` | 設計 | 実装 | — | 実装（このモードに「計画」は無い） |
 | `operation` | 設計 | 計画 | — | 計画 |
 
-**課題が 1 件のスプリント**は、親が工程「実装」の手前まで今のとおり流し、実装計画の単位の定義を読んだ結果だけで判定する。工程「計画」の有無では判定しない。`light` には「計画」が無いが、工程「設計」が書いた実装計画に単位を定義できる。
+**課題が 1 件のスプリント**は、この設計では、親が工程「実装」の手前まで今のとおり流し、工程「実装」の開始前の確かめ（`units_invoke.prepare`）が確定した実行対象の単位の数で判定する。工程「計画」の有無と、実装計画の単位の見出しの有無では判定しない。`light` には「計画」が無いが、工程「設計」が書いた実装計画に単位を定義できる。
 
-判定は、今の工程「実装」の開始前の確かめ（`units_invoke.prepare`）の 1 回の呼び出しの中で行う。この確かめはリモートの取得、課題本文の GitHub API での読み取り、スプリントブランチの push、経路のファイル（`units.json`）の書き込みをするので、判定のために別には呼ばない。
+開始前の確かめは [#3702](https://github.com/devbasex/ai-plugins/issues/3702) の実装が入った後の形を使い、次の順で行う。
 
-- 単位を読んだ直後、push の前に判定する。計画が要れば、push も書き込みもせずに止まる
-- 要らなければそのまま続き、実装の開始はこの回の `units.json` を使う。取得・API の読み取り・push の回数は今と同じである
-- 止まった後に `plan set` すると、子が同じ確かめを改めて行う。取得と API の読み取りが 1 回増えるのは、止まった場合だけである
+1. 分け方の承認（設計承認ゲートで、単位の分け方と実行対象を人が承認すること）が要るかを、スプリントの保存した定義とモードで判定する
+2. 承認が要れば、承認の記録と今の中身を照合する。記録が無いか中身が違えば止まる。承認の対象だった単位の欄とファイルが両方消えていても、ここで止まる
+3. 照合を通った実行対象（承認が要らなければ、今の単位のファイルか実装計画）から、単位の並びを確定する
+4. 確定した単位の数で、計画の要否を判定する
 
 | 確かめの結果 | `next` の振る舞い |
 | --- | --- |
-| どの実装計画にもレビューの単位の見出しが無い（正常な省略。実装計画を省いた場合を含む） | 計画を求めず、今の「`impl` を 1 本」の経路で流す |
-| 見出しがあり、読み取った単位が 1 つ | 計画を求めず、今の単位の経路で流す |
-| 見出しがあり、読み取った単位が 2 つ以上 | `plan set` を示して止まる |
-| 今の確かめがエラーを返す | そのエラーを返す。計画は求めない |
+| 確かめがエラーを返す（承認の記録が無い、照合で違う、単位を読めないなど） | そのエラーを返す。計画は求めない |
+| 直接の経路（承認が要らず、どの課題にも単位の欄もファイルも無い） | 計画を求めず、今の「`impl` を 1 本」の経路で流す |
+| 確定した単位が 1 つ | 計画を求めず、今の単位の経路で流す |
+| 確定した単位が 2 つ以上 | `plan set` を示して止まる |
 
-停止の条件は今の確かめに足さない。たとえば実装計画に未コミットの変更があっても、どこにも単位の見出しが無ければ、今のとおり通る。
+この判定は開始前の確かめの 1 回の呼び出しの中で行う。この確かめはリモートの取得、課題本文の GitHub API での読み取り（承認が要るスプリントでは読まず、記録の数を使う）、スプリントブランチの push、経路のファイル（`units.json`）の書き込みをするので、判定のために別には呼ばない。
+
+- 単位の並びを確定した直後、push の前に判定する。計画が要れば、push も `units.json` の書き込みもせずに止まる
+- 要らなければそのまま続き、実装の開始はこの回の `units.json` を使う。取得・API の読み取り・push の回数は今と同じである
+
+計画が要って止まるときは、検査した入力と結果をスプリントの事象 `plan_required` に書く。
+
+| 書くもの | 中身 |
+| --- | --- |
+| 入力 | 課題の並び、読んだファイル（実装計画・単位のファイル・設計文書・`.ndf/project.json`）のパスと blob の ID、承認の回答の事象の番号（承認が要るとき） |
+| 結果 | 課題ごとの受け入れ条件の数、単位の並び |
+
+`plan set` の後は、実装の作業の子が同じ確かめを呼び、`plan_required` の入力と照らす。
+
+| 子が打つもの | 条件 | 止まった場合に増える回数 |
+| --- | --- | --- |
+| リモートの取得 | 必ず打つ。リモートが変わったかは取得しないと分からない | 1 回 |
+| 承認の照合と単位の検査 | 入力が同じなら `plan_required` の結果を使う。違えばやり直す | 手元の git の読み取りだけ |
+| 課題本文の API の読み取り | 承認が要らず、入力が違うときだけ読む | 入力が同じなら 0 回、違えば 1 回 |
+| push | 止まった回は打っていない | 0 回 |
+
+入力はコミットでなくファイルの中身で比べる。実装の作業が始める手前で起点を取り込んでも、上のファイルが同じなら結果を使える。止まった後に課題の本文だけを直した場合は、受け入れ条件の数を読み直さない。
+
+計画の要否による停止を追加する。実装計画の未コミットなど、既存の入力検査の停止条件は変えない。たとえば承認が要らないスプリントで実装計画に未コミットの変更があっても、手元の変更を含めてどこにも単位の欄もファイルも無ければ、今のとおり通る。
 
 **親が終えた工程は、作業に持たせない。** 子から除くのは、モードに無い工程と、親が実際に終えた工程だけである。子の文脈には、親の工程の出力（作業場所・スプリントブランチ・設計 PR など）を引き継ぐ。
 
@@ -355,16 +381,30 @@ sequenceDiagram
   - 子は自分の設計承認ゲートで待つ。耐久ワークフローは、承認の回答なしに進める設計の作業が無くなった時点で、待っている子と設計 PR を 1 件の知らせにまとめる
   - 問うのはスプリントの conductor で 1 回、回答は子ごとに `ndf answer <子の ID>` で書き、承認で見た設計 PR の head に結び付ける
   - 設計の作業どうしは「収束」でだけ待つので（I10）、依存があっても承認は 1 回にまとまる。承認の後に足した設計の作業は、今と同じく改めて承認する
+- **分け方の承認の照合**: 下の「分け方の承認の照合」で行う
 - **同時実行数**: 子の工程が実際に流れている数を数える。承認待ち・失敗の子は数えないので、依存の無い作業は進む。上限は計画の `max_parallel` である。無ければ上限の設定（`contracts/limits/sprint-run.works.json`。値は 3）を使う
   - 回答や `retry` の後の再開も、同じ耐久ワークフローが空きを確かめてから打つ。空きが無ければ待たせ、再開する作業を未着手の作業より先に流す
 - **失敗**: 止まった子に依存する作業は始めない。依存の無い作業は進め、知らせは 1 回だけ書く
 - **流す作業が無いとき**: 全作業が承認待ちや失敗でも、耐久ワークフローは抜けずに読み直しを続ける。抜けるのは、区間が終わったときとスプリントを中止したときだけである
-  - 回答・`retry`・`plan set` は事象に残るので、次の読み直しで拾う。ワークフローの終了と回答が行き違うことは無い
-- **読み直しの時機と費用**: 耐久ワークフローは、`ndf lanes run` と同じ 60 秒ごとに読み直す。人の回答を待つ間も、#4050 の実装の待ちの間も同じである
-  - 間隔は `contracts/limits/sprint-run.poll.json` が持つ。待つ間は耐久の待ち（`DBOS.sleep`）で眠り、コマンドからの通知は使わない
-  - 回答・`retry`・`finish`・`cancel`・`plan set`・子の終わりは、次の読み直し（60 秒以内）で反映する
-  - 1 周で読むのは、親の事象を 1 回と、始めて終わっていない作業 1 つにつき子の事象を 1 回である。#4050 の実装の待ちがあれば、並列開発計画の状態を 1 回足す。1 周ごとに耐久の記録への書き込みも残る
-  - 読み直しは LLM も GitHub の API も呼ばない。何も進まない間は 1 時間に 60 周である
+  - 回答・`retry`・`plan set` は事象に残るので、合図を受けた読み直しで拾う。ワークフローの終了と回答が行き違うことは無い
+- **読み直しの時機と費用**: この設計では、耐久ワークフローは、合図が届くか、読み直しの間隔が過ぎると読み直す。人の回答を待つ間も、#4050 の実装の待ちの間も同じである
+  - 合図は、スプリントの作業の保存先に置くファイルの更新である。親か子の事象を書く処理（`next`・`answer`・`retry`・`finish`・`cancel`・`plan set` と、子の工程を流す仕組み）が、書き込みのコミットの後に更新する
+  - 耐久ワークフローは、合図のファイルの更新時刻を覚えてから状態を読む。待ちは耐久ステップ 1 つで、更新時刻が変わるか間隔が過ぎるまで、1 秒ごとにファイルの属性を確かめる。この確認は DB を読まず、記録も書かない
+  - 間隔は 60 秒から始める。合図が無く、読んだ事象の番号が前の周と同じで、打つ手も無い周が終わるたびに 2 倍にし、600 秒で止める。どれか 1 つでも当たらなければ 60 秒へ戻す
+  - 値（最初と最大の間隔・属性を確かめる間隔）は `contracts/limits/sprint-run.poll.json` が持つ
+  - 合図を更新する前にコマンドが落ちた場合は、次の読み直し（600 秒以内）で反映する
+  - 1 周で読むのは、親の事象を 1 回と、始めて終わっていない作業 1 つにつき子の事象を 1 回である。#4050 の実装の待ちがあれば、並列開発計画の状態を 1 回足す。耐久の記録への書き込みは、1 周ごとに読みと待ちの 2 件である
+  - 読み直しは LLM も GitHub の API も呼ばない
+
+始めて終わっていない作業が W 本のとき、状態が動かない 1 時間の回数は次のとおりである。
+
+| 回数 | 固定の 60 秒 | 600 秒まで延びた後 |
+| --- | --- | --- |
+| 読み直しの周 | 60 | 6 |
+| 親と子の事象の読み取り | 60×(1+W) | 6×(1+W) |
+| 並列開発計画の状態の読み取り（#4050 の実装の待ちがあるとき） | 60 | 6 |
+| 耐久の記録への書き込み | 120 | 12 |
+
 - **耐久ワークフローの起動と回復**: `next`・`wait`・`answer`・`retry`・`finish`・`cancel`・`plan set` は、区間の途中で耐久ワークフローが動いていなければ起動する
   - conductor が `wait` で待つ間に落ちれば、`wait` が起動し直す。利用者の操作は要らない
   - 判定に要る状態はすべて事象にあり、完了した子は流さない
@@ -373,12 +413,39 @@ sequenceDiagram
   - 当てるのは、フェーズが `implement` の工程を持つ作業を始める手前である。作業の種類ではなく工程の定義のフェーズで決めるので、「計画」が設計のフェーズへ移っても追える
   - 判定と記録は #4050 の `rules.implementation_wait`・`lane.begin_implementation` を使う。待つ間も、`implement` の工程を持たない作業は流し続ける
   - 進められる作業がほかに無くなった時点で、#4050 の待ち（`row_held` と `lane_held`）を 1 回書き、`wait` が conductor へ返す。ほかの作業が流れる間は行の待ちを書かないので、マシンの本数の数え方は崩れない
-  - 待ちが解けた後は、#4050 の起動し直し（耐久ワークフロー `ndf lanes run` が conductor を起動し、`next` を打つ）を使う。`next` は `ndf progress works` が止まっていれば起動するだけで、動いていれば何も送らない。実装の作業は、`ndf progress works` の次の読み直し（60 秒以内。起動し直した場合は最初の読み直し）で始まる
+  - 実装の作業を始めてよいのは、レーンの行に実装の開始の記録（`row_entered`（`implement`））があるときだけである。待つ先が無くなったことだけでは始めない。#4050 の待ちを書いた行では、この記録は conductor の `next` が、待つ間に変わったファイルの確認を済ませて書く
+  - 待ちが解けた後は、#4050 の起動し直し（耐久ワークフロー `ndf lanes run` が conductor を起動し、`next` を打つ）を使う。`next` は `ndf progress works` が止まっていれば起動し、動いていれば合図を更新する。実装の作業は、合図を受けた読み直しですぐに始まる。`ndf progress works` はスプリントに 1 本で、作業の開始は `work_started` の確かめを通るので、同じ作業は二重に始まらない
 - **閉じる**: 全作業の後、スプリントの変更をベースブランチへ入れる PR（スプリントの PR。スプリントブランチを作らない進め方では最後にマージした単位の PR）がマージされた時点で、描画した Markdown をその PR へコメントする
   - マージするのが工程「Pull Request」でもリリースでも、工程を終えるごとの進捗記録の同期が PR の状態を読んで投稿する。振り返りより前に済む
   - コメントには隠しの目印（スプリントの ID）を入れる。投稿の前に PR のコメントを読み、目印があれば足さずにそのコメントを直す。投稿の後の記録で落ちても二重にならない
   - 書けなければ警告を返し、`ndf progress resync` が書き直す
   - 計画は事象に残るので消えない
+
+### 分け方の承認の照合
+
+#3702 の開始前の確かめは、流しているステートマシンの定義・回答・課題を読む。子は担当の工程と課題しか持たないので、そのまま当てると実装の作業では「承認は要らない」になり、照合が省かれる。この設計では、次のものを読む。
+
+| 読むもの | 取得元 |
+| --- | --- |
+| 承認の要否 | スプリント（親）の保存した定義とモード。子の定義からは判定しない |
+| 承認の記録 | 課題ごとに、その課題の設計承認ゲートを流したステートマシンの最新の承認の回答。親が工程「ドキュメントレビュー」を終えていれば親、そうでなければ、その課題を持つ中止していない設計の作業の子 |
+| 記録と比べる課題 | 記録が持つ課題の全体。実装の作業の課題には絞らない |
+
+設計の作業の子は、自分の課題の承認の記録を #3702 の形で作る。承認した文書の取り込み（`design-sync`）と照合は、スプリントの作業場所で行う。
+
+実装の作業の子は、開始の手前で次の順に照合する。どれかに当たらなければ、始めずに理由を返す。承認が要らないモードでは 1〜3 を行わない。
+
+1. 親の今の課題が、どれも計画の作業か `excluded` にある（I9）。承認の後に増えた課題をここで拾う
+2. 自分の課題をすべて覆う承認の記録を集める。記録の無い課題があれば始めない
+3. 集めた記録ごとに、#3702 の 4 つの比較をする。課題の一覧は、記録を作ったステートマシンの保存した課題と比べる。単位のファイル・扱いと統合先・省いた課題は、記録の課題の全体で比べる。記録の HEAD がスプリントブランチに届いていることも、記録ごとに確かめる
+4. 通った記録の単位から、自分の課題の単位を取り出して流す。上限と受け入れ条件の数は、その単位を覆う記録の値を使う。単位の起動の記録（`units_guard`）にも、その記録と回答の番号を書く
+
+設計と実装で課題の分け方は違ってよい。たとえば 1 つの設計の作業が課題 101・102 を承認し、実装の作業が 101 と 102 に分かれる場合、2 つの子は同じ記録の全体を照らし、自分の課題の単位だけを流す。逆に 101 と 102 を別々に設計して 1 つの作業で実装する場合は、子が 2 つの記録を順に照らす。次の分け方は流せないので、始めずに止まる。
+
+- 1 つの単位が、2 つの実装の作業の課題にまたがる
+- 単位が先に要る単位を別の実装の作業が持ち、その作業を「マージ」で（直接か間接に）待っていない
+
+作業がすべて終わった後に親が通す「実装」の工程も、親の定義で承認の要否を決め、スプリントの課題を覆う記録の全部を同じ順で照らす。親自身の承認の記録が無いことだけでは止めない。
 
 ### レーンのスプリントとの接続
 
@@ -460,14 +527,15 @@ sequenceDiagram
 ### 決定 6: 手で作業を選ばずに進むように、スプリントの耐久ワークフローを DBOS で足す
 
 - **質問**: 次の作業を誰が起動するか
-- **選んだ案**: 並列開発計画の耐久ワークフローと同じ形（判定は純粋な関数、読みと起動は耐久ステップ）で `ndf progress works` を足す。`next` などのコマンドが切り離して起動し、区間が終われば抜ける。常駐は置かない
+- **選んだ案**: 並列開発計画の耐久ワークフローと同じ形（判定は純粋な関数、読みと起動は耐久ステップ）で `ndf progress works` を足す。`next` などのコマンドが切り離して起動し、区間が終われば抜ける。常駐は置かない。事象を書いた側はファイルの合図で起こし、状態が動かない間は読み直しの間隔を 60 秒から 600 秒まで延ばす（「処理の流れ」）
 - 採らなかった案: 流す作業が無ければ抜け、回答の後に起動し直す（終了の直前に届いた回答を取りこぼす競合ができ、起動し直す担い手も要る）
-- 採らなかった案: 状態を書いた側が耐久の通知（`durable.send`／`recv`）で起こす。SQLite の保存先では、DBOS は `recv` が待つ間 0.2 秒ごと（上限の設定 `durable.poll`）に表を読んで通知を届ける。1 時間に約 18,000 回の読み取りになり、60 秒ごとの読み直し（1 時間に 60 周）より多い
-- 採らなかった案: 回答待ちの間は読み直しの間隔を 600 秒に延ばす（読み直しは 1 時間に 54 周減るが、回答を記録してから再開まで最大 10 分かかる。減るのは手元の DB の読み取りだけで、LLM と API の費用は変わらない）
+- 採らなかった案: 状態を書いた側が耐久の通知（`durable.send`／`recv`）で起こす。SQLite の保存先では、DBOS は `recv` が待つ間 0.2 秒ごと（上限の設定 `durable.poll`）に表を読んで通知を届ける。1 時間に約 18,000 回の読み取りになり、ファイルの合図と読み直し（状態が動かない間は 1 時間に 6 周）より多い
+- 採らなかった案: 合図を持たず 60 秒ごとに読み直す（状態が動かない間も 1 時間に 60 周の読み取りと 120 件の耐久の記録が続き、待ちが解けても最大 60 秒は作業が始まらない）
+- 採らなかった案: 合図を持たず間隔だけを延ばす（回答を記録してから再開まで最大 10 分かかる）
 - 採らなかった案: `ndf lanes run` が全レーンのスプリントの中まで起動する（スプリントを進めるのはレーンの conductor である。また、計画の外のスプリントには計画の耐久ワークフローが無い）
 - 採らなかった案: DBOS のキューの同時実行の指定で数を絞る（承認待ちの作業を数から外す条件と、依存の判定を持てない）
 - 採らなかった案: Prefect・Airflow・Temporal を入れる（それぞれが実行の状態を持つので、依存に既にある DBOS と事象の記録に重なる）
-- **代償**: 耐久ワークフローが 2 種類になる
+- **代償**: 耐久ワークフローが 2 種類になる。ファイルの合図は自分で持ち、事象を書く処理が更新する
 - 作り方: ライブラリやサービスを使う・自前で作る
 - 比べた候補: LIB1 / LIB4 / LIB5 / LIB6 / PRD2 / PRD4
 - 根拠: Value 3 / Value 12（MVV バージョン 11）
@@ -590,17 +658,19 @@ sequenceDiagram
 | I6（開始の競合） | 読み直しの後・開始の前に `plan set` が成功したら、古い内容では始めない。`work_started` の後に落ちても、起動し直すと子は 1 本だけ始まる | 版を照合しない |
 | 依存の判定・収束の取り消し | 中止や PR がマージされていない `finish` は `merged` を満たさない。先の設計が変わると、後続はレビューを流し直してから承認を依頼する | 子の完了だけで `merged` にする |
 | 設計の承認 | 依存のある設計の作業が 2 つあっても承認の知らせは 1 件で、回答は PR の head ごとに残る | 作業ごとに知らせる |
-| I9〜I11・中止の作り直し | 課題や種類の書き漏らし、許さない依存、モードに無い作業は断る。`excluded` に書けば通る。中止した作業の課題を新しい作業に入れた計画は通る | 網羅の検査を外す、中止した作業を重複に数える |
+| I9〜I12・中止の作り直し | 課題や種類の書き漏らし、許さない依存、モードに無い作業、承認が要るモードで設計の無い実装は断る。`excluded` に書けば通る。中止した作業の課題を新しい作業に入れた計画は通る | 網羅の検査を外す、中止した作業を重複に数える |
 | #4050 の待ち | 実装の待ちの間も、依存を満たした設計の作業は始まる | 親の全体を止める |
 | 条件 6・I1・I3・I4 | 無い依存先・輪・始めた作業の変更を持つ計画は断り、作業を始めない。始めた後の誤った変更では前の計画で進む | 検査の 1 つを外す |
 | 条件 7・I6 | 1 作業の失敗で後続は始まらず、他は進み、知らせが 1 回届く。耐久ワークフローを落として起動し直すと、完了した作業は流れない | 子を作り直す、知らせを毎回書く |
 | 条件 8・I7 | 今のレーンの検査と実行中の変更のテストが、`version` 2 の入力で通る | 今の検査の 1 つを外す |
-| 条件 9 | 課題 1 件で、単位の見出しが無いか単位が 1 つのスプリントは、計画なしで今のとおり流れる。課題 2 件か、単位が 2 つ以上で計画が無ければ止まる。`light` は「実装」、`operation` は「計画」の手前で止まる。実装計画が読めないときは今のエラーを返す | 要否の判定を逆にする、見出しの無い計画を 0 単位として止める |
+| 条件 9 | 課題 1 件で、直接の経路か確定した単位が 1 つのスプリントは、計画なしで今のとおり流れる。課題 2 件か、単位が 2 つ以上で計画が無ければ止まる。`light` は「実装」、`operation` は「計画」の手前で止まる。開始前の確かめがエラーを返すときは今のエラーを返す | 要否の判定を逆にする、直接の経路を 0 単位として止める |
 | 条件 9（止まった後の再開） | 課題 1 件・2 単位のスプリントは、止まった後に `plan set` すると、「計画」を流し直さずに「実装」から進み、単位の PR が 2 本になる | 子に「計画」を持たせる、2 単位を 1 つにまとめる |
-| 耐久ワークフローの読み直し | 回答は次の読み直しで拾う。#4050 の待ちが解けて conductor が `next` を打つと、`ndf progress works` は 2 本にならず、次の読み直しで実装の作業が始まる。時計は偽物に差し替える | `next` が 2 本目を起動する、待ちの解けた作業を読み直さない |
+| 耐久ワークフローの読み直し | 回答と、#4050 の待ちが解けた後の conductor の `next` は合図で次の周を始め、`ndf progress works` は 2 本にならず、実装の作業が始まる。状態が動かなければ間隔は 600 秒まで延び、動けば 60 秒へ戻る。`row_entered`（`implement`）の無い行は、待つ先が無くても待ちを書いた後は実装の作業を始めない。時計とファイルの属性の読みは偽物に差し替える | 合図を更新しない、`next` が 2 本目を起動する、間隔を延ばさないか戻さない、待つ先だけを見て始める |
 | モードごとの子の最初の工程 | `standard`・`legacy-refactor` は設計の作業が「計画」を持ち、実装の作業は「実装」から始まる。`documentation`・`operation` の実装の作業は「計画」から始まる。親が流した「計画」を子は流さず、「計画」が無いまま実装が始まる経路も無い（`light` を除く） | 作業の種類をモードによらず固定する |
 | 条件 9（`light` の単位） | 課題 1 件の `light` で、実装計画に単位が 2 つあれば「実装」の手前で止まり、再開すると子は「実装」から始まる | 「計画」の工程の有無で判定する |
-| 要否の判定の費用 | 課題 1 件で計画が要らないスプリントは、開始前の確かめが 1 回だけ呼ばれる。見出しの無い実装計画に未コミットの変更があっても通る。計画が要れば push せずに止まる | 判定で確かめをもう 1 回呼ぶ、未コミットを停止の条件にする |
+| 要否の判定の費用 | 課題 1 件で計画が要らないスプリントは、開始前の確かめが 1 回だけ呼ばれる。承認が要らず単位の欄もファイルも無ければ、実装計画に未コミットの変更があっても通る。計画が要れば push せずに止まる。入力が同じ再開では API を読まず、ファイルが変わった再開では検査し直す | 判定で確かめをもう 1 回呼ぶ、未コミットを停止の条件にする、`plan_required` を使わないか、変わった入力にも使う |
+| 要否の判定と承認の照合の順 | 承認の後に単位の欄とファイルが両方消えた課題 1 件のスプリントは、直接の経路へ進まず止まる | 照合の前に見出しの有無で経路を決める |
+| 分け方の承認の照合（作業） | 実装の作業の子は、自分の定義にゲートが無くても照合する。1 つの記録を 2 つの実装の作業が使う場合と、2 つの記録を 1 つの作業が使う場合の両方で、承認の後に単位のファイルを変えると始まらない。単位が 2 つの作業にまたがれば止まる | 子の定義で承認の要否を決める、記録の課題を子の課題に絞らず比べる処理を外す、1 つ目の記録だけを照らす |
 | 作業の再起動 | 課題 1 件・2 単位で登録した作業は、起動し直しても完了した「計画」を持たない | モードの定義から子を作り直す |
 | `operation` の経路 | 単位の見出しの無い `operation` の作業は、単位の PR を作らない | 作業の全体を単位にする |
 | 条件 10 | スプリントの PR がマージされた時点で Markdown がその PR のコメントになり、投稿の失敗では警告が出て `resync` で書ける。投稿の後の記録で落ちて打ち直しても、コメントは 1 件である | 失敗を握りつぶす、PR を開いた時点で投稿する、目印を見ずに投稿する |
@@ -612,7 +682,7 @@ sequenceDiagram
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4550 | 実装する | — | `plugins/ndf/contracts/workflow/sprint-plan.schema.json`（新設）、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/progress.schema.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/workflow/stages/document-sources.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/design-detail.json`、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/stages/plan.json`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/limits/sprint-run.works.json`（新設）、`plugins/ndf/contracts/limits/sprint-run.poll.json`（新設）、`plugins/ndf/contracts/schemas/io/progress.args.schema.json`、`plugins/ndf/contracts/schemas/io/progress.result.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.args.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/src/ndf/progress/plan_doc.py`（新設）、`plugins/ndf/src/ndf/progress/works/__init__.py`（新設）、`plugins/ndf/src/ndf/progress/works/decide.py`（新設）、`plugins/ndf/src/ndf/progress/works/run.py`（新設）、`plugins/ndf/src/ndf/progress/works/cli.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/hooks/guards/full_test.py`、`plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/worktree/mainlock.py`、`plugins/ndf/contracts/domains/branch-flows.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/schemas/ndf-settings/pace.schema.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/tests/progress/test_plan_doc.py`（新設）、`plugins/ndf/tests/progress/test_works_decide.py`（新設）、`plugins/ndf/tests/progress/test_works_run.py`（新設）、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke_per_unit.py`、`plugins/ndf/skills/issue-plan-strategy/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/sprint-plan.md`（新設）、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/backlog-refinement/references/milestones.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/out-of-scope/references/issue-target.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-parallel.md`、`docs/glossary/ndf-branch-strategy.md`、`docs/glossary/ndf-relay.md`、`docs/glossary/ndf-workflow.md` |
+| #4550 | 実装する | — | `plugins/ndf/contracts/workflow/sprint-plan.schema.json`（新設）、`plugins/ndf/contracts/workflow/parallel-plan.schema.json`、`plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/progress.schema.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/contracts/workflow/stages/document-sources.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/design-detail.json`、`plugins/ndf/contracts/workflow/stages/document-rebuild.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/stages/plan.json`、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/limits/sprint-run.works.json`（新設）、`plugins/ndf/contracts/limits/sprint-run.poll.json`（新設）、`plugins/ndf/contracts/schemas/io/progress.args.schema.json`、`plugins/ndf/contracts/schemas/io/progress.result.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.args.schema.json`、`plugins/ndf/contracts/schemas/io/lanes.result.schema.json`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/src/ndf/progress/plan_doc.py`（新設）、`plugins/ndf/src/ndf/progress/works/__init__.py`（新設）、`plugins/ndf/src/ndf/progress/works/decide.py`（新設）、`plugins/ndf/src/ndf/progress/works/run.py`（新設）、`plugins/ndf/src/ndf/progress/works/cli.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/design_record.py`、`plugins/ndf/src/ndf/progress/units_guard.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/lane/__init__.py`、`plugins/ndf/src/ndf/progress/lane/fold.py`、`plugins/ndf/src/ndf/progress/lane/types.py`、`plugins/ndf/src/ndf/progress/lane/rules.py`、`plugins/ndf/src/ndf/progress/lane/liveness.py`、`plugins/ndf/src/ndf/progress/plan/__init__.py`、`plugins/ndf/src/ndf/progress/plan/cli.py`、`plugins/ndf/src/ndf/domains/hooks/guards/full_test.py`、`plugins/ndf/src/ndf/domains/hooks/guards/stop_wait.py`、`plugins/ndf/src/ndf/domains/worktree/mainlock.py`、`plugins/ndf/contracts/domains/branch-flows.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/contracts/schemas/ndf-settings/pace.schema.json`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/docs/contracts/ndf-settings.md`、`plugins/ndf/tests/progress/test_plan_doc.py`（新設）、`plugins/ndf/tests/progress/test_works_decide.py`（新設）、`plugins/ndf/tests/progress/test_works_run.py`（新設）、`plugins/ndf/tests/progress/test_plan.py`、`plugins/ndf/tests/progress/test_lane.py`、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_invoke_per_unit.py`、`plugins/ndf/skills/issue-plan-strategy/SKILL.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/skills/issue-plan-strategy/references/sprint-plan.md`（新設）、`plugins/ndf/skills/issue-plan-strategy/references/parallel-plan.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/asking.md`、`plugins/ndf/skills/development-workflow/references/context-window.md`、`plugins/ndf/skills/development-workflow/references/loop.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/development-workflow/references/parallel-checks.md`、`plugins/ndf/skills/development-workflow/references/parallel-cross-repo.md`、`plugins/ndf/skills/development-workflow/references/parallel-work.md`、`plugins/ndf/skills/development-workflow/references/relay.md`、`plugins/ndf/skills/development-workflow/references/waiting.md`、`plugins/ndf/skills/backlog-refinement/references/milestones.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/out-of-scope/SKILL.md`、`plugins/ndf/skills/out-of-scope/references/issue-target.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/skills/worktree/references/ndf-settings.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-parallel.md`、`docs/glossary/ndf-branch-strategy.md`、`docs/glossary/ndf-relay.md`、`docs/glossary/ndf-workflow.md` |
 
 ## 未確認のまま残ること
 
