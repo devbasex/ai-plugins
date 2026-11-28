@@ -361,9 +361,13 @@ def _mask_unread(existing: dict[str, Any]) -> Optional[str]:
     unread, written = analysis_record.UNREAD_ITEMS, analysis_record.written_digests(existing)
     if not any(k in existing or k in written for k in unread):
         return None
-    shown = {k: MASK if k in unread else v for k, v in existing.items()}
+
+    def masked(values: dict[str, Any]) -> dict[str, Any]:
+        return {k: MASK if k in unread else v for k, v in values.items()}
+
+    shown = masked(existing)
     if written:
-        shown["analysis"] = {**existing["analysis"], "written": {k: MASK if k in unread else v for k, v in written.items()}}
+        shown["analysis"] = {**existing["analysis"], "written": masked(written)}
     return dumps(shown)
 
 
