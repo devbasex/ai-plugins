@@ -277,7 +277,7 @@ def unreviewed_range(context: Mapping[str, Any], cwd: Path) -> tuple[Git, str, s
     git, head = _context_git_head(context, cwd)
     try:
         gathered = git.rev_parse(str(context["gathered"]))
-        checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+        checked = git.head_name()
         if "branch" in context and checked != head:
             raise FactUnknown(f"worktree のブランチ {checked} が文脈のブランチ {head} と違う")
         if not git.is_ancestor(gathered, head):
@@ -311,7 +311,7 @@ def _remote_unreviewed_range(git: Git, context: Mapping[str, Any], gathered: str
     リモートを持たないリポジトリ（PR が無い）と detached HEAD（ブランチが決まらない）では手元の範囲だけを見るので空を返す。
     取得できない・`gathered` が HEAD の祖先でなければ `FactUnknown`（PR の中身を確かめずに工程を飛ばさない）。
     """
-    name = str(context.get("branch") or git.run("rev-parse", "--abbrev-ref", "HEAD").strip())
+    name = str(context.get("branch") or git.head_name())
     if name == "HEAD" or not git.run("remote").split():
         return []
     far = git.remote()
@@ -341,7 +341,7 @@ def gathered_commit(cwd: Path, branch: str | None, remote: str | None) -> dict[s
     PR のマージ先と同じなら単位の PR は無いので、開いた PR を問わない（`pace: fast` の課題はベースブランチへ直接入る）。
     """
     git = Git(cwd)
-    checked = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+    checked = git.head_name()
     name = branch if branch else checked
     far = remote if remote else git.remote()
     if name.startswith("-") or far.startswith("-"):

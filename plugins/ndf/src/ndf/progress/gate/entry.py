@@ -47,18 +47,12 @@ from ndf.progress.gate.answering import (
     Answer,
     Observe,
     Post,
-    Recheck,
     answer,
-    git_docs_only,
     github_observe,
     github_post,
     lane_env,
     no_post,
-    recheck,
-    reread,
     shared_hub,
-    standing,
-    verifier,
 )
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
@@ -69,6 +63,7 @@ from ndf.progress.gate.asking import (
     question,
 )
 from ndf.progress.gate import finishing
+from ndf.progress.gate.rechecking import Recheck, git_docs_only, recheck, reread, standing, verifier
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.gate.targets import TargetReader

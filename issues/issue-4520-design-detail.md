@@ -12,7 +12,7 @@ src/ndf/adapters/        github.py  github_pulls.py
 src/ndf/core/            merge_approval.py  release_record.py*
 src/ndf/progress/        model.py  folding.py  run_view.py  run.py  stages.py  definition.py  records.py  command.py  plan/external.py
                          approval_decide.py*  delivery_decide.py*  run_approval.py*  reopening.py*  redo.py*  redo_decide.py*
-src/ndf/progress/gate/   asking.py  answering.py  entry.py  records.py  release.py  __init__.py
+src/ndf/progress/gate/   asking.py  answering.py  rechecking.py*  entry.py  records.py  release.py  __init__.py
                          targets.py*  finishing.py*  requests.py*  delivery_check.py*  mvv_trail.py*
 src/ndf/domains/         records/cli.py  records/mvv_gate.py  release/{record,record_decide}.py  worktree/cli.py  worktree/merged.py
 tests/progress/          test_model.py  test_command.py  test_reopen_operations.py*  test_manual_gate.py*
@@ -39,7 +39,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `progress/redo.py` | 新設 | 作り直し用の作業場所の記録・作成・取り込み・片付け | `adapters.git`・`redo_decide` | 新設 `redo_record`・`ensure_workspace`・`take_in`・`discard`・`redirect_inputs` |
 | `progress/redo_decide.py` | 新設 | 作り直しの要否、ブランチの名前、移すコミットを決める | `progress.model` | 新設 `needed`・`branch_name`・`commits_to_move` |
 | `progress/gate/targets.py` | 新設 | 承認の対象を 1 回の呼び出しで 1 回だけ読む | `adapters.github`・`asking` | 新設 `TargetReader` |
-| `progress/gate/finishing.py` | 新設 | `finish`・`check`・`retry`・`question`・`request-status` | `answering`・`reopening`・`delivery_check` | 移動と変更: `_cmd_finish`・`_cmd_check`・`_cmd_retry`。新設 `hand_finish`・`judge_design`・`ask_question`・`request_status` |
+| `progress/gate/finishing.py` | 新設 | `finish`・`check`・`retry`・`question`・`request-status` | `answering`・`rechecking`・`reopening`・`delivery_check` | 移動と変更: `_cmd_finish`・`_cmd_check`・`_cmd_retry`。新設 `hand_finish`・`judge_design`・`ask_question`・`request_status` |
 | `progress/gate/requests.py` | 新設 | 出したリリースのリクエストの記録と取り下げ | `store`・`plan.external` | 新設 `record_issued`・`issued`・`withdraw`・`unrecorded`・`current_request` |
 | `progress/gate/delivery_check.py` | 新設 | 記録の PR と CD の実行を読み、判定に渡す | `adapters.github`・`delivery_decide` | 新設 `confirm` |
 | `progress/gate/mvv_trail.py` | 新設 | MVV の承認の後に、担い手 `mvv` の証跡を書く | `core.merge_approval` | 新設 `ensure` |
@@ -53,7 +53,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `progress/run.py` | 変更 | 次の 1 手の判断と駆動 | `run_approval`・`redo` | 変更 `_running_move`・`_reading_skipped`・`_run_step`・`_start_once`・`_complete`・`Env` |
 | `progress/command.py` | 変更 | サブコマンドのうち、移さずに残るもの | `model` | `_cmd_finish`・`_cmd_check`・`_cmd_retry` を `gate/finishing.py` へ移す |
 | `progress/gate/asking.py` | 変更 | 質問と承認資料 | `run_view` | 新設 `off_wait_question`。変更 `material` |
-| `progress/gate/answering.py` | 変更 | 回答の記録と、回答を読む前の確かめ | `asking`・`targets`・`reopening` | 新設 `_find_question`・`_effects`・`_drafts`。変更 `answer`・`_refusal`・`_trail_by`・`_ensure_trail`・`github_observe`・`recheck` |
+| `progress/gate/answering.py` | 変更 | 回答の記録と、回答する対象の読み取り | `asking`・`targets`・`reopening` | 新設 `_find_question`・`_effects`・`_drafts`。変更 `answer`・`_refusal`・`_trail_by`・`_ensure_trail`・`github_observe` |
+| `progress/gate/rechecking.py` | 新設 | 回答を読む前の確かめと、承認ゲートの待ちへの戻し・出し直し | `answering`・`asking`・`targets`・`approval_decide` | `answering.py` から移動: `recheck`・`verifier`・`standing`・`reread`。`recheck` は変更、`verifier`・`standing` は新設 |
 | `progress/gate/records.py` | 変更 | 回答を読む口 | `approval_decide` | 変更 `approved_head`・`answers` |
 | `progress/gate/release.py` | 変更 | リリースのリクエストを出す | `requests` | 変更 `request_release` |
 | `progress/gate/entry.py`・`progress/gate/__init__.py` | 変更 | サブコマンドと引数の登録、`Env` の口の差し込み | `finishing` | `question`・`request-status`・新しい引数の登録 |
@@ -168,7 +169,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `boundary`・`latest_answer`・`objection_remains` | `StageAnswers`・`approved_head` | `grep -rn` で `src/ndf/` を `gate_id`・`answered` で検索し、`run_view.py`・`gate/records.py` を読む | 使えない。境界（開き直しと質問の出し直し）を持たない。読み手の側はこの関数を使う形へ寄せる |
-| `differences` | `Target.differs`・`_judged_elsewhere`・`_check_presented` | `gate/asking.py`・`gate/answering.py` を読む | 本文・題・資料の比較は `Target.differs` を使う。マージ先と本番への反映の比較は無いので足す |
+| `differences` | `Target.differs`・`_judged_elsewhere`・`_check_presented` | `gate/asking.py`・`gate/answering.py`・`gate/rechecking.py` を読む | 本文・題・資料の比較は `Target.differs` を使う。マージ先と本番への反映の比較は無いので足す |
 | `TargetReader.read`・`TargetReader.forget` | `github_observe`・`shared_hub` | `gate/answering.py` を読む | `github_observe` の読み取りを移す。GitHub の接続は `shared_hub` を使う |
 
 ### 単体テストの観点
@@ -453,8 +454,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `prior_approval` | `progress/run_approval.py` | 新設 | `(d: Drive, v: View, s: StageDef, step: StepDef) -> list[EventDraft] \| None` | 自動の流れの承認ゲートに有効な先の承認があれば、質問せずに済ませる事象を返す。追認と `no_release` の承認は使わない |
 | `approved_seen` | `progress/run_approval.py` | 変更 | `(answers: StageAnswers, root: Path) -> dict \| None` | 直近の開き直しより後で、工程の対象の PR を見た承認だけを返す |
 | `ensure` | `progress/gate/mvv_trail.py` | 新設 | `(hub: GitHub, v: View, answered: Event, now: Target) -> bool` | 記録した `service:mvv` の承認がまだ有効なら、判定の記録へのリンクと担い手 `mvv` の行を持つ証跡を書く |
-| `recheck` | `progress/gate/answering.py` | 変更 | `(st, machine_id, observe, docs_only=never_docs_only, revoke=no_revoke, how=Recheck()) -> str \| None` | 承認の対象を持つ回答は、マージ先と本番への反映を比べる。`how` は、書くか、比べた回答の番号の控え先、呼び手が作業の排他を持つかを渡す |
-| `verifier` | `progress/gate/answering.py` | 新設 | `(st, observe, docs_only, revoke, forget, take=…) -> ((machine_id: str, seq: int \| None) -> str \| None)` | 戻り値の関数を `run.Env.verify` に渡す。`next`・`work` の駆動は、作業の排他の中で、最初の手と回答を読む手の前にこの関数を呼ぶ。最初の手では、読む回答が無くても `seq=None` で呼ぶ。戻り値の関数は `recheck` を呼ぶ（照合し終えた回答には呼び直さない）。対象を読むのは `recheck` で、照合する回答（`ndf answer` で書かれ、まだ読まれていない回答）があるときだけ読む。戻り値の関数は先読みしない。`take`（リリースのリクエストへの回答を承認ゲートの回答として書く）は初回の `recheck` の前に 1 度だけ呼ぶ。`take` が同じ対象をすでに読んでいれば、`recheck` はその結果を使う |
+| `recheck` | `progress/gate/rechecking.py` | 変更 | `(st, machine_id, observe, docs_only=never_docs_only, revoke=no_revoke, how=Recheck()) -> str \| None` | 承認の対象を持つ回答は、マージ先と本番への反映を比べる。`how` は、書くか、比べた回答の番号の控え先、呼び手が作業の排他を持つかを渡す |
+| `verifier` | `progress/gate/rechecking.py` | 新設 | `(st, observe, docs_only, revoke, forget, take=…) -> ((machine_id: str, seq: int \| None) -> str \| None)` | 戻り値の関数を `run.Env.verify` に渡す。`next`・`work` の駆動は、作業の排他の中で、最初の手と回答を読む手の前にこの関数を呼ぶ。最初の手では、読む回答が無くても `seq=None` で呼ぶ。戻り値の関数は `recheck` を呼ぶ（照合し終えた回答には呼び直さない）。対象を読むのは `recheck` で、照合する回答（`ndf answer` で書かれ、まだ読まれていない回答）があるときだけ読む。戻り値の関数は先読みしない。`take`（リリースのリクエストへの回答を承認ゲートの回答として書く）は初回の `recheck` の前に 1 度だけ呼ぶ。`take` が同じ対象をすでに読んでいれば、`recheck` はその結果を使う |
 | `_reading_skipped` | `progress/run.py` | 変更 | `(d, v, s, step, prog) -> list[EventDraft] \| None` | 有効な先の承認がある設計では、読み手役のステップを打たない |
 | `_run_step` | `progress/run.py` | 変更 | `(d: Drive, v: View, s: StageDef, step: StepDef) -> list[EventDraft]` | 否定の回答が残る間は設計の判定のステップの `argv` に `--no-skip` を足し、設計の工程の入力を作り直し用の作業場所へ差し替える |
 
@@ -479,7 +480,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `consume_held`・`prior_approval` | `run._consume`・`gate_report`・`answering.recheck` | `run.py`・`gate/answering.py` を読む | 終了と失敗の書き方は使う。ステップを流さずに終える手は無い |
+| `consume_held`・`prior_approval` | `run._consume`・`gate_report`・`rechecking.recheck` | `run.py`・`gate/rechecking.py` を読む | 終了と失敗の書き方は使う。ステップを流さずに終える手は無い |
 | `ensure` | `merge_approval.write_merge_row`・`mvv_gate._recorded` | `core/merge_approval.py`・`records/mvv_gate.py` を読む | 投稿は `write_merge_row` を使う。本文に判定の見出しとリンクを足す形を新設する |
 
 ### 単体テストの観点

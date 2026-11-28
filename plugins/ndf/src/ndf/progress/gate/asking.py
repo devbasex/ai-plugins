@@ -225,7 +225,7 @@ def text_sha256(text: str) -> str:
 def material_path(root: Path, q: Question) -> Path:
     """質問の承認資料の保存先（`run.work_root` の下）。資料を作る時点の head ごとに別のファイルで、書いた後は書き換えない。
 
-    head が分からなければ質問の id だけの名前（この変更の前の名前でもある。`answering.seen_material` が探す）。"""
+    head が分からなければ質問の id だけの名前（この変更の前の名前でもある。`rechecking.seen_material` が探す）。"""
     name = f"{q.id}-{q.target.head}.md" if q.target.head else f"{q.id}.md"
     return run.work_root(root, q.machine_id) / MATERIAL_DIR / name
 

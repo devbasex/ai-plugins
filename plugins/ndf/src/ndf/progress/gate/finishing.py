@@ -18,7 +18,8 @@ from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, definition, model, reopening, run, stages, store
-from ndf.progress.gate.answering import shared_hub, standing
+from ndf.progress.gate.answering import shared_hub
+from ndf.progress.gate.rechecking import standing
 from ndf.progress.gate.targets import TargetReader
 from ndf.progress.run_view import FINISH_HELD
 from ndf.progress.records import github_records, sync_records

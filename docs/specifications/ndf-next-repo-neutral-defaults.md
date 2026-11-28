@@ -195,7 +195,7 @@ ndf-next の形のプラグインは、Skill の一覧を `manifests/skills.json
 - 判定は `command.range_diff_kinds` の `docs_only_diff` で、工程の条件と同じものを使う（I8a）
 - `docs.behavior` の既定は空である。空の並びのとき `git diff` を打たない（打つと全体が返り、すべてが振る舞いの文書に当たる）
 - 結果 JSON は範囲と件数（変えたファイル・文書・振る舞いの文書）だけを出し、ファイルの名前の一覧を出さない
-- リリース承認ゲートの承認を次へ持ち越す判定（`progress/gate/answering.py` の `git_docs_only`）は、`docs.behavior` を宣言して
+- リリース承認ゲートの承認を次へ持ち越す判定（`progress/gate/rechecking.py` の `git_docs_only`）は、`docs.behavior` を宣言して
   いないリポジトリでは文書だけと見なさず、承認を出し直す。どの文書が振る舞いを決めるかが分からないまま持ち越すと、
   Skill の本文の変更が人の承認を経ずに通るためである
 - ai-plugins は `.ndf/project.json` の `docs.behavior` に `**/skills/**/*.md`・`**/agents/*.md` を書く。今の NDF の既定と

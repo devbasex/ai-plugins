@@ -17,7 +17,7 @@ from result_json import last_result
 
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, gate, invoke, model, run, store
-from ndf.progress.gate import answering, finishing, release, targets
+from ndf.progress.gate import answering, asking, finishing, rechecking, release, targets
 
 ISSUE = 4520
 DESIGN = "設計"
@@ -58,7 +58,7 @@ def env(repo, st, monkeypatch):
         prepare=lambda r, work_dir, cwd: None,
         records=lambda cwd: lanes._NoRecords(),
         sleep=lambda s: None,
-        standing=answering.standing(reader, st.root),
+        standing=rechecking.standing(reader, st.root),
         forget=reader.forget,
     )
     monkeypatch.setattr(finishing, "shared_hub", lambda cwd: lambda: hub)
@@ -137,6 +137,11 @@ def _answer(
 
 def _merge(env, head: str = merge_hub.HEAD) -> None:
     env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, head=head, merged=True)
+
+
+def _stop_design(st, tid: str) -> None:
+    """回答を待つ設計の工程を失敗にする（実行中の工程は手で終えられない）。"""
+    run._write(st, tid, model.EventDraft("failed", "workflow", DESIGN, payload={"step": None}, rev=1))
 
 
 def _held_design(st, capsys, repo, env) -> str:
@@ -288,13 +293,18 @@ def test_the_flow_waits_for_an_answer_before_passing_the_gate(repo, st, env, cap
         v = run.read(st, tid)
         if meanwhile == "reissued":  # 質問の出し直しで、先の承認は数えなくなる
             m = run.decide(v)
-            run._write(st, tid, answering._no_report_draft(v, DESIGN, m.step.id, "waiting", m.progress.generation, "出し直し"))
+            run._write(st, tid, rechecking._no_report_draft(v, DESIGN, m.step.id, "waiting", m.progress.generation, "出し直し"))
         elif meanwhile == "moved":  # PR の変化は DB の事象を増やさない
             env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, head=merge_hub.OTHER)
         elif meanwhile == "rejection_not_recorded":  # 却下を投稿した後に、回答の確定が失敗する
-            a = gate.Answer(gate.waiting(v).id, "rejected", "却下", "human:reviewer", "k-reject")
+            q = gate.waiting(v)
+            env.reader.forget()
+            observe = answering.github_observe(repo, st.root, reader=env.reader)
+            gate.write_material(st.root, v, replace(q, target=observe(q)))  # 却下は提示した資料への回答
+            seen = replace(observe(q), presentation=asking.read_presented(st.root, q).presentation)
+            a = gate.Answer(q.id, "rejected", "却下", "human:reviewer", "k-reject", seen=seen)
             with pytest.raises(model.Refused, match="確定に失敗"):
-                gate.answer(st, tid, a, answering.github_observe(repo, st.root, reader=env.reader), fail)
+                gate.answer(st, tid, a, observe, fail)
 
     env.env = replace(env.env, sleep=sleep)
 
@@ -506,7 +516,7 @@ def test_reread_is_refused_for_a_hand_finished_wait(repo, st, env, capsys):
     tid = _held_design(st, capsys, repo, env)
     before = _kinds(st, tid, DESIGN)
 
-    out = answering.reread(st, tid, repo, env.env)
+    out = rechecking.reread(st, tid, repo, env.env)
 
     assert out["status"] == "stopped" and "--later reopen" in out["cause"]["detail"], out
     assert _kinds(st, tid, DESIGN) == before
@@ -548,7 +558,7 @@ def test_a_refused_finish_and_a_non_advancing_recheck_revoke_nothing(repo, st, e
     assert _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})["cause"]["kind"] == "refused"
     env.reader.forget()
     observe = answering.github_observe(repo, st.root, reader=env.reader)
-    why = gate.recheck(st, tid, observe, revoke=lambda r: pytest.fail("取り消した"), how=answering.Recheck(advancing=False))
+    why = gate.recheck(st, tid, observe, revoke=lambda r: pytest.fail("取り消した"), how=rechecking.Recheck(advancing=False))
 
     assert why is not None and "ndf progress next" in why
     assert env.hub.dequeued == [] and _kinds(st, tid, DESIGN) == before
@@ -591,6 +601,7 @@ def test_a_hand_finish_revokes_an_approval_whose_answer_was_not_recorded(repo, s
         return merge_approval.merge_judgment(merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer()), target)
 
     assert judged() is not None
+    _stop_design(st, tid)
 
     out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
 
@@ -616,6 +627,7 @@ def test_a_hand_finish_keeps_the_queue_when_no_approval_was_posted(repo, st, env
     shown = _next(st, tid, repo, env)
     if tried:
         _fail_answer(st, tid, repo, env, shown)
+    _stop_design(st, tid)
 
     out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
 
@@ -630,6 +642,7 @@ def test_a_hand_finish_revokes_an_unrecorded_approval_after_the_material_was_pre
     env.hub.files["develop"] = env.hub.files["main"]
     env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, base="develop")
     _next(st, tid, repo, env)
+    _stop_design(st, tid)
 
     out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
 
@@ -742,7 +755,7 @@ def test_an_answer_is_compared_with_the_target_read_under_the_work_lock(repo, st
     env.hub.files["develop"] = env.hub.files["main"]
     env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, base="develop")
     observe = answering.github_observe(repo, st.root, reader=env.reader)
-    verify = answering.verifier(st, observe, answering.never_docs_only, lambda r: None, env.reader.forget)
+    verify = rechecking.verifier(st, observe, rechecking.never_docs_only, lambda r: None, env.reader.forget)
 
     lanes.turn(st, tid, repo, replace(env.env, verify=verify))
 
@@ -753,10 +766,10 @@ def test_an_answer_is_compared_with_the_target_read_under_the_work_lock(repo, st
 def test_the_verifier_takes_the_reply_once_after_dropping_the_earlier_reads(st, env, capsys):
     tid = _new(capsys)
     calls: list[str] = []
-    verify = answering.verifier(
+    verify = rechecking.verifier(
         st,
         answering.no_observe,
-        answering.never_docs_only,
+        rechecking.never_docs_only,
         lambda r: None,
         lambda: calls.append("forget"),
         lambda: calls.append("take") or "書いた",

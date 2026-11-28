@@ -278,6 +278,10 @@ class Git:
         """
         return Path(self.run("rev-parse", "--show-toplevel").strip())
 
+    def head_name(self) -> str:
+        """今チェックアウトしているブランチの名前（`git rev-parse --abbrev-ref HEAD`）。detached HEAD なら `HEAD`。失敗は `GitError`。"""
+        return self.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+
     def rev_parse(self, ref: str) -> str:
         """参照（短い SHA・ブランチ・タグ）をコミットの完全な SHA へ解決する（#2041）。"""
         sha = self.run("rev-parse", "--verify", "--quiet", END_OF_OPTIONS, f"{ref}^{{commit}}").strip()

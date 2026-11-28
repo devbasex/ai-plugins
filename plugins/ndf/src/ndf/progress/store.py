@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import IO, Any, Optional
 
 import sqlalchemy as sa
+import tenacity
 from sqlalchemy import event as sa_event
 
 from ndf.contracts import limits
@@ -473,7 +474,8 @@ def read_events(conn: sa.Connection, machine_id: str, after: int = 0) -> list[mo
 
 def last_seq(conn: sa.Connection, machine_id: str) -> int:
     """最後の事象の番号（事象が無ければ 0）。事象を読まずに、追記が増えたかを確かめる。"""
-    return conn.execute(sa.select(sa.func.max(EVENTS.c.seq)).where(EVENTS.c.machine_id == machine_id)).scalar() or 0
+    latest = sa.func.coalesce(sa.func.max(EVENTS.c.seq), 0)
+    return conn.execute(sa.select(latest).where(EVENTS.c.machine_id == machine_id)).scalar_one()
 
 
 def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any]]:
@@ -691,15 +693,13 @@ def approval_lock_after_answer(store: Store, machine_id: str, sleep: Callable[[f
 
     待ったら真を渡す。待つ間に事象も PR も変わりうるので、呼び手は排他を取った後に決め直す。"""
     deadline = time.monotonic() + limits.value(APPROVAL_WAIT, "seconds")
-    waited = False
+    retrying = tenacity.Retrying(
+        retry=tenacity.retry_if_exception_type(model.Refused),
+        stop=lambda _: time.monotonic() >= deadline,
+        wait=tenacity.wait_fixed(limits.value(APPROVAL_WAIT, "interval")),
+        sleep=sleep,
+        reraise=True,
+    )
     with ExitStack() as stack:
-        while True:
-            try:
-                stack.enter_context(approval_lock(store, machine_id))
-                break
-            except model.Refused:
-                if time.monotonic() >= deadline:
-                    raise
-                sleep(limits.value(APPROVAL_WAIT, "interval"))
-                waited = True
-        yield waited
+        retrying(lambda: stack.enter_context(approval_lock(store, machine_id)))
+        yield retrying.statistics["attempt_number"] > 1
