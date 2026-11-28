@@ -13,11 +13,37 @@
 
 ## [ndf 11.0.51] - 2026-11-28
 
-- ステートマシンが保守的すぎる: 終えた工程をやり直せず、承認ゲートの回答も回答待ちの行にしか書けない（#4684）
-- プロジェクトの設定: 解析が書く項目を、読み手のあるものだけにする（#4688）
-- 設計書と Pull Request の概要で、これまでの状態とこれから変えることを書き分ける（#4703）
-- 起動の権限・Tool と工程ごとのモデルの選択（#1959・#2944）（#4715）
-- プロジェクトの解析: 読み手のある項目だけを測って設定に書く（#4521）（#4726）
+### 利用者向けの変化
+
+**入れる前に確かめること**
+
+3 つの指定は、どれも同じ 1 つのファイル `.ndf/launch.json` に書く（併記の例は下）。
+
+- **ユーザー名前空間を作れない環境では、承認するまで次の起動がすべて止まる:** codex の相手役（cross-review・委譲）と、Kiro・agy への作業の委譲。作れるかは `unshare -Ur true` の成否で分かる（失敗すれば作れない。コンテナに多い）。なお Kiro・agy への委譲は、名前空間を作れる環境でも承認が要る。Kiro のレビューはこれまでどおり動き、agy はレビューに使わない。続けて使うには `permissions.unsandboxed` に使うランタイム（`"codex"`・`"kiro"`・`"agy"` の配列）を書き、`/ndf:launch-config`（端末では `ndf launch-config approve`）で承認する。承認したランタイムは安全装置を外して起動するので、マシンが外側で隔離されていることを確かめてから承認する（#4715、課題 #1959）
+- **worker と Skill を回す `claude -p` は、MCP を読み込まなくなる。** 組み込みの Tool も `Read`・`Edit`・`Write`・`Bash`・`Grep`・`Glob`・`Skill`・`Agent`・`Monitor`・`SendMessage`・`ToolSearch`・`WebFetch`・`WebSearch`・`TaskStop`・`NotebookEdit`・`ListAgents` の 16 個に絞る。工程で MCP やほかの Tool を使うリポジトリは、`permissions.steps` に指定を書いて承認する（Tool を足すのは `load`、MCP は `mcp`。`*` はすべての工程）（#4715）
+- **モデルと effort の実験が、設定を書かなくても有効になる。** worker・Skill を回す起動・判定の起動・cross-review の claude と codex の相手役は、工程ごとの選択肢から 1 組を抽選して起動する。選択肢は指定なし（CLI の既定）のほか、工程により haiku〜opus と effort low〜high（一覧は `plugins/ndf/contracts/domains/launch-experiments.json`）。起動の引数（`--model`・`--effort`）か環境変数（`NDF_LAUNCH_MODEL`・`NDF_LAUNCH_EFFORT` など）で指定した起動は抽選しない。抽選を止めるには `experiments.enabled` に `false` を書く（この指定は承認が要らない）（#4715、課題 #2944）
+
+3 つを併記した例（要るものだけを書く）:
+
+```json
+{
+  "version": 1,
+  "permissions": {
+    "unsandboxed": ["codex"],
+    "steps": {"*": {"load": ["LSP"], "mcp": "inherit"}}
+  },
+  "experiments": {"enabled": false}
+}
+```
+
+**増えること**
+
+- 起動の設定 `.ndf/launch.json` と、承認のコマンド `ndf launch-config`（Skill `launch-config`）（#4715）
+- 実験の結果を読む `ndf models report` と、起動ごとの組を確かめる `ndf models pick`。起動した子ごとの使用量と費用が使用量ログに 1 行ずつ残る（#4715）
+
+**この版に含む設計の文書（動きは変わらない）**
+
+- 終えた工程の開き直し（#4684、課題 #4520）、`.ndf/project.json` の読み手の無い項目をやめる（#4688・#4726、課題 #4521）、設計書と PR の概要の書き分け（#4703、課題 #4543）。実装は後の版で届く
 
 ## [ndf 11.0.50] - 2026-11-27
 
