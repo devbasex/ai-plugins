@@ -12,6 +12,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `ANTHROPIC_ORGANIZATION_ID` | user | string | — | 認証のプロファイルの組織（認証の優先順位でログインより上に来る源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
 | `ANTHROPIC_PROFILE` | user | string | — | 認証のプロファイルの名前（認証の優先順位でログインより上に来る源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
 | `CLAUDECODE` | runtime | flag | — | Claude Code の中で動いているマーカー（ホストの推定）。中継が起動するセッションへ渡さない（残ると claude が入れ子の起動を断る） | 内部（予告なく変えてよい） |
+| `CLAUDE_CODE_EFFORT_LEVEL` | user | string | — | Claude Code が読む effort の指定で、子の中で --effort より優先する。NDF は値を検証しない（#2944）。あれば NDF の起動は選択肢の effort を足さずに子へ引き継ぎ、実験に数えない。NDF_LAUNCH_EFFORT か起動の引数で effort を指定した起動では子の環境から外す | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` | ndf | string | — | 中継が起動する claude へ false を渡し、入力欄のサジェストを止める（人の入力と取り違えない） | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_OAUTH_SCOPES` | user | string | — | Claude Code の OAuth のスコープ。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
 | `CLAUDE_CODE_OAUTH_TOKEN` | user | string | 秘密 | Claude Code の OAuth のトークン（ログインより上の認証の源）。登録済みアカウントと従量の接続の子へ渡さない | 内部（予告なく変えてよい） |
@@ -40,6 +41,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `LC_ALL` | user | string | — | 利用者のロケールの上書き。届け先の結果を読むコマンドへそのまま渡す。無ければ渡さない | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNTS_DIR` | user | path | — | アカウントの登録の保存先（ndf relay account の登録のサブコマンド）。無ければ <共有の設定ディレクトリ>/ndf/accounts（旧いプラグインと同じ保存先） | 内部（予告なく変えてよい） |
 | `NDF_ACCOUNT_GENERATION` | ndf | string | — | 登録済みアカウントの子で、起動を確かめた登録の世代（空文字は世代の無い登録）。子の ndf plan がリースと上限の後の替え先の判断に使う。従量の接続と API キーの子には渡さない | 内部（予告なく変えてよい） |
+| `NDF_AI_CHILD` | ndf | flag | — | NDF が非対話で起動した AI の子（worker・Skill を回す起動・判定・相手役・修正担当・委譲）のマーカー。起動の承認と取り消しはこの値があれば拒む（#1959）。無ければ NDF が起動した AI の中ではない。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_API_KEY_CHECK_MODEL` | user | string | — | API キーの確かめに使うモデル。無ければ claude-haiku-4-5 | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PATH` | ndf | string | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の PATH（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CALLER_PLUGIN_ROOT` | ndf | path | — | bin/ndf が子へ自分の根を渡す前に写した、呼び出し元の CLAUDE_PLUGIN_ROOT（空なら無かった）。bin/start.py が自分のパッケージを呼ぶ前に CLAUDE_PLUGIN_ROOT へ戻して消す（#4029）。残っていれば（bin/ndf を通らずに打った子）ほかのプラグインの根のとき旧い状態の保存先を退避しない。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
@@ -48,6 +50,7 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_CALLER_UV_PROJECT_ENVIRONMENT` | ndf | path | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の UV_PROJECT_ENVIRONMENT（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CALLER_UV_RUN_RECURSION_DEPTH` | ndf | integer | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の UV_RUN_RECURSION_DEPTH（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
 | `NDF_CALLER_VIRTUAL_ENV` | ndf | path | — | bin/ndf が子へ自分の値を入れる前に写した、呼び出し元の VIRTUAL_ENV（無ければ写しを持たない）。bin/start.py が自分のパッケージを呼ぶ前に呼び出し元の値へ戻して消す（#4029）。中継が起動するセッションへ渡さない | 内部（予告なく変えてよい） |
+| `NDF_CHARGE_TO` | ndf | string | — | プランの実行がステップの子へ渡す、その起動の費用を手戻りとして負う割り付け ID（#2944）。ndf worker run は作業 fix・ci-fix のときだけ使用量ログの行の charge_to にし、ほかの作業は worker の子の環境から外す | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_ACCOUNT` | user | string | — | 子の claude を起動する登録済みのアカウントの名前 | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_GENERATION` | ndf | integer | — | 子へ渡した API キーの世代。入れ子の監督が読む | 内部（予告なく変えてよい） |
 | `NDF_CLAUDE_API_KEY_NAME` | ndf | string | — | 子へ渡した API キーの名前。入れ子の監督が読む | 内部（予告なく変えてよい） |
@@ -57,11 +60,16 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_FACTORY_RUN` | service | flag | — | サービスの実行ジョブの中で動いているマーカー | 公開 |
 | `NDF_HOOK_OFF` | user | string | — | 止める guard の名前をカンマでつなぐ。all で全部を止める。無ければ全部の guard が働く。閾値はこの変数で受けず、上限の設定から読む | 内部（予告なく変えてよい） |
 | `NDF_ISSUE_REQUEST_FILE` | service | path | — | 作業のリポジトリと別の起票先への起票を、承認資料を書かずにリクエストの 1 行（{repo, title, body, labels} の JSON）として足すファイル。サービスが起票するかを決める。無ければ承認資料で止まる | 公開 |
+| `NDF_LAUNCH_CODEX_EFFORT` | user | string | — | NDF が起動する Codex の推論の強さ（model_reasoning_effort）の一時的な上書き（#2944）。値は表 launch-experiments の codex の順位にあるものだけで、無い値は起動しない。効いた起動は実験に数えない。無ければ実験の割り付けか基準の組の値 | 内部（予告なく変えてよい） |
+| `NDF_LAUNCH_CODEX_MODEL` | user | string | — | NDF が起動する Codex のモデルの一時的な上書き（#2944）。効いた起動は実験に数えない。無ければ実験の割り付けか基準の組の値。改行を含む値は起動しない | 内部（予告なく変えてよい） |
+| `NDF_LAUNCH_EFFORT` | user | string | — | NDF が起動する claude -p の effort の一時的な上書き（#2944）。値は表 launch-experiments の claude の順位にあるものだけで、無い値は起動しない。効いた起動は実験に数えず、子の環境から CLAUDE_CODE_EFFORT_LEVEL を外す。無ければ CLAUDE_CODE_EFFORT_LEVEL か実験の値 | 内部（予告なく変えてよい） |
+| `NDF_LAUNCH_MODEL` | user | string | — | NDF が起動する claude -p のモデルの一時的な上書き（#2944）。すべての層（worker・Skill を回す起動・判定・相手役）に効き、効いた起動は実験に数えない。無ければ実験の割り付けか基準の組の値。改行を含む値は起動しない | 内部（予告なく変えてよい） |
 | `NDF_LOCK_DIR` | user | path | — | 旧い NDF の Issue の本文を守る錠の保存先。無ければ ~/.claude/<名前>/locks。新しい NDF は読むだけで、状態の保存先の退避がこの保存先を含まないかを確かめる | 内部（予告なく変えてよい） |
 | `NDF_LOOP_EXCLUDE` | service | string | — | 開発ループの選定から、そのループの 1 回だけ外す課題の番号（, か空白で区切る）。同じリポジトリの別の実行が持つ課題をサービスが渡す。無ければ外さない | 公開 |
 | `NDF_MVV_STATE_DIR` | service | path | — | 判断の記録（ask.jsonl）と承認ゲートの変更要求の記録（gate-rejections.jsonl）の保存先。無ければ状態の保存先 | 公開 |
 | `NDF_ORGANIZER_DIR` | ndf | path | — | 外のオーガナイザーとファイルでやり取りする保存先。あればこのセッションは外のオーガナイザーのレーン | 公開 |
 | `NDF_ORGANIZER_LANE` | ndf | string | — | 外のオーガナイザーのレーンの名前。NDF_ORGANIZER_DIR と組で渡す | 公開 |
+| `NDF_PLAN_RUN_ID` | ndf | string | — | プランの実行がステップの子へ渡す、プランの実行の id。使用量ログの行の run_id になる（#1959）。実行ログの親を指す NDF_RUN_ID とは別の値で、実行ログを開いた実行でも上書きされない。無ければプランの外の起動で、行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_PROGRESS_DB` | service | string | 秘密 | ステートマシンの DB の URL（sqlite:/// か postgresql://。PostgreSQL の URL は認証情報を含むため秘密）。無ければチェックアウトの保存先の progress.sqlite。Factory は PostgreSQL の URL を入れる | 公開 |
 | `NDF_RELAY_DIR` | ndf | path | — | 中継のラッパーが子のセッションへ渡すセグメントのやり取りの保存先。hook が次のセグメントのマーカーと問い合わせをここへ書く。無ければ中継の外 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_HUB_WAIT` | user | seconds | — | 頼む側がリレーハブの回答を待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
@@ -76,14 +84,19 @@ NDF が読む環境変数と、NDF が子のプロセスへ渡す環境変数で
 | `NDF_RELAY_SPIN` | user | seconds | — | 再起動ループとみなすセグメントの秒。0 で検出を切る。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_STOP_WAIT` | user | seconds | — | 名前つきの stop がラッパーの終わりを待つ上限。無ければ上限の設定の値 | 内部（予告なく変えてよい） |
 | `NDF_RELAY_TMUX` | user | path | — | リレーハブが呼ぶ tmux の実行ファイル。無ければ PATH の tmux | 内部（予告なく変えてよい） |
+| `NDF_RETRY_CAUSE` | ndf | string | — | プランの実行が、同じ失敗への 2 回目以降の修正のステップの子へ渡す失敗の理由（#2944。表 launch-experiments の retries の値）。ndf worker run は失敗の理由をもとに、引き上げの規則に従ってモデルか effort を 1 段階上げる。手動の指定（引数か環境変数）が優先される場合や、規則で上げられる値が無い場合は、選んだ値のまま起動する。無いか空なら上げない。表に無い値なら起動せずに止まり、誤りの文に値を出さない | 内部（予告なく変えてよい） |
 | `NDF_RUNTIME_SESSION` | user | string | — | ランタイムのセッションを <pid>:<開始時刻> で指定する（テストと CI）。無ければ祖先のプロセスから探す | 内部（予告なく変えてよい） |
 | `NDF_SHARED_CONFIG_DIR` | ndf | path | — | アカウントの子の中で、元の CLAUDE_CONFIG_DIR を持つ（空なら ~/.claude）。アカウントの登録の保存先を決める。登録済みアカウントの子には、親にあれば親の値、無ければ子へ渡す前の CLAUDE_CONFIG_DIR（無ければ空文字）を入れる | 内部（予告なく変えてよい） |
 | `NDF_STATE_HOME` | user | path | — | 状態の保存先の根。保存先は <値>/<プラグイン名>（XDG_STATE_HOME と同じ読み方。入れ替えの前に旧い NDF と同じ値を渡されても、旧い保存先を退避しない）。無ければ XDG_STATE_HOME の下 | 公開 |
+| `NDF_STEP_ATTEMPT` | ndf | integer | — | プランの実行がステップの子へ渡す、そのプランの実行でそのステップを実行した何回目か（最初が 1。打ち直しと、遷移で戻った実行の両方で 1 増える）。使用量ログの行の attempt になる（#1959）。無いか 1 以上の整数でなければ行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
+| `NDF_STEP_ID` | ndf | string | — | プランの実行がステップの子へ渡す、ステップの id。使用量ログの行の step になる（#1959）。無ければプランの外の起動で、行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_SUPERVISE_CLAUDE_FALLBACK` | user | string | 秘密 | 従量の接続の設定（KEY=VALUE を空白区切り）。定義されていれば保存した設定（metered.json）より先に読む | 内部（予告なく変えてよい） |
 | `NDF_UNIT_FILE` | ndf | path | — | レビューの単位の指示（単位の範囲）のファイル。ndf cross-review run が相手役と修正担当の指示に中身と例外を足す。無ければ単位の指示を足さない。指すファイルを読めなければ invalid で止まる | 内部（予告なく変えてよい） |
+| `NDF_UNIT_ID` | ndf | string | — | プランの実行がステップの子へ渡す、モデルと effort の割り付けの単位の ID（#2944）。ndf worker run は --unit が無ければこの値を単位にし、Skill を回す起動も読む。無いか空なら割り付けない。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `NDF_UPKEEP_STATE_DIR` | user | path | — | 棚卸しの状態（候補・順位・却下・見積・付け直しの前の状態・深さの記録）の保存先。無ければメインディレクトリの .ndf/backlog/state | 内部（予告なく変えてよい） |
 | `NDF_USAGE_DIR` | user | path | — | 使用量の使用量ログ（usage.jsonl）の保存先。hook から書いてもスクリプトから書いても同じ保存先になる。無ければ状態の保存先の usage | 内部（予告なく変えてよい） |
 | `NDF_VERSION` | service | string | — | サービスの実行ジョブが入れた NDF のバージョン（開発版は <version>@<コミットの SHA>） | 公開 |
+| `NDF_WORKFLOW_MODE` | ndf | string | — | プランの実行がステップの子へ渡す工程のモード（工程の入力の mode。standard など。#2944）。起動の値を選ぶ処理は、引数の mode が無ければこの値を使用量ログと実験の記録の行の mode にする。割り付ける組と確率は変えない。工程の入力に mode が無ければプランの実行が子の環境から外し、行の欄を省く。中継が起動する対話のセッションへは渡さない | 内部（予告なく変えてよい） |
 | `PATH` | user | string | — | 外部 CLI（gh・claude・codex）の実行ファイルを探す道。下限の比べ（cli_floor）が、起動へ渡す環境に無ければこのプロセスの値で、起動と同じ実行ファイルを解く。どちらにも無ければ既定の道（os.defpath） | 内部（予告なく変えてよい） |
 | `SLACK_BOT_TOKEN` | user | string | 秘密 | Slack の通知のトークン。無ければ通知しない | 内部（予告なく変えてよい） |
 | `SLACK_CHANNEL_ID` | user | string | — | Slack の通知先のチャンネル | 内部（予告なく変えてよい） |

@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "experiment.schema.json",
+  "title": "モデルと effort の実験の記録の 1 行",
+  "description": "実験の記録（表 ndf-files の launch-experiments。月ごとの JSONL）の行（#2944）。kind で 6 つの形に分かれる。書き手は ndf.adapters.model_choice（割り付け・停止・拒否）と、効果指標・実際のモデル・費用を計算できないモデルを書く後の単位。記録は割り付け ID（assign_id）で結ぶ",
+  "$defs": {
+    "id": {"type": "string", "minLength": 1},
+    "arm": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "選択肢の組（どちらも省ける。{} は指定なし）",
+      "properties": {"model": {"type": "string", "minLength": 1}, "effort": {"type": "string", "minLength": 1}}
+    },
+    "assign": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "割り付け（単位の最初の起動で 1 行）",
+      "required": ["version", "at", "kind", "assign_id", "unit", "stage", "runtime", "repo", "arms", "probs", "chosen", "key", "phase", "window_days"],
+      "properties": {
+        "version": {"$ref": "common.schema.json#/$defs/version"},
+        "at": {"$ref": "common.schema.json#/$defs/time"},
+        "kind": {"const": "assign"},
+        "assign_id": {"$ref": "#/$defs/id", "description": "割り付けの行を書くたびに新しく発行する一意な値"},
+        "unit": {"$ref": "#/$defs/id", "description": "単位の ID"},
+        "stage": {"type": "string", "description": "工程"},
+        "runtime": {"type": "string", "description": "ランタイム（表 runtimes の id）"},
+        "repo": {"type": "string", "description": "リポジトリのキー（model_choice.repo_key。git を起動せずに求めた git の共通ディレクトリの実体）"},
+        "mode": {"type": "string", "description": "工程のモード。分かる起動だけ"},
+        "arms": {"type": "array", "minItems": 2, "items": {"$ref": "#/$defs/arm"}, "description": "そのときの選択肢（先頭が基準の組）"},
+        "probs": {"type": "array", "minItems": 2, "items": {"type": "number", "minimum": 0, "maximum": 1}, "description": "選択肢ごとの確率。候補は 0 より大きく、ほかは 0"},
+        "chosen": {"type": "integer", "minimum": 0, "description": "選んだ組の添字"},
+        "key": {"type": "string", "description": "互換性のキー（選択肢の並びと指標の名前とバージョンのハッシュ）"},
+        "phase": {"enum": ["burn_in", "adaptive", "uniform"], "description": "burn_in は件数を集める間か使える出現率が無い、adaptive は調整した出現率、uniform は費用を計算できないモデルがあり均等"},
+        "window_days": {"type": "integer", "minimum": 1, "maximum": 365, "description": "割り付けたときの選択の計算に使う期間（日）。月の掃除が、保存先を共有するリポジトリのうち最も長い期間の記録を残すために読む"}
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "効果指標（単位の評価で 1 行）",
+      "required": ["version", "at", "kind", "assign_id", "metric", "metric_version", "quality", "detail"],
+      "properties": {
+        "version": {"$ref": "common.schema.json#/$defs/version"},
+        "at": {"$ref": "common.schema.json#/$defs/time"},
+        "kind": {"const": "outcome"},
+        "assign_id": {"$ref": "#/$defs/id"},
+        "metric": {"type": "string", "description": "指標の名前"},
+        "metric_version": {"type": "integer", "minimum": 1, "description": "指標の定義のバージョン"},
+        "quality": {"type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "0〜1。取れなければ null"},
+        "detail": {"type": "object", "description": "元の数（採用された重大な指摘の数など）"}
+      }
+    },
+    "launch_error": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "単位を持つ起動がモデルを理由にした拒否で終えた",
+      "required": ["version", "at", "kind", "assign_id", "stage", "runtime", "arm", "reason", "switched"],
+      "properties": {
+        "version": {"$ref": "common.schema.json#/$defs/version"},
+        "at": {"$ref": "common.schema.json#/$defs/time"},
+        "kind": {"const": "launch_error"},
+        "assign_id": {"$ref": "#/$defs/id"},
+        "stage": {"type": "string"},
+        "runtime": {"type": "string"},
+        "arm": {"$ref": "#/$defs/arm", "description": "起動できなかった組"},
+        "reason": {"type": "string", "description": "拒否の理由"},
+        "switched": {"type": "boolean", "description": "基準の組へ切り替えたか"}
+      }
+    },
+    "halted": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "単位を実験の対象外にした",
+      "required": ["version", "at", "kind", "unit", "repo", "stage", "runtime", "assign_id", "reason"],
+      "properties": {
+        "version": {"$ref": "common.schema.json#/$defs/version"},
+        "at": {"$ref": "common.schema.json#/$defs/time"},
+        "kind": {"const": "halted"},
+        "unit": {"$ref": "#/$defs/id"},
+        "repo": {"type": "string", "description": "リポジトリのキー（model_choice.repo_key）。単位の ID は呼び出し元が付けるので、停止はリポジトリ・工程・ランタイムで絞る"},
+        "stage": {"type": "string", "description": "工程"},
+        "runtime": {"type": "string", "description": "ランタイム（表 runtimes の id）"},
+        "assign_id": {"oneOf": [{"$ref": "#/$defs/id"}, {"type": "null"}], "description": "単位の割り付け ID。無ければ null"},
+        "reason": {"enum": ["disabled", "fixed", "changed", "manual"], "description": "disabled は停止、fixed は選択肢が 1 つ、changed は選択肢か指標の変更、manual は引数か環境変数の指定"}
+      }
+    },
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "割り付けのある Claude の単位の、引き上げでも基準への切り替えでもない起動が、実際のモデルを最初に返した",
+      "required": ["version", "at", "kind", "assign_id", "arm", "model"],
+      "properties": {
+        "version": {"$ref": "common.schema.json#/$defs/version"},
+        "at": {"$ref": "common.schema.json#/$defs/time"},
+        "kind": {"const": "observed"},
+        "assign_id": {"$ref": "#/$defs/id"},
+        "arm": {"$ref": "#/$defs/arm"},
+        "model": {"type": "string", "minLength": 1, "description": "実際のモデル"}
+      }
+    },
+    "unpriced": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "起動の費用を計算できないモデルに当たった",
+      "required": ["version", "at", "kind", "assign_id", "model"],
+      "properties": {
+        "version": {"$ref": "common.schema.json#/$defs/version"},
+        "at": {"$ref": "common.schema.json#/$defs/time"},
+        "kind": {"const": "unpriced"},
+        "assign_id": {"$ref": "#/$defs/id"},
+        "model": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "type": "object",
+  "required": ["version", "at", "kind"],
+  "properties": {"at": {"$ref": "common.schema.json#/$defs/time"}},
+  "oneOf": [
+    {"$ref": "#/$defs/assign"},
+    {"$ref": "#/$defs/outcome"},
+    {"$ref": "#/$defs/launch_error"},
+    {"$ref": "#/$defs/halted"},
+    {"$ref": "#/$defs/observed"},
+    {"$ref": "#/$defs/unpriced"}
+  ]
+}

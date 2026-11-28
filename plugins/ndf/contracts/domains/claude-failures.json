@@ -13,6 +13,7 @@
     {"id": "timeout", "meaning": "期限を超えた", "judge_cause": "interrupted", "work_cause": "interrupted", "skill_cause": "interrupted"},
     {"id": "usage_limit", "meaning": "利用上限に当たった", "judge_cause": "usage_limit", "work_cause": "usage_limit", "skill_cause": "usage_limit"},
     {"id": "refused", "meaning": "学習に使わない設定と確かめられていないか、claude が下限より古いので起動しなかった", "judge_cause": "precondition", "work_cause": "refused", "skill_cause": "precondition"},
+    {"id": "model_refused", "meaning": "モデルか effort の指定を理由に、実行を始める前に断られた（#2944。基準の組へ切り替えられなければ止まる。理由と直す場所を示す）", "judge_cause": "precondition", "work_cause": "precondition", "skill_cause": "precondition"},
     {"id": "no_slot", "meaning": "重い起動のスロットが待ちの上限までに空かなかった", "judge_cause": "infra_wait", "work_cause": "infra_wait", "skill_cause": "precondition"}
   ]
 }

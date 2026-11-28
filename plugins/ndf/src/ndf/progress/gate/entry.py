@@ -28,8 +28,9 @@ from string import Template
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
+from ndf.adapters import claude_choice
 from ndf.adapters.git import Git, GitError
-from ndf.contracts import result, worker_paths
+from ndf.contracts import internal, result, worker_paths
 from ndf.contracts.worker_kinds import (
     DELIVERY,
     PRODUCT_VERSION,
@@ -407,6 +408,7 @@ class WorkHandoff(NamedTuple):
     workdir: Path
     prompt: str
     fd: int
+    mode: Optional[str] = None  # 工程の入力のモード（#2944）
     # 起動指示に書いた product_version の形。`work_argv` の `--require-version-number` へ同じ値で渡す（#4513）
     version_number: bool = False
 
@@ -418,7 +420,8 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
     要素がリンクなら止める）、`values.json` の読み取り（`values_in`）と報告の初期化・起動指示の書き込みを同じ記述子で
     行う。読んだ場所と書く場所が食い違わない。記録済みの値で終える作業は、起動指示も報告の初期化もせずに `Released` を返す
     （#4513）。起動指示を継ぐ記述子（`_held_prompt`）は初期化より先に用意し、用意できなければ
-    前の報告一式を残して止まる。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
+    前の報告一式を残して止まる。モデルと effort の値の誤り（`claude_choice.precheck_values`。`precondition`）も初期化の前に
+    確かめ、誤りなら前の報告一式を残して止まる（#2944）。起動指示とコマンドの見本のパスは解いた場所で組む（worker の
     `ndf worker append`・`ndf contracts emit --out` がリンクを経ずに開ける）。
     """
     _known(kind)
@@ -446,11 +449,16 @@ def _work_handoff(kind: str, state_dir: Path, cwd: Optional[str]) -> WorkHandoff
             version_number = aware and recorded.with_number
         else:
             version_number = aware and _needs_version_number(strategy)
+        # モデルと effort の値の誤り（`ndf worker run` が起動の前に止まるもの）を、前の報告一式を初期化する前に確かめる（#2944）
+        retry = os.environ.get(identity.env_name("retry-cause"))
+        claude_choice.precheck_values(cwd=workdir, retry=None if retry == "" else retry)
         body = work_prompt(kind, saved, workdir, paths, version_number=version_number)
         fd = _held_prompt(body)  # 前の報告一式を初期化する前に用意する（用意できなければ何も消さずに止まる）
         try:
             _write_prompt(wd, paths, body)
-            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd, version_number)
+            given = saved["inputs"].get("mode")
+            mode = given if isinstance(given, str) else None
+            return WorkHandoff(kind, wd.path, worker_paths.dir_id(wd), workdir, body, fd, mode=mode, version_number=version_number)
         except BaseException:
             os.close(fd)
             raise
@@ -501,6 +509,8 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
         kind = next(c for t, c in WORK_STOPS if isinstance(exc, t))
         items = exc.items if isinstance(exc, invoke.KindInputsMissing) else []
         return result.emit(result.stopped(TOOL, kind, str(exc), items=items))
+    except internal.InternalError as exc:  # モデルと effort の値の誤り（`claude_choice.precheck_values`）。前の報告一式は残っている
+        return result.emit(result.stopped(TOOL, exc.kind, str(exc)))
     if isinstance(handoff, Released):
         log.info("worker を起動せずに作業を終えた", extra={"kind": a.kind, "status": handoff.outcome["status"]})
         return result.emit(handoff.outcome)
@@ -514,6 +524,8 @@ def _cmd_work(argv: list[str], exec_: Callable[[str, list[str]], Any] = os.execv
             result_dir_id=handoff.dir_id,
             version_number=handoff.version_number,
         )
+        if handoff.mode:  # 工程の入力のモードは `--mode` で渡す（使用量ログと実験の記録に残す。#2944）
+            args += ["--mode", handoff.mode]
         # -I: 作業場所と呼び出し元の PYTHONPATH の ndf.py・ndf/ を NDF の src より先に読まない。置き換えた先も、呼び出し元が読む
         # 今の標準出力・標準エラーの文字コードで書く（プランのステップはロケールで読む。#4029）
         argv = invoke.ndf_command("worker", *args, keep_streams=True)

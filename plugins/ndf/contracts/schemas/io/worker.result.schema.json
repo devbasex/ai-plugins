@@ -21,6 +21,25 @@
           "type": "integer",
           "description": "worker を起動した回数（run）"
         },
+        "launch": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "起動の値と出所・割り付け ID と実際のモデル（run。#2944）。値を選ばなかった起動は置かない。欄の意味は使用量ログの行（contracts/schemas/internal/usage.schema.json）と同じで、値の無い欄は置かない。基準の組へ切り替えた起動は切り替えた後の値",
+          "properties": {
+            "layer": {"type": "string"},
+            "name": {"type": "string"},
+            "runtime": {"type": "string"},
+            "mode": {"type": "string"},
+            "unit": {"type": "string"},
+            "assign_id": {"type": "string"},
+            "requested_model": {"type": "string"},
+            "effort": {"type": "string"},
+            "model_source": {"type": "string"},
+            "effort_source": {"type": "string"},
+            "raised": {"type": "boolean"},
+            "model": {"type": "string", "description": "最後に実際のモデルを返した子のモデル（結果の modelUsage の主モデル）"}
+          }
+        },
         "expectation_search": {
           "type": [
             "object",

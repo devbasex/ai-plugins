@@ -147,7 +147,10 @@ def _run(capsys, monkeypatch, fake: Fake, wt: Path, *extra: str) -> tuple[int, d
 
 
 def _state(state_dir: Path) -> dict:
-    return store.read_object(store.state_pr(state_dir, PR).path)
+    got = store.read_object(store.state_pr(state_dir, PR).path)
+    for row in got.get("findings", []):
+        row.pop("raisers", None)  # 挙げた席は test_crossreview_experiment が確かめる
+    return got
 
 
 def test_loop_fixes_pushes_and_converges(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

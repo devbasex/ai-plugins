@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/io/launch-config.args.schema.json",
+  "title": "ndf launch-config の引数",
+  "description": "ndf launch-config が受ける引数。キーは引数の名前（オプションは -- の名前、位置引数は名前）。規約の生成が作り、手で直さない",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "approve",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--sha256": {
+          "type": "string",
+          "description": "示した承認の対象のハッシュ"
+        },
+        "--request": {
+          "type": "string",
+          "description": "承認のリクエストの識別子（質問で確認した場合）"
+        },
+        "--candidate": {
+          "type": "string",
+          "description": "反映する候補のパス"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--sha256"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "draft",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "revoke",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--sha256": {
+          "type": "string",
+          "description": "取り消す承認の対象のハッシュ"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--sha256"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
+          "const": "show",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--candidate": {
+          "type": "string",
+          "description": "候補のパス（draft が返したもの）"
+        },
+        "--question": {
+          "type": "string",
+          "enum": [
+            "approve"
+          ],
+          "description": "承認の質問を作る"
+        }
+      },
+      "required": [
+        "subcommand"
+      ]
+    }
+  ]
+}
