@@ -176,6 +176,4 @@ def hub(monkeypatch: pytest.MonkeyPatch) -> FakeHub:
 
     fake = FakeHub()
     monkeypatch.setattr(cli, "HUB", fake.make)
-    # 接続先は作業場所のリモート（テストではローカルのパス）から読まず、`FakeHub.make` と同じ順で決める
-    monkeypatch.setattr(cli, "TARGET", lambda repo_arg, state_repo, cwd: repo_arg or state_repo or "o/r")
     return fake

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, Optional, Protocol
 
 from ndf.adapters import git
@@ -60,36 +60,6 @@ def why_unread(run: Run, pr: Optional[threads.ReadPr]) -> Optional[str]:
         f"PR {pr.ident} の head（{pr.branch} の {pr.head[:9]}）が、レビューするブランチ {run.cfg.branch} の"
         f"取得した先頭 {run.synced_head[:9]} と違う"
     )
-
-
-def bind_target(run: Run, target_of: Callable[[], Optional[str]]) -> tuple[bool, Optional[str]]:
-    """状態の対象のリポジトリ（`target_repo`。起票先の確認に使う）を、head を確かめて読んだ PR から決める。状態を書き換えたか
-    （呼び手が保存する）と、レビューを始めずに止める理由を返す。
-
-    PR を読めない起動は、接続先（`target_of`）とブランチを `unconfirmed_target` に残す。保存済みのラウンドは、その値が読んだ PR の
-    リポジトリと今のブランチに一致するときだけ結び直す（どの PR のレビューか確かめられないラウンドを別の PR にしない。#3780）。"""
-    if store.repo_of(run.data) is not None:
-        return False, None
-    rounds = bool(store.list_of(run.data, store.ROUNDS))
-    held = run.data.get(store.UNCONFIRMED_KEY)
-    if run.read_pr is None:
-        slug = target_of()
-        now = {"repo": slug.casefold(), "branch": run.cfg.branch} if slug else None
-        if not rounds and now:
-            run.data[store.UNCONFIRMED_KEY] = now
-        elif now and held != now:
-            # 違う接続先かブランチのラウンドが混ざるので、照らし先を捨てて結び直さない
-            run.data.pop(store.UNCONFIRMED_KEY, None)
-        return False, None
-    repo = run.read_pr.ident.partition("#")[0]
-    if rounds and held != {"repo": repo.casefold(), "branch": run.cfg.branch}:
-        return False, (
-            f"状態の保存先 {run.cfg.state_dir} のラウンドに対象のリポジトリ target_repo が無く、どの PR のレビューか確かめられない。"
-            "保存先を消して打ち直す"
-        )
-    run.data[store.REPO_KEY] = repo
-    run.data.pop(store.UNCONFIRMED_KEY, None)
-    return True, None
 
 
 def confirmed(run: Run, head: Optional[str]) -> Optional[str]:

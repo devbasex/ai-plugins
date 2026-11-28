@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import re
@@ -217,7 +216,7 @@ def trusted(author_id: int, me: int, account_ids: Collection[int]) -> bool:
     return author_id > 0 and (author_id == me or author_id in account_ids)
 
 
-def prose(text: str) -> str:
+def _prose(text: str) -> str:
     """引用とコードブロックを除いた本文。"""
     lines = _lines_of(text)
     quoted: set[int] = set()
@@ -238,48 +237,25 @@ def matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool:
     URL は伏せ字が変えない末尾の `/pull/<番号>` で見る。"""
     if listed.is_pull or _final_line(listed.body) != issue_mark(ident):
         return False
-    return re.search(rf"/pull/{int(origin_pr)}(?!\d)", prose(listed.body)) is not None
+    return re.search(rf"/pull/{int(origin_pr)}(?!\d)", _prose(listed.body)) is not None
 
 
-def pr_numbers(text: str) -> tuple[int, ...]:
-    """文にある PR の URL の番号（重複は除く）。"""
-    return tuple(dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", text)))
+def issue_prs(body: str) -> tuple[int, ...]:
+    """引用とコードブロックを除いた本文にある PR の URL の番号。"""
+    return tuple(dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", _prose(body))))
 
 
-class ParsedBody:
-    """引用とコードブロックを除いた Issue の本文（`prose`）。PR の番号（`prs`）は、初めて読むときに抽出して持つ。"""
-
-    def __init__(self, prose: str) -> None:
-        self.prose = prose
-
-    @functools.cached_property
-    def prs(self) -> tuple[int, ...]:
-        return pr_numbers(self.prose)
-
-
-def parse_body(body: str) -> ParsedBody:
-    return ParsedBody(prose(body))
-
-
-def _has_mark(body: str, ident: str, parse: Callable[[str], ParsedBody]) -> bool:
-    """引用とコードブロックの外に、目印だけの行があるか。目印の文字列を含まない本文は解析しない。"""
-    mark = issue_mark(ident)
-    return mark in body and any(line.strip() == mark for line in _lines_of(parse(body).prose))
-
-
-def names_finding(listed: Listed, ident: str, text: str, parse: Callable[[str], ParsedBody] = parse_body) -> bool:
+def names_finding(listed: Listed, ident: str, text: str, prs_of: Callable[[str], Sequence[int]] = issue_prs) -> bool:
     """起票の記録か引き継ぎの URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。
-    引用かコードブロックに転載した目印は数えない。
 
     目印は、今の識別値 `ident` か、本文の PR の URL の番号（起票時の元の PR）と指摘の本文 `text` の識別値を受ける。PR を
     巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。
-    PR の番号は、今の識別値の目印が無いときだけ抽出する。呼び手は本文ごとの解析（`parse`）の結果を使い回し、抽出した番号も
-    その結果が持つ。"""
+    本文の解析（`prs_of`）は `ident` の目印が無いときだけする。"""
     if listed.is_pull:
         return False
-    if _has_mark(listed.body, ident, parse):
+    if issue_mark(ident) in listed.body:
         return True
-    return any(_has_mark(listed.body, identity(pr, text), parse) for pr in parse(listed.body).prs)
+    return any(issue_mark(identity(pr, text)) in listed.body for pr in prs_of(listed.body))
 
 
 def _issue_number(url: str, issues_url: str) -> Optional[int]:

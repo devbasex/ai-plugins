@@ -26,9 +26,6 @@ FIX_RESULT_NAME = "fix-pr{pr}-result.json"
 ORIGIN_KEY = "pr"
 CURRENT_KEY = "current_pr"
 REPO_KEY = "target_repo"
-# 最初のラウンドの前に PR を読めなかった起動の接続先とブランチ（`{"repo": ..., "branch": ...}`）。`target_repo` を後の起動で
-# 書くときの照らし先で、起票先には使わない（#3780）
-UNCONFIRMED_KEY = "unconfirmed_target"
 ROUNDS = "rounds"
 REVIEWED = "reviewed_sections"
 # `reviewed_sections` のセクションを読んだときの MVV を見分ける値（#4076）

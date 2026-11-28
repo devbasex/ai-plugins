@@ -769,8 +769,7 @@ def test_issue_3780_a_rerun_files_after_the_skip_is_resolved(tmp_path: Path, mon
     port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
     hub.leftovers, hub.clean = lambda pr: port, list
     note: list[Optional[str]] = ["リモートが違う" if before == "remote-differs" else None]
-    checked: list[str] = []
-    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: checked.append("target") or note[0])
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: note[0])
     state_dir = tmp_path / "st"
     store.write_object(state_dir / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": "o/r"})
     cfg = types.SimpleNamespace(state_dir=state_dir, pr=7, main=tmp_path)
@@ -787,18 +786,8 @@ def test_issue_3780_a_rerun_files_after_the_skip_is_resolved(tmp_path: Path, mon
     assert len(hub.comments) == 1 and github.issues == []
     note[0] = None
     settings_file.write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
-    checked.clear()
     rerun()
-    # 公開の判定と起票は、リモートの確認を共有する
-    assert len(hub.comments) == 2 and len(github.issues) == 1 and checked == ["target"]
-    # 公開の後に引き継いだ URL が増えて未照合の指摘ができれば、同じ指摘の状態でも公開し直す
-    path = state_dir / store.STATE_NAME.format(pr=7)
-    state = store.read_object(path)
-    state[leftover.CARRIED_URLS] = [github.issues[0]["html_url"]]
-    store.write_object(path, state)
-    rerun()
-    rerun()
-    assert len(hub.comments) == 3 and len(github.issues) == 1
+    assert len(hub.comments) == 2 and len(github.issues) == 1
 
 
 def test_filing_skipped_after_a_rewind_takes_no_lock_of_the_origin_pr(tmp_path: Path, monkeypatch, hub) -> None:

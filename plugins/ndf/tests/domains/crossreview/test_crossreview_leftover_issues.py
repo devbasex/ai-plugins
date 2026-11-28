@@ -186,15 +186,6 @@ def test_issue_3780_matches_finding_needs_the_mark_and_the_url_outside_quotes() 
 
 
 @pytest.mark.parametrize(
-    ("wrap", "wanted"),
-    [("{}\n\n書き足し", True), ("> {}", False), ("```\n{}\n```", False), ("`{}`", False)],
-)
-def test_issue_3780_names_finding_ignores_a_quoted_mark(wrap: str, wanted: bool) -> None:
-    body = wrap.format(leftover_decide.issue_mark("abc"))
-    assert leftover_decide.names_finding(_listed(body), "abc", "本文") is wanted
-
-
-@pytest.mark.parametrize(
     ("author", "author_id", "association", "permission", "wanted"),
     [
         ("x", 4, "OWNER", "none", True),
@@ -524,30 +515,17 @@ def test_issue_3780_a_url_already_in_the_record_is_not_written_again() -> None:
     assert github.count("PATCH", "comments/500") + github.count("POST", "issues/7/comments") == writes
 
 
-def test_issue_3780_pr_numbers_are_not_extracted_when_the_current_mark_matches(monkeypatch: pytest.MonkeyPatch) -> None:
-    github = FakeGitHub()
-    Run(github).go()
-    url = github.issues[0]["html_url"]
-    extracted: list[str] = []
-    monkeypatch.setattr(leftover_decide, "pr_numbers", lambda text: extracted.append(text) or ())
-    again = Run(github)
-    again.data[leftover.CARRIED_URLS] = [url]
-    assert again.go() == [] and again.row[Filed.URL] == url and extracted == []
-
-
 def test_issue_3780_the_body_of_a_carried_issue_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     github = FakeGitHub()
     Run(github).go()
     url = github.issues[0]["html_url"]
     parsed: list[str] = []
-    extracted: list[str] = []
-    real, numbers = leftover_decide.prose, leftover_decide.pr_numbers
-    monkeypatch.setattr(leftover_decide, "prose", lambda body: parsed.append(body) or real(body))
-    monkeypatch.setattr(leftover_decide, "pr_numbers", lambda text: extracted.append(text) or numbers(text))
+    real = leftover_decide.issue_prs
+    monkeypatch.setattr(leftover_decide, "issue_prs", lambda body: parsed.append(body) or real(body))
     again = Run(github, _row(text="別の指摘"), _row("r2-2", text="さらに別の指摘"))
     again.data[leftover.CARRIED_URLS] = [url]
     again.go()
-    assert len(parsed) == 1 and len(extracted) == 1
+    assert len(parsed) == 1
 
 
 def test_issue_3780_a_carried_url_is_found_by_the_issue_mark_without_the_text_of_the_record() -> None:

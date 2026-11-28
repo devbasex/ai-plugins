@@ -838,12 +838,11 @@ def drive(
     launch: Launcher = agents.run_agent,
     reader_for: Optional[carry.ReaderFor] = None,
     clean: report_decide.Cleaner = run_log.redact,
-    target_of: Callable[[], Optional[str]] = lambda: None,
 ) -> Outcome:
     """ラウンドを上限まで回し、要約を書いて返す。始められなければ `DriveStopped`・`worktree.WorktreeUnregistered`。
     `reader_for` は PR のコメントを読む口を作る（省けば読まない）。引き継ぎの確かめに要るもの（スレッドと PR コメント）は
     いつも読み、PR のマージ先は `--base` がコミットのときだけスレッドと同じ応答から読み、相手役へ渡す参考資料の残り（レビューコメントとレビュー本文）は相手役を初めて起動する直前に 1 回だけ読む（前回の結果を返すときと、判定待ちの結果だけで終わるときは読まない。PR 3944 の r2-10・#4363）。
-    `clean` は、結果と MVV の記録に残す自由記述を伏せる処理（省けば秘密だけを伏せる）。`target_of` は接続先のリポジトリを返す口で、PR を読めないときだけ呼ぶ（`reviewed_pr.bind_target`）。"""
+    `clean` は、結果と MVV の記録に残す自由記述を伏せる処理（省けば秘密だけを伏せる）。"""
     cfg = settings.outside_checkout(cfg)
     try:
         cfg.state_dir.mkdir(parents=True, exist_ok=True)
@@ -852,14 +851,14 @@ def drive(
         raise DriveStopped("precondition", f"状態の保存先 {cfg.state_dir} を作れない: {exc}") from exc
     run = _start(cfg, reader_for, clean)
     try:
-        return _drive_rounds(run, launch, reader_for, target_of)
+        return _drive_rounds(run, launch, reader_for)
     finally:
         # 止まったときも資料を消す。消せなくても結果は変えない（次の実行は新しいディレクトリを作る。#3955）
         if run.input_dir is not None:
             shutil.rmtree(run.input_dir, ignore_errors=True)
 
 
-def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.ReaderFor], target_of: Callable[[], Optional[str]]) -> Outcome:
+def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.ReaderFor]) -> Outcome:
     cfg = run.cfg
     prs = carry.reader(cfg, reader_for, run.warnings)
     prior = carry.read_prior(prs, run.warnings)
@@ -869,10 +868,16 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.Reader
         # 読めなかった原因は注意にある。結果へ載る文なので秘密を伏せる
         detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}", *run.warnings]
         raise DriveStopped("precondition", "\n".join(str(line) for line in run_log.redact(detail)))
-    bound, refused = reviewed_pr.bind_target(run, target_of)
-    if refused is not None:
-        raise DriveStopped("precondition", refused)
-    if bound:
+    if run.read_pr is not None and store.repo_of(run.data) is None:
+        # 保存済みのラウンドがどのリポジトリの PR のものか確かめられないので、読んだ PR へ結び直さない（#3780）
+        if store.list_of(run.data, store.ROUNDS):
+            raise DriveStopped(
+                "precondition",
+                f"状態の保存先 {cfg.state_dir} のラウンドに対象のリポジトリ target_repo が無く、どの PR のレビューか確かめられない。"
+                "保存先を消して打ち直す",
+            )
+        # 起票先の確認に使う。head を確かめて読んだ PR のリポジトリだけを書く（#3780）
+        run.data[store.REPO_KEY] = run.read_pr.ident.partition("#")[0]
         _save(run)
     if carry.carry(run, prior):
         _save(run)
