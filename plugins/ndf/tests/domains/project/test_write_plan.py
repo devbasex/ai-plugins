@@ -10,7 +10,7 @@ import git_sandbox
 import pytest
 
 from ndf.domains.project import analysis_record, check, cli, write
-from ndf.domains.project.items import value_digest
+from ndf.domains.project.items import measured, value_digest
 from ndf.domains.records import files
 
 INPUTS = {"pyproject.toml": "3634277f"}
@@ -185,10 +185,6 @@ def no_git(tmp_path, monkeypatch) -> Path:
     return main
 
 
-def _measured(value) -> dict:
-    return {"status": "measured", "value": value}
-
-
 def _apply(planned: write.Plan) -> None:
     """計画のファイルを順に書く。"""
     for f in planned.files:
@@ -202,7 +198,7 @@ def _new(planned: write.Plan, name: str) -> dict:
 
 
 def test_the_first_plan_has_none_of_the_unread_items(no_git):
-    items = {"ci": _measured({"required_checks": []}), **{k: _measured(v) for k, v in OLD_SIX.items()}}
+    items = {"ci": measured({"required_checks": []}), **{k: measured(v) for k, v in OLD_SIX.items()}}
     doc = _new(_plan(no_git, measure={**MEASURE, "items": items}), PROJECT)
     assert not set(UNREAD) & set(doc) and not set(UNREAD) & set(doc["analysis"]["written"])
     assert not set(UNREAD) & set(write.ITEM_KEYS)
@@ -232,7 +228,7 @@ def test_plan_removes_the_dropped_items_even_when_edited_by_hand(no_git):
     written |= {"checks": value_digest({"tools": [{"name": "ruff", "config": "x"}]}), "ci": value_digest(ci)}
     existing = {"version": 1, "ci": ci, "materials": hand_materials, **OLD_SIX, "analysis": {"written": written}}
     _put(no_git, "project", json.dumps(existing))
-    items = {"ci": _measured({"required_checks": ["lint"]}), "materials": _measured({"deferred_milestones": []})}
+    items = {"ci": measured({"required_checks": ["lint"]}), "materials": measured({"deferred_milestones": []})}
     measure = {**MEASURE, "items": items}
     planned = _plan(no_git, existing=existing, measure=measure)
     doc = _new(planned, PROJECT)
@@ -261,7 +257,7 @@ def test_the_diff_names_the_dropped_items_without_their_values(no_git, capsys, d
 
 def test_a_measure_of_an_older_analyzer_stays_stale(no_git):
     older = check.ANALYZER - 1
-    measure = {**MEASURE, "analyzer": older, "items": {"ci": _measured({"required_checks": []})}}
+    measure = {**MEASURE, "analyzer": older, "items": {"ci": measured({"required_checks": []})}}
     doc, record = None, None
     for _ in range(2):
         planned = _plan(no_git, existing=doc, measure=measure, record=record)
