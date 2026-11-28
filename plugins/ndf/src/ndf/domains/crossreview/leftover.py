@@ -104,14 +104,12 @@ def unconfirmed_target(
     main: Path, repo_arg: Optional[str], state_repo: Optional[str], make: Callable[[Path], git.Git] = git.Git
 ) -> Optional[str]:
     """起票先が `main` の設定のリポジトリだと確かめられないときの注意（確かめられれば None）。起票先は `--repo`（`repo_arg`）、
-    無ければ状態ファイルの対象のリポジトリ（`state_repo`）で、両方あって違えば確かめられない。どちらも無ければ起票先は打った
-    場所のリモートから決まるので、確かめるものは無い。"""
+    無ければ状態ファイルの対象のリポジトリ（`state_repo`）で、どちらも無ければ元の PR のリポジトリを確かめられない。
+    両者の食い違いは、呼び手が公開の前に断る。"""
     skipped = "直さずに残した指摘を起票していない"
-    if repo_arg and state_repo and repo_arg.casefold() != state_repo.casefold():
-        return f"{skipped}（--repo の {repo_arg} と状態ファイルの対象 {state_repo} が違う）"
     target = repo_arg or state_repo
     if not target:
-        return None
+        return f"{skipped}（--repo も状態ファイルの対象も無く、元の PR のリポジトリを確かめられない）"
     try:
         own = make(main).remote_repo()
     except (git.GitError, OSError) as exc:

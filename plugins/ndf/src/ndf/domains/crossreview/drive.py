@@ -862,6 +862,10 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.Reader
         # 読めなかった原因は注意にある。結果へ載る文なので秘密を伏せる
         detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}", *run.warnings]
         raise DriveStopped("precondition", "\n".join(str(line) for line in run_log.redact(detail)))
+    if run.read_pr is not None and store.REPO_KEY not in run.data:
+        # 起票先の確認に使う。head を確かめて読んだ PR のリポジトリだけを書く（#3780）
+        run.data[store.REPO_KEY] = run.read_pr.ident.partition("#")[0]
+        _save(run)
     if carry.carry(run, prior):
         _save(run)
     if carry.restate(run):

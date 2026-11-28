@@ -19,7 +19,7 @@ from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import journal, leftover, leftover_decide, report_decide, store, threads, verify_decide
 from ndf.domains.records.mvv import Snapshot
 
-from ._repos import Repos, run_cli, sh
+from ._repos import BRANCH, Repos, run_cli, sh
 from .conftest import FakePort
 from .test_crossreview_leftover import _rounds, _said
 from .test_crossreview_leftover_issues import FakeGitHub
@@ -205,9 +205,8 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
     [
         pytest.param(None, "o/r", "O/R", False, id="same"),
         pytest.param("o/r", "o/r", "o/r", False, id="arg-and-state-agree"),
-        pytest.param(None, None, "o/r", False, id="decided-by-the-remote"),
+        pytest.param(None, None, "o/r", True, id="no-target"),
         pytest.param(None, "o/r", "me/other", True, id="other-main"),
-        pytest.param("o/x", "o/r", "o/x", True, id="arg-differs-from-state"),
         pytest.param(None, "o/r", None, True, id="main-unreadable"),
     ],
 )
@@ -221,6 +220,21 @@ def test_issue_3780_2_filing_needs_the_settings_of_the_target_repository(
 
     note = leftover.unconfirmed_target(Path("main"), repo_arg, state_repo, lambda p: types.SimpleNamespace(remote_repo=remote_repo))
     assert (note is not None) is refused
+
+
+def test_issue_3780_2_report_writes_nothing_when_the_repo_differs_from_the_state(tmp_path: Path, capsys, hub) -> None:
+    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"})
+    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7", "--repo", "acme/other")
+    assert (code != 0, got["cause"]["kind"]) == (True, "precondition") and "acme/other" in got["cause"]["detail"]
+    assert (hub.made, hub.comments, hub.port.opened, hub.port.resolved) == (0, [], [], [])
+
+
+def test_issue_3780_2_run_saves_the_repository_of_the_confirmed_pr(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt)
+    assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
 
 
 def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, monkeypatch, hub) -> None:

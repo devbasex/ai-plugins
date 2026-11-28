@@ -513,6 +513,12 @@ def _post_report(
     ref = store.state_pr(state_dir, pr)
     if not ref.path.is_file():
         raise ReportFailed(f"PR #{pr} の状態ファイルが {state_dir} に無い")
+    # `--repo` が接続先を決めるので、状態の対象と違えば、どこへ書くより前に公開をまとめて中止する（#3780）
+    state_repo = store.state_repo(ref)
+    if filer.repo_arg and state_repo and filer.repo_arg.casefold() != state_repo.casefold():
+        raise ReportFailed(
+            f"PR #{ref.current_pr} の記録を公開していない（--repo の {filer.repo_arg} と状態ファイルの対象 {state_repo} が違う）"
+        )
     try:
         hub = hub_of()
         # 同じ PR の公開のロックの中で状態ファイルを読み直す（後から取った公開は先の記録を見て二重に書かない。#4016）
@@ -572,7 +578,7 @@ def _main_of_cwd() -> Optional[Path]:
     """打った場所のメインディレクトリ。決められなければ None（起票先の設定を読めないので起票しない）。"""
     try:
         return location.main_worktree(git.Git(Path.cwd()))
-    except (git.GitError, OSError):
+    except (git.GitError, OSError):  # noqa: NDF401 外部コマンド: 決められなければ呼び手が起票を見送り、注意に出す
         return None
 
 
