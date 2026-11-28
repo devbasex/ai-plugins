@@ -257,11 +257,12 @@ def test_a_lagging_worktree_is_moved_forward_and_reads_the_units_added_on_the_re
     assert _git(sprint, "rev-parse", "HEAD") == _git(other, "rev-parse", "HEAD")
 
 
-def test_units_only_on_the_remote_send_an_older_definition_to_the_conversion(sprint, tmp_path):
+def test_units_only_on_the_remote_send_an_older_definition_to_the_conversion(sprint, tmp_path, git_calls):
     other = _clone(sprint, tmp_path)
     _commit_plan(other, PLAN_WITH_UNITS)
     _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
     asked: list[str] = []
+    git_calls.clear()
 
     def destination(g, branch):
         asked.append(branch)
@@ -272,7 +273,7 @@ def test_units_only_on_the_remote_send_an_older_definition_to_the_conversion(spr
 
     # 通常の入口の振り分け（by_units）を通り、単位に分けないプランは組まない
     assert invoke.prepare_plan(stage_run, tmp_path / "w", sprint) is None
-    assert asked == [BRANCH]
+    assert asked == [BRANCH] and [c[0] for c in git_calls].count("fetch") == 1
 
 
 def test_a_worktree_diverged_from_the_remote_stops(sprint, tmp_path):

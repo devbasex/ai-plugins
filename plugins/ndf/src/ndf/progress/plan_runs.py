@@ -59,6 +59,8 @@ class SprintPlan:
     reusable: Optional[Callable[..., bool]] = None
     # 文脈の branch（`per_unit` の無い定義は工程の入力に持たないことがある）
     branch: Optional[str] = None
+    # 取得の URL がスプリントのリポジトリを指すことを、通信の前に確かめる（`units_convert.check_fetch`。`(git)`）。新しい定義は None
+    verify_fetch: Optional[Callable[..., None]] = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,8 @@ class StageRun:
     start: Optional[str] = None
     # 単位ごとに流す工程だけが持つ、スプリントの保存した状態（#3702）
     sprint: Optional[SprintPlan] = None
+    # 経路の判定がリモート名の取得で読んだ中身（`units_flow.Peeked`）。開始前の確かめは取得し直さない
+    peeked: Optional[Any] = field(default=None, compare=False)
 
     def plain(self) -> StageRun:
         """単位に分けない呼び出し。入力の `branch` は除く（残すと差し込みの `branch` になり、作業場所の今のブランチを使わない）。"""

@@ -143,7 +143,7 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     branch = _current_branch(g)
     remote = g.remote()
     uncommitted = _uncommitted(g, issues)
-    head, tip, at_head, at_tip, checked_to = units_flow.read_start(g, remote, branch, issues, sprint.destination)
+    head, tip, at_head, at_tip, checked_to = units_flow.read_start(g, remote, branch, issues, sprint, run.peeked)
     left = units_flow.Seen(units_flow.worktree_plans(root, uncommitted), bool(units_files.paths_naming(uncommitted, issues)))
     if not (sprint.required or at_head.has_units() or at_tip.has_units() or left.has_units()):
         return _plain_route(work_dir)

@@ -25,13 +25,14 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
 from concurrent import futures
+from dataclasses import replace
 from graphlib import TopologicalSorter
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
-from ndf.adapters.git import HEADS, Completed, Git, mask_urls
+from ndf.adapters.git import HEADS, Completed, Git, GitError, mask_urls
 from ndf.contracts import facts, result, worker_paths
 from ndf.core import route
 from ndf.core.issue_docs import plan_issues
@@ -40,7 +41,7 @@ from ndf.core.plan import units_files
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, has_units, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
 from ndf.progress import plan_runs, units_queue
-from ndf.progress.plan_runs import StageResult, UnitsStopped
+from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
 
 # PR がキューに残りうる停止理由（待てば進むので、ほかの理由の失敗があればそちらを結果の種類にする。前ほど優先する）
 WAIT_KINDS = ("infra_wait", github_merge.MERGE_QUEUE_PENDING)
@@ -696,6 +697,15 @@ class Start(NamedTuple):
     checked_to: Optional[tuple[str, Optional[str]]]
 
 
+class Peeked(NamedTuple):
+    """リモート名の取得 1 回で読んだ手元と取得先の HEAD。取得先にブランチが無ければ `head` は "HEAD" で `tip` は None。"""
+
+    head: str
+    tip: Optional[str]
+    at_head: Seen
+    at_tip: Seen
+
+
 def probe_branch(g: Git, source: str, branch: str) -> Completed:
     """`source`（リモート名か URL）にブランチがあるかを読む。無ければ終了コードが `LS_REMOTE_ABSENT`。"""
     return g.attempt("ls-remote", "--exit-code", "--heads", source, f"{HEADS}{branch}")
@@ -719,18 +729,43 @@ def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
     )
 
 
-def fetched_has_headings(g: Git, remote: str, branch: str, issues: Sequence[int]) -> bool:
-    """手元の HEAD の実装計画に単位の欄が無いときの、取得先の確かめ。取得先の実装計画に欄があるか。
+def peek(g: Git, remote: str, branch: Optional[str], issues: Sequence[int], here: Optional[Seen]) -> Peeked:
+    """リモート名で 1 回取得し、手元の HEAD と取得先の HEAD の中身を読む。`here` は読み終えた手元の HEAD の中身。"""
+    fetched = None if branch is None else _fetched_tip(g, remote, branch)
+    head, tip = fetched if fetched is not None else ("HEAD", None)
+    at_head = here if here is not None else seen_at(g, head, issues)
+    return Peeked(head, tip, at_head, at_head if tip is None or tip == head else seen_at(g, tip, issues))
 
-    取得できなければ真を返し、開始前の確かめに理由を返して止めさせる（欄が無いと確かめずに、課題全体の実装を流さない）。
+
+def by_units(run: StageRun, location: Path) -> Optional[StageRun]:
+    """単位を流す処理へ渡す呼び出し。渡さなければ None。`per_unit` の無い定義のスプリントは、実装計画に単位の欄があるとき
+    渡す（#3702 の決定 10）。
+
+    作業場所の実装計画に欄が無ければ、取得の URL を確かめてから今いるブランチを取得し、取得先の実装計画も読む。読んだ結果は
+    返す呼び出しに持たせ、開始前の確かめは取得し直さない。確かめか取得に失敗した場合も呼び出しを返し、開始前の確かめに理由を
+    返して止めさせる（欄が無いと確かめずに、課題全体の実装を流さない）。
     """
+    if run.per_unit or run.sprint is None or run.sprint.convert is None:
+        return run if run.per_unit else None
+    g = Git(location)
+    issues = sorted({int(n) for n in run.inputs["issues"]})
     try:
-        fetched = _fetched_tip(g, remote, branch)
+        root = Path(g.run("rev-parse", "--show-toplevel").strip())
+        changed = [p for p in g.status_paths() if is_sprint_plan(p, issues)]
+        here = seen_at(g, "HEAD", issues)
+        if any(has_units(p.text) for p in [*here.plans, *worktree_plans(root, changed)]):
+            return run
+        branch = g.run("branch", "--show-current").strip()
+        if branch == "":
+            return None
+        if run.sprint.verify_fetch is not None:
+            run.sprint.verify_fetch(g)
+        peeked = peek(g, g.remote(), branch, issues, here)
     except UnitsStopped:
-        return True
-    if fetched is None or fetched[0] == fetched[1]:
-        return False
-    return seen_at(g, fetched[1], issues).has_headings()
+        return run
+    except GitError:  # noqa: NDF401 外部コマンド: 読めない作業場所は、単位に分けない経路が理由を返す
+        return None
+    return replace(run, peeked=peeked) if peeked.at_tip.has_headings() else None
 
 
 def read_start(
@@ -738,20 +773,28 @@ def read_start(
     remote: str,
     branch: Optional[str],
     issues: Sequence[int],
-    destination: Optional[Callable[[Git, str], tuple[str, Optional[str]]]],
+    sprint: SprintPlan,
+    peeked: Optional[Peeked] = None,
 ) -> Start:
     """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
 
-    取得はリモート名で行う。`destination` があり（変換しうるスプリント）単位の欄が見つかったときだけ、確かめた送り先の
-    URL から HEAD を読む。手元に欄があればリモート名では取得せず、取得先にだけあれば送り先の HEAD で読み直す。
-    変換しないスプリントは送り先を使わないので、取得と push で認証の経路が違っても止まらず、通信も増えない。
+    取得はリモート名で行う。経路の判定が取得していれば（`peeked`）取得し直さない。変換しうるスプリント（`sprint.destination`
+    がある）は、取得の前に取得の URL を確かめ、単位の欄が見つかったときだけ、確かめた送り先の URL から HEAD を読む。
+    手元に欄があればリモート名では取得せず、取得先にだけあれば送り先の HEAD で読み直す。送り先から単位の欄のある実装計画を
+    読めなければ止める。変換しないスプリントは送り先を使わないので、取得と push で認証の経路が違っても止まらない。
     """
-    here = None if destination is None else seen_at(g, "HEAD", issues)
-    local_headings = here is not None and here.has_headings()
-    fetched = None if branch is None or local_headings else _fetched_tip(g, remote, branch)
-    head, tip = fetched if fetched is not None else ("HEAD", None)
-    at_head = here if here is not None else seen_at(g, head, issues)
-    at_tip = at_head if tip is None or tip == head else seen_at(g, tip, issues)
+    destination = sprint.destination
+    local_headings = False
+    if peeked is None:
+        here = None if destination is None else seen_at(g, "HEAD", issues)
+        local_headings = here is not None and here.has_headings()
+        if here is not None and local_headings:
+            peeked = Peeked("HEAD", None, here, here)
+        else:
+            if branch is not None and sprint.verify_fetch is not None:
+                sprint.verify_fetch(g)
+            peeked = peek(g, remote, branch, issues, here)
+    head, tip, at_head, at_tip = peeked
     checked_to = None
     if destination is not None and branch is not None and (local_headings or at_tip.has_headings()):
         url, found = destination(g, branch)
@@ -759,4 +802,10 @@ def read_start(
         if found != tip:
             head, tip = (g.rev_parse("HEAD"), found) if found is not None else ("HEAD", None)
             at_tip = at_head if found is None or found == head else seen_at(g, found, issues)
+        # 取得先にだけ欄があった場合に、欄の無い手元の計画へ戻ると、分けた変更を 1 本で流してしまう
+        if not local_headings and not at_tip.has_headings():
+            raise UnitsStopped(
+                "precondition",
+                f"取得先の {branch} の実装計画に単位の欄があるが、送り先の {branch} では確かめられないので、始めない",
+            )
     return Start(head, tip, at_head, at_tip, checked_to)

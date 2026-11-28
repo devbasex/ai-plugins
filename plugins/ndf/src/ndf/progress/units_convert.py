@@ -98,6 +98,7 @@ def sprint_plan(v: run_view.View, s: stages.StageDef, root: Path, repo: Callable
     return SprintPlan(
         convert=None if new_definition else functools.partial(convert, job),
         destination=None if new_definition else functools.partial(destination, job),
+        verify_fetch=None if new_definition else functools.partial(check_fetch, job),
         reusable=None if new_definition else functools.partial(still_converted, job),
         branch=context["branch"] if "branch" in context else None,
         required=required,
@@ -288,22 +289,34 @@ def _new_tree(r: _Run, commit: str) -> Path:
     return r.tree_path
 
 
+def _sprint_repo(job: Job) -> str:
+    """ステートマシンの `repo` を解析した `<所有者>/<リポジトリ>`。"""
+    machine = github_target(job.machine_repo())
+    if machine is None:
+        raise UnitsStopped("refused", "スプリントのリポジトリを解析できないので、変換しない")
+    return machine.repo
+
+
+def check_fetch(job: Job, git: Git, repo: Optional[str] = None) -> None:
+    """取得の URL がスプリントのリポジトリ（`repo` を省けば解析する）を指すことを確かめる。通信しない。違えば `refused`。"""
+    repo = _sprint_repo(job) if repo is None else repo
+    fetch = github_target(git.remote_url())
+    if fetch is None or fetch.repo.casefold() != repo.casefold():
+        now = "解析できない" if fetch is None else fetch.repo
+        raise UnitsStopped("refused", f"取得の URL のリポジトリがスプリントと違う（スプリント {repo}、今 {now}）ので、変換しない")
+
+
 def checked_url(job: Job, git: Git) -> str:
     """確かめた送り先の URL。通信しない。
 
     push の URL と取得の URL の両方が、スプリントのリポジトリであることを求める。単位を流す処理は、受け入れ条件の取得と
     単位の起動で使うリポジトリを取得の URL から決めるためである。違えば `UnitsStopped`（`refused`）。
     """
-    machine = github_target(job.machine_repo())
-    if machine is None:
-        raise UnitsStopped("refused", "スプリントのリポジトリを解析できないので、変換しない")
-    url, errors = units_sync.push_url(git, machine.repo)
+    repo = _sprint_repo(job)
+    url, errors = units_sync.push_url(git, repo)
     if url is None:
         raise UnitsStopped("refused", "送り先を確かめられないので、変換しない: " + "; ".join(errors))
-    fetch = github_target(git.remote_url())
-    if fetch is None or fetch.repo.casefold() != machine.repo.casefold():
-        now = "解析できない" if fetch is None else fetch.repo
-        raise UnitsStopped("refused", f"取得の URL のリポジトリがスプリントと違う（スプリント {machine.repo}、今 {now}）ので、変換しない")
+    check_fetch(job, git, repo)
     return url
 
 

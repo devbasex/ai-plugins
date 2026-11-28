@@ -46,7 +46,6 @@ from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.core.plan.review_units_decide import has_units
 from ndf.progress import (
     definition,
     issue_values,
@@ -589,27 +588,6 @@ class PreparedPlan(NamedTuple):
     local_tests: bool
 
 
-def by_units(run: StageRun, cwd: Path) -> bool:
-    """単位を流す処理へ渡すか。`per_unit` の無い定義のスプリントは、実装計画に単位の欄があるとき（#3702 の決定 10）。
-
-    作業場所の実装計画に欄が無ければ、今いるブランチを取得して取得先の実装計画も確かめる。
-    """
-    if run.per_unit or run.sprint is None or run.sprint.convert is None:
-        return run.per_unit
-    g = git.Git(work_location(run, cwd))
-    issues = sorted({int(n) for n in run.inputs["issues"]})
-    try:
-        root = Path(g.run("rev-parse", "--show-toplevel").strip())
-        changed = [p for p in g.status_paths() if units_flow.is_sprint_plan(p, issues)]
-        plans = [*units_flow.plans_at(g, "HEAD", issues)[0], *units_flow.worktree_plans(root, changed)]
-        if any(has_units(p.text) for p in plans):
-            return True
-        branch = g.run("branch", "--show-current").strip()
-        return branch != "" and units_flow.fetched_has_headings(g, g.remote(), branch, issues)
-    except GitError:  # noqa: NDF401 外部コマンド: 読めない作業場所は、単位に分けない経路が理由を返す
-        return False
-
-
 def _add_registered_branch(run: StageRun) -> StageRun:
     """工程の入力に `branch` の無い定義の呼び出しに、文脈の `branch` を足す。"""
     branch = run.sprint.branch if run.sprint is not None else None
@@ -624,8 +602,9 @@ def prepare_plan(run: StageRun, work_dir: Path, cwd: Path) -> Optional[PreparedP
     単位ごとに流す工程（`per_unit`）は開始前の確かめ（`units_invoke.prepare`）を行い、単位の経路なら None（単位ごとの値は
     単位を流すときに組む）、これまでの経路なら単位に分けない呼び出し（`StageRun.plain`）で組む（#4369）。
     """
-    if by_units(run, cwd):
-        if units_invoke.prepare(_add_registered_branch(run), work_dir, cwd) is not None:
+    routed = units_flow.by_units(run, work_location(run, cwd))
+    if routed is not None:
+        if units_invoke.prepare(_add_registered_branch(routed), work_dir, cwd) is not None:
             return None
         run = run.plain() if run.per_unit else run
     t = _template_of(run)
@@ -953,8 +932,9 @@ def invoke(
     `runner` は plan・script の子プロセスを、`call_claude` は skill の `claude -p` を打つ。skill と script は、入力に
     作業場所（`worktree`）があればそこで打つ（プランは埋めたプランの作業場所で受ける）。
     """
-    if run.kind == PLAN and by_units(run, cwd):
-        units = _units_stage(_add_registered_branch(run), cwd, work_dir, runner, answer)
+    routed = units_flow.by_units(run, work_location(run, cwd)) if run.kind == PLAN else None
+    if routed is not None:
+        units = _units_stage(_add_registered_branch(routed), cwd, work_dir, runner, answer)
         if units is not None:
             return units
         run = run.plain() if run.per_unit else run

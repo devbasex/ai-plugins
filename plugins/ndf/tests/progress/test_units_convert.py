@@ -756,9 +756,31 @@ def test_the_start_of_a_sprint_without_unit_headings(outcome, by_name, checked_t
 
     git = SimpleNamespace(run=lambda *args: "", fetch_branch=fetch_branch, commits_of=lambda *refs: ("local", "local"))
 
-    start = units_flow.read_start(git, "origin", SPRINT, [3], destination)
+    start = units_flow.read_start(git, "origin", SPRINT, [3], plan_runs.SprintPlan(destination=destination))
 
     assert (fetched, start.checked_to) == (by_name, checked_to)
+
+
+def test_a_refused_fetch_url_stops_before_any_fetch():
+    def refused(g):
+        raise UnitsStopped("refused", "取得の URL が違う")
+
+    git = SimpleNamespace(run=lambda *args: "", fetch_branch=lambda *args: pytest.fail("取得しない"))
+    sprint = plan_runs.SprintPlan(destination=lambda *args: pytest.fail("読まない"), verify_fetch=refused)
+
+    with pytest.raises(UnitsStopped, match="取得の URL"):
+        units_flow.read_start(git, "origin", SPRINT, [3], sprint)
+
+
+def test_units_seen_at_the_fetch_url_but_not_at_the_destination_stop():
+    empty = units_flow.Seen([], False)
+    headed = units_flow.Seen([PlanDoc(PLAN, frozenset({3}), OLD_PLAN)], False)
+    peeked = units_flow.Peeked("local", "tip", empty, headed)
+    git = SimpleNamespace(rev_parse=lambda ref: "local")
+    sprint = plan_runs.SprintPlan(destination=lambda g, branch: (URL, None))
+
+    with pytest.raises(UnitsStopped, match="送り先"):
+        units_flow.read_start(git, "origin", SPRINT, [3], sprint, peeked)
 
 
 def test_a_release_branch_declared_at_the_tip_stops_before_the_conversion(tmp_path, monkeypatch):
