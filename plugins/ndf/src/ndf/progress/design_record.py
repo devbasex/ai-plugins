@@ -201,7 +201,7 @@ def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mappi
     head = record["review"]["head"]
     if not _fetched(Git(tree.root), head):
         return [*found, f"記録の HEAD {head} が手元に無く、取得もできないので照らせない"]
-    found += _file_mismatches(units_files.Tree(tree.root, head), tree, issues)
+    found += _file_mismatches(units_files.Tree(tree.root, head), tree, targets)
     found += _handling_mismatches(targets["handling"], tree, issues)
     excluded = {int(n) for n, h in targets["handling"].items() if h["handling"] in units_files.EXCLUDED_HANDLINGS}
     held = context["plan_omitted"] if "plan_omitted" in context else []
@@ -224,15 +224,23 @@ def _fetched(g: Git, head: str) -> bool:
     return False
 
 
-def _file_mismatches(approved: units_files.Tree, now: units_files.Tree, issues: Sequence[int]) -> list[str]:
+def _file_mismatches(approved: units_files.Tree, now: units_files.Tree, targets: Mapping[str, Any]) -> list[str]:
+    """単位のファイルの違い。ファイルの増減は記録の全課題で見る。重複と中身は、記録を組むときに読む課題（実装計画を省かず、
+    独立した単位を持つ課題）のファイルだけを見る。"""
+    issues = targets["issues"]
+    handled = targets["handling"]
+    unread = {int(n) for n, h in handled.items() if h["handling"] in units_files.EXCLUDED_HANDLINGS} | set(targets["omitted"])
+    read = [n for n in issues if n not in unread]
     try:
-        before = set(units_files.find(approved, issues).values())
-        after = set(units_files.find(now, issues).values())
+        old_names, new_names = approved.names(), now.names()
+        old_read = set(units_files.find(approved, read, old_names).values())
+        new_read = set(units_files.find(now, read, new_names).values())
     except units_files.UnitsFileError as exc:
         return [str(exc)]
+    before, after = units_files.named(old_names, issues), units_files.named(new_names, issues)
     found = [f"{path}: 承認した単位のファイルが無い" for path in sorted(before - after)]
     found += [f"{path}: 承認の時点に無い単位のファイルがある" for path in sorted(after - before)]
-    common = sorted(before & after)
+    common = sorted(old_read & new_read)
     try:
         # 読み取りは側ごとに 1 回にまとめる（git の起動をファイル数に比例させない）
         old, new = approved.read_all(common), now.read_all(common)
