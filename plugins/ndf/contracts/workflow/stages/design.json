@@ -36,6 +36,9 @@
       "outputs": [
         "design_pr",
         "mvv_gate"
+      ],
+      "generated_outputs": [
+        "mvv_gate"
       ]
     }
   },

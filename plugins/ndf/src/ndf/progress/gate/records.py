@@ -15,9 +15,9 @@ from typing import Any, Optional
 
 from ndf import identity
 from ndf.contracts import facts
-from ndf.progress import invoke, model, run, stages
+from ndf.progress import approval_decide, invoke, model, run
 from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, sprint_issues
-from ndf.progress.run_view import read_accepted_head
+from ndf.progress.run_view import closes_only, read_accepted_head
 
 # --- 変更要求の記録 ---------------------------------------------------------------------------------
 
@@ -111,14 +111,30 @@ def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Option
 
     マージの側は、これを `--expect-head` へ渡し、承認の後に進んだ head をマージしない（#2147）。変更要求の後の承認だけを読む。
     承認の後に文書だけが加わって出し直さなかった（#3020）なら、そのときの head を返す（`root` は状態の保存先）。
-    工程の直近の開き直しより前の回答は読まない。
+    工程の直近の開き直し・手で終えた回答待ち・質問の出し直しより前の回答と、工程の今の対象と違う PR を見た回答は読まない
+    （`approved_seen` と同じ境界と対象の確かめ）。
+    最後の回答が工程を閉じるだけの確認（`closes_only`）でも None を返す。
+    最後の回答の後に却下か変更要求の投稿を試みた記録があれば None（`counted_approval` と同じ失効条件）。
     最後の回答が数えない MVV 判定の回答（`model.mvv_answer_void`）なら、その前の回答へさかのぼらずに None を返す（#3959 の決定 3）。
     """
     answered = (ev for ev in v.events if ev.draft.kind == run.ANSWERED and run.event_payload(ev).get("gate") == kind)
-    # 開き直しより前の承認は読まない（工程ごとの境界は 1 回だけ求める）
-    cut = stages.reopened_at(v.events)
-    got = [ev for ev in answered if ev.seq > (cut[k] if (k := str(ev.draft.row_key)) in cut else 0)]
-    if not got or model.mvv_answer_void(run.event_payload(got[-1]), kind):
+    # 境界より前の承認は読まない（工程ごとの境界は 1 回だけ求める）
+    cuts: dict[str, int] = {}
+    got = []
+    for ev in answered:
+        stage = str(ev.draft.row_key)
+        if stage not in cuts:
+            rows = [e for e in v.events if e.draft.row_key == stage]
+            cuts[stage] = approval_decide.approval_boundary(rows, str(run.event_payload(ev).get("step")))
+        if ev.seq > cuts[stage]:
+            got.append(ev)
+    if not got:
+        return None
+    p = run.event_payload(got[-1])
+    if closes_only(p) or model.mvv_answer_void(p, kind) or approval_decide.saw_another_pr(v, str(got[-1].draft.row_key), p):
+        return None
+    posted_on = [e for e in v.events if e.draft.row_key == got[-1].draft.row_key]
+    if approval_decide.rejection_posted_after(posted_on, kind, got[-1].seq):
         return None
     last = next(a for a in answers(v) if a["seq"] == got[-1].seq)
     if last["answer"] != run.APPROVED:

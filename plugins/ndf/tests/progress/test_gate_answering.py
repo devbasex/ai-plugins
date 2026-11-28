@@ -11,8 +11,9 @@ import pytest
 
 from ndf.adapters.github import GitHubError
 from ndf.core import merge_approval
-from ndf.progress import command, gate, model, run
+from ndf.progress import command, gate, model, run, store
 from ndf.progress.gate import asking
+from ndf.progress.run_view import APPROVAL_POSTING
 
 import scenes
 
@@ -67,7 +68,7 @@ class Posts:
         self.rows: list[merge_approval.MergeRow] = []
         self.fail = fail
 
-    def __call__(self, row: merge_approval.MergeRow) -> bool:
+    def __call__(self, row: merge_approval.MergeRow, *, resend: bool = False) -> bool:
         if self.fail:
             raise GitHubError("届かない", unreached=True)
         if any(r.record_id == row.record_id for r in self.rows):
@@ -122,6 +123,20 @@ def _a_recorded_answer_without_its_trail_writes_it_on_resend(repo, st, env, caps
     posts = Posts()
     _give(st, q, post=posts)
     assert [r.record_id for r in posts.rows] == [asking.presented_id(q)]
+
+
+def _a_resend_of_an_approval_older_than_a_rejection_posting_writes_no_trail(repo, st, env, capsys):
+    """r4-1: 却下の投稿を試みた後は、先の承認を同じキーで送り直しても（別のアカウントでも）証跡を書かない。"""
+    q = _asked(st, repo, env, capsys)
+    _give(st, q, post=lambda row: False)
+    v = run.read(st, q.machine_id)
+    payload = {"rejecting": q.gate, "record": "r2"}
+    draft = model.EventDraft(APPROVAL_POSTING, run.CONDUCTOR, q.stage, payload=payload, rev=v.rev)
+    with store.transaction(st) as conn:
+        store.append_events(conn, v.machine_id, [draft], v.events[-1].seq)
+    posts = Posts()
+    _give(st, q, post=posts)
+    assert posts.rows == []
 
 
 def _a_resend_by_another_actor_is_refused_and_writes_no_trail(repo, st, env, capsys):
@@ -279,6 +294,10 @@ def _stale_routes_carry_the_retry_and_the_next(repo, st, env, capsys):
         scenes.scene(_a_failed_post_does_not_record_and_a_retry_recovers, id="a_failed_post_does_not_record_and_a_retry_recovers"),
         scenes.scene(
             _a_recorded_answer_without_its_trail_writes_it_on_resend, id="a_recorded_answer_without_its_trail_writes_it_on_resend"
+        ),
+        scenes.scene(
+            _a_resend_of_an_approval_older_than_a_rejection_posting_writes_no_trail,
+            id="a_resend_of_an_approval_older_than_a_rejection_posting_writes_no_trail",
         ),
         *[
             scenes.scene(

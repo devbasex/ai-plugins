@@ -19,7 +19,8 @@ import fcntl
 import hashlib
 import logging
 import os
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import UTC, datetime
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import IO, Any, Optional
 
 import sqlalchemy as sa
+import tenacity
 from sqlalchemy import event as sa_event
 
 from ndf.contracts import limits
@@ -470,6 +472,12 @@ def read_events(conn: sa.Connection, machine_id: str, after: int = 0) -> list[mo
     return [_event(r) for r in conn.execute(q)]
 
 
+def last_seq(conn: sa.Connection, machine_id: str) -> int:
+    """最後の事象の番号（事象が無ければ 0）。事象を読まずに、追記が増えたかを確かめる。"""
+    latest = sa.func.coalesce(sa.func.max(EVENTS.c.seq), 0)
+    return conn.execute(sa.select(latest).where(EVENTS.c.machine_id == machine_id)).scalar_one()
+
+
 def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any]]:
     row = conn.execute(sa.select(MACHINES).where(MACHINES.c.id == machine_id)).first()
     return dict(row._mapping) if row is not None else None
@@ -661,9 +669,13 @@ def _pg_run_lock(store: Store, machine_id: str) -> Iterator[None]:
             conn.execute(sa.text("SELECT pg_advisory_unlock(:space, :key)"), params)
 
 
+# 書いている回答の終わりを待つ方針（contracts/limits/）
+APPROVAL_WAIT = "progress.approval-lock"
+
+
 @contextmanager
 def approval_lock(store: Store, machine_id: str) -> Iterator[None]:
-    """承認を書く操作（`ndf answer` の回答と、工程の開き直し）を 1 つに限る。取れなければ待たずに `Refused`。
+    """承認を書く操作（`ndf answer` の回答）と取り消す操作（工程の開き直し・承認の待ちへの戻し・手で終える回答待ち）を 1 つに限る。取れなければ待たずに `Refused`。
 
     回答は PR へ証跡を書いてから DB へ追記するので、間に開き直しが確定すると、記録の無い承認が PR に残る。
     工程を流す作業の排他（`run_lock`）とは別のキーなので、作業が流れていても回答できる。"""
@@ -673,3 +685,21 @@ def approval_lock(store: Store, machine_id: str) -> Iterator[None]:
         except model.Refused:
             raise model.Refused(f"ステートマシン {machine_id} の回答か開き直しを書いている。終わってから同じコマンドを打ち直す") from None
         yield
+
+
+@contextmanager
+def approval_lock_after_answer(store: Store, machine_id: str, sleep: Callable[[float], None]) -> Iterator[bool]:
+    """`approval_lock` を、書いている回答が終わるまで間隔を空けて取り直す。待ちの上限を越えれば `model.Refused`。
+
+    待ったら真を渡す。待つ間に事象も PR も変わりうるので、呼び手は排他を取った後に決め直す。"""
+    deadline = time.monotonic() + limits.value(APPROVAL_WAIT, "seconds")
+    retrying = tenacity.Retrying(
+        retry=tenacity.retry_if_exception_type(model.Refused),
+        stop=lambda _: time.monotonic() >= deadline,
+        wait=tenacity.wait_fixed(limits.value(APPROVAL_WAIT, "interval")),
+        sleep=sleep,
+        reraise=True,
+    )
+    with ExitStack() as stack:
+        retrying(lambda: stack.enter_context(approval_lock(store, machine_id)))
+        yield retrying.statistics["attempt_number"] > 1

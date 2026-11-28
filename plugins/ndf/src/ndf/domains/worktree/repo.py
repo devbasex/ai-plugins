@@ -82,7 +82,7 @@ def contained_in_production(main: Git, branch: str, production: Optional[str], r
 
 def current_branch(git: Git) -> Optional[str]:
     """今チェックアウトしているブランチ。detached HEAD なら `None`。"""
-    name = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+    name = git.head_name()
     return None if name == "HEAD" else name
 
 

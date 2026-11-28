@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
@@ -35,8 +35,12 @@ STEP_EVENT = _event_kind("step_recorded")
 ANSWERED = _event_kind("answered")
 FAILED = _event_kind("failed")
 FINISHED = _event_kind("finished")
+# 証跡を PR へ投稿する前の記録（回答の確定に失敗しても、承認は取り消す対象を指せ、却下は先の承認を数えない）
+APPROVAL_POSTING = _event_kind("approval_posting")
 # 工程を開き直す事象。これより前の結果・出力・承認は、記録に残るが今の判断に使わない
 REOPENED = stages.REOPENED_EVENT
+# 承認ゲートの工程を手で終えて、承認を待つ事象（`ndf progress finish`）
+FINISH_HELD = _event_kind("finish_held")
 # 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
 RETRY_EVENT = _event_kind("retry")
 # 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）
@@ -171,12 +175,37 @@ def migration_drafts(v: View) -> list[model.EventDraft]:
     return [moved, model.EventDraft(RETRY_EVENT, CONDUCTOR, cleanup, reason=why, rev=v.rev)]
 
 
+def ends_approvals(ev: model.Event) -> bool:
+    """工程の事象 `ev` より前の回答を承認として読まないか。開き直し・手で終えた回答待ち・質問の出し直し（承認ゲートの待ちを
+    報告なしで書き直した記録）が当たる。"""
+    if ev.draft.kind in (REOPENED, FINISH_HELD):
+        return True
+    p = event_payload(ev)
+    return ev.draft.kind == STEP_EVENT and p.get("status") == "waiting" and p.get("report") is None
+
+
+# 投稿前の記録（`APPROVAL_POSTING`）の payload で、却下か変更要求の投稿だと示すキー（値は承認ゲートの区分）
+REJECTING_KEY = "rejecting"
+
+
+def posts_rejection(ev: model.Event) -> bool:
+    """事象 `ev` が、却下か変更要求の投稿を試みた記録か（その承認ゲートの区分は payload の `REJECTING_KEY`）。先の承認を失効させる。"""
+    return ev.draft.kind == APPROVAL_POSTING and REJECTING_KEY in event_payload(ev)
+
+
+def closes_only(payload: Mapping[str, Any]) -> bool:
+    """回答が、手で終えた工程を閉じるだけの確認（`closes_stage`）か。マージや後の操作の承認に数えない。
+    リリースの実行は確かめていないので、追認とは記録しない。"""
+    return payload.get("closes_stage") is True
+
+
 _UNSEEN: Any = object()
 
 
 class StageAnswers:
     """工程の事象を新しい順にたどる走査を 1 本だけ持つ（#4513）。走査は工程の直近の開き直しで止まる。
 
+    走査は手で終えた回答待ちと質問の出し直しでも止まる（`ends_approvals`）。
     たどった事象ごとに「最新の承認の回答」と「リリース承認ゲートへの最後の回答とその次の事象」の両方を照らし、最初に当たった
     ものを覚える。`approved` と `release_gate` は、覚えた値があればそれを返し、無ければ止まった所から古い方へ続ける。
     どの順で何回呼んでも、たどる事象の数は工程の事象の数を超えない。
@@ -184,8 +213,9 @@ class StageAnswers:
 
     def __init__(self, v: View, stage: str) -> None:
         self._events = iter(reversed(v.events))
+        self.view = v
         self.machine_id = v.machine_id
-        self._stage = stage
+        self.stage = stage
         self._newer: Optional[model.Event] = None
         self._approved: Any = _UNSEEN
         self._gate: Any = _UNSEEN
@@ -193,13 +223,13 @@ class StageAnswers:
     def _advance(self) -> bool:
         """事象を 1 つ古い方へ進める。尽きたら覚えていない値を None にして偽を返す。"""
         ev = next(self._events, None)
-        if ev is not None and ev.draft.kind == REOPENED and ev.draft.row_key == self._stage:
+        if ev is not None and ev.draft.row_key == self.stage and ends_approvals(ev):
             self._events, ev = iter(()), None
         if ev is None:
             self._approved = None if self._approved is _UNSEEN else self._approved
             self._gate = None if self._gate is _UNSEEN else self._gate
             return False
-        if ev.draft.kind == ANSWERED and ev.draft.row_key == self._stage:
+        if ev.draft.kind == ANSWERED and ev.draft.row_key == self.stage:
             p = event_payload(ev)
             if self._approved is _UNSEEN and p.get("answer") == invoke.APPROVED:
                 self._approved = ev

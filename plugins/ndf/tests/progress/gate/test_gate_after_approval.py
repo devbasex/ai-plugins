@@ -11,7 +11,7 @@ import pytest
 
 from ndf.core import route
 from ndf.progress import gate, invoke, model, run
-from ndf.progress.gate import answering, asking
+from ndf.progress.gate import asking, rechecking
 
 BY = "human:reviewer"
 
@@ -31,7 +31,7 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
     if production is None:
         _approve(st, tid, q, "h1")
     else:
-        shown = replace(q, target=gate.Target("h1", None, "o/r", 7, "main", production))
+        shown = replace(q, target=gate.Target("h1", None, "o/r", q.pr, "main", production))  # 工程の対象の PR を見た回答
         gate.write_material(st.root, run.read(st, tid), shown)
         presentation = asking.read_presented(st.root, q).presentation
         seen = gate.Target(head="h1", presentation=presentation)
@@ -43,7 +43,8 @@ def test_a_docs_only_range_after_the_release_approval_does_not_ask_again(st, new
         flow.turn(tid)  # 未了に戻した読み手役のステップを打ち直してから待つ（#4446）
         new = gate.waiting(run.read(st, tid))
         assert new is not None and new.id != q.id and new.gate == "release"
-        assert gate.approved_head(run.read(st, tid), "release", st.root) == "h1"
+        # 質問を出し直した後は、前の承認の head を返さない
+        assert gate.approved_head(run.read(st, tid), "release", st.root) is None
         return
     assert why is not None and "文書だけ" in why
     assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
@@ -159,7 +160,7 @@ def _material(st, q, head, text="資料 A\n"):
 
 
 def _hub(head):
-    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, body="本文", title="題"))
+    return SimpleNamespace(pull=lambda n: SimpleNamespace(head_sha=head, body="本文", title="題", merged=False))
 
 
 DOCS_ONLY = lambda seen, now: (seen, now) == ("hA", "hB")  # noqa: E731
@@ -197,8 +198,8 @@ def test_the_recheck_compares_only_the_material_the_answerer_saw(st, repo, new_t
     elif change == "gone":
         path.unlink()
     read = []
-    real = answering.material_sha256
-    monkeypatch.setattr(answering, "material_sha256", lambda p: read.append(p.name) or real(p))
+    real = rechecking.material_sha256
+    monkeypatch.setattr(rechecking, "material_sha256", lambda p: read.append(p.name) or real(p))
     why = gate.recheck(st, tid, gate.github_observe(repo, st.root, lambda: _hub(now)), DOCS_ONLY)
     assert why is None if expect is None else (why is not None and expect in why), why
     assert read == [f"{q.id}.md" if r == "old" else f"{q.id}-{r}.md" for r in reads]
@@ -229,5 +230,5 @@ def test_a_service_answer_needs_both_the_judged_pr_and_head_to_match(judged, que
     # #3959: MVV 判定で設計承認ゲートを省いた回答は、判定した PR の番号と head の両方が今の質問と同じときだけ読む
     q = gate.Question("q", "t", "設計", "design-gate", "design", ("approved",), question_pr)
     payload = {"by": model.MVV_SERVICE, model.MVV_KEY: {"pr": judged, "head": seen}}
-    got = answering._judged_elsewhere(payload, q, gate.Target(head=seen), gate.Target(head=now))
+    got = rechecking._judged_elsewhere(payload, q, gate.Target(head=seen), gate.Target(head=now))
     assert (got is None) is kept

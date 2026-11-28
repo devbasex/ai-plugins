@@ -11,11 +11,14 @@
   回答を読む前に今の対象と照らし、違えば待ちへ戻す（`recheck`。3364-2）。承認の後に加わった範囲が文書だけなら、リリース
   承認ゲートを出し直さない（#3020）。外した課題はレーンの順番表の次の行へ入れ（決定 99）、スプリントの完了と同じトランザクションで
   レーンの行を終える（`lane_env`。決定 17）
+- 回答を読む前の確かめ（`rechecking`）: 回答を読む前に見た対象と今の対象を比べて待ちへ戻し、`ndf progress reread` で待ちを出し直す
 - レーンのリリースのリクエスト（`release`）: リリース承認ゲートの待ちでリクエストを出し、リクエストへの回答を承認ゲートの回答にする
 - 回答の記録（`records`）: 回答を `gate-rejections.jsonl` へ写し（#3136）、conductor が読む回答の一覧（#2934・#3174）と
   承認で見た head（#2147）を返す
 - MVV 判定の前の機械の検査（`checks`）: 6 つの検査（PR 本文のセクションの中身は #2853）と、承認ゲートを省けるかの判定（#3017）・判定の記録（#2950）
-- 工程を手で扱うサブコマンド（`finishing`）: `ndf progress finish`・`check`・`retry`（終了した工程の開き直しは `progress.reopening`）
+- 工程を手で扱うサブコマンド（`finishing`）: `ndf progress finish`・`check`・`retry`（終了した工程の開き直しは `progress.reopening`）。
+  承認ゲートを持つ工程の `finish` は、有効な承認（`progress.approval_decide`）が無ければ回答待ちにする（#4520）
+- 承認の対象の読み取り（`targets`）: PR とマージ先の設定を 1 回の呼び出しで 1 回だけ読む
 - サブコマンドのエントリポイント（`entry`）: `ndf answer`（`main`）と `ndf progress`（`progress_main`。エントリポイントは `progress_cli`）
 """
 
@@ -23,20 +26,14 @@ from __future__ import annotations
 
 from ndf.progress.gate.answering import (
     ACTORS,
-    DocsOnly,
     Observe,
     Post,
     answer,
-    git_docs_only,
     github_observe,
     github_post,
     lane_env,
-    never_docs_only,
     no_observe,
     no_post,
-    recheck,
-    reread,
-    seen_material,
 )
 from ndf.progress.gate.asking import (
     MATERIAL_DIR,
@@ -61,6 +58,7 @@ from ndf.progress.gate.asking import (
     waiting,
     write_material,
 )
+from ndf.progress.gate.rechecking import DocsOnly, git_docs_only, never_docs_only, recheck, reread, seen_material
 from ndf.progress.gate.checks import (
     CHECKS,
     Changed,

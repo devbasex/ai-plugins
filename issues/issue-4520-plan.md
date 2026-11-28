@@ -114,7 +114,7 @@
 | --- | --- | --- |
 | 実装の前（準備のリファクタリング） | `command.py` と `run.py` を分ける（Task 1） | 2026-11-27 の行数は `command.py` 1,000 行、`run.py` 988 行で、`ndf check` の行数の上限 1,000 行に当たる |
 | 実装の中 | 各タスクで行う | `tdd-cycle` のリファクタリングのステップ |
-| スプリントの終わり（cross-refactoring） | 承認の対象の読み取りと比較（`approval_decide`・`gate/answering.py`・`run_approval.py`）、承認の回答の走査（`StageAnswers`・`approved_head`） | 複数の単位が同じ形の処理に触れる |
+| スプリントの終わり（cross-refactoring） | 承認の対象の読み取りと比較（`approval_decide`・`gate/answering.py`・`gate/rechecking.py`・`run_approval.py`）、承認の回答の走査（`StageAnswers`・`approved_head`） | 複数の単位が同じ形の処理に触れる |
 
 ## リスクと対処
 

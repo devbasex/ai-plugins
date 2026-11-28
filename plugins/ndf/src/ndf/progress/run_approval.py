@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf.contracts import result
-from ndf.progress import invoke, model, stages
+from ndf.progress import approval_decide, invoke, model, stages, store
 from ndf.progress.folding import Action, Move
 from ndf.progress.run_view import (
     ACTOR,
@@ -21,6 +21,7 @@ from ndf.progress.run_view import (
     STEP_EVENT,
     StageAnswers,
     View,
+    closes_only,
     event_payload,
     read_accepted_head,
     work_root,
@@ -35,8 +36,14 @@ class Hands(Protocol):
     """回答を読む手が使う駆動の操作。"""
 
     machine_id: str
+    env: Any  # `run.Env`
+    st: store.Store
+
+    def warn(self, text: str) -> None: ...
 
     def write(self, *drafts: model.EventDraft) -> None: ...
+
+    def write_if_unchanged(self, v: View, *drafts: model.EventDraft) -> None: ...
 
     def synced(self) -> None: ...
 
@@ -63,15 +70,23 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
 def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     """承認ゲートの回答を読む。回答が無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。
 
-    省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。回答を読む前の検証（`gate.recheck`）はサブコマンドの
-    エントリポイントでだけ打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が検証を通してから読む。
+    省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。同じ呼び出しは判定の前に読んだ対象を持ちうるので、
+    続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が読み直して照らしてから読む。
+    読む回答は、呼び手（`run._compared_move`）が作業の排他の中で対象と照らしてある。
     数えない MVV 判定の回答（`model.mvv_answer_void`）と、省けると決めた判定の無い手は、事象を書かずに承認ゲートの待ちを返す（#3959）。
     """
     assert m.stage is not None and m.step is not None and m.progress is not None
+    if m.progress.held_finish is not None:
+        return consume_held(d, v, m)
     waiting = replace(m, action=Action.GATE, event=None)
     if m.event is not None and model.mvv_answer_void(event_payload(m.event), m.step.gate):
         return d.report(v, waiting)
     if m.event is None:
+        # 同じ対象への有効な先の承認があれば、MVV の回答を書かずにそれを使う
+        found = standing_approval(d, v, m.stage, m.step)
+        if found is not None:
+            d.write(_passed(v, m, found))
+            return None
         held = model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
         if held is None:
             return d.report(v, waiting)
@@ -80,12 +95,87 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         return d.proceed(v, m, f"{reason}。回答は検証を通してから読むので next を打つ")
     if event_payload(m.event)["answer"] == APPROVED:
-        rep = gate_report(m.step, m.event)
-        payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
-        d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
+        d.write(_passed(v, m, m.event))
         return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.refuse(v, m, detail)
+    d.synced()
+    return None
+
+
+def _standing(d: Hands, v: View, s: stages.StageDef, step: stages.StepDef, answered: model.Event) -> approval_decide.Standing:
+    """承認の回答 `answered` を、今の工程の承認の対象に照らす。"""
+    return d.env.standing(v, step.gate, approval_decide.target_pr(v, s, step.gate), answered)
+
+
+def standing_approval(d: Hands, v: View, s: stages.StageDef, step: stages.StepDef) -> Optional[model.Event]:
+    """承認ゲート `step` の有効な先の承認の事象。無ければ None（承認の記録が無ければ対象を読まない）。"""
+    found = approval_decide.counted_approval(v.row_events(s.name), step.gate, step.id)
+    if found is None:
+        return None  # 数えない回答は、対象を読むまでもなく承認でない
+    return None if _standing(d, v, s, step, found).differences else found
+
+
+def _passed(v: View, m: Move, answered: model.Event) -> model.EventDraft:
+    """承認の回答 `answered` で承認ゲートのステップを済ませる事象。"""
+    assert m.stage is not None and m.step is not None and m.progress is not None
+    rep = gate_report(m.step, answered)
+    payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
+    return model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev)
+
+
+def prior_approval(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
+    """自動の流れの承認ゲートの待ち。有効な先の承認があれば質問せずにステップを済ませ、無ければ待ちを返す。
+
+    手で終えた回答待ちは、回答を `consume_held` が読むので、ここでは先の承認を使わない。
+    待ちの状態は回答も受けるので、ステップを済ませる書き込みは回答と共有する排他の中で行う。書いている回答があれば終わるまで
+    待つ。待ったか、事象が増えていれば、何も書かずに None を返し、呼び手が最新の記録と対象から次の手を決め直す。"""
+    assert m.stage is not None
+    if m.step is None or m.progress is None or not invoke.is_listen(m.step) or m.progress.held_finish is not None:
+        return d.report(v, m)
+    found = standing_approval(d, v, m.stage, m.step)
+    if found is None:
+        return d.report(v, m)
+    # 回答は証跡を投稿してから DB へ確定する。その間にステップを済ませると、PR の却下が DB に残らない
+    with store.approval_lock_after_answer(d.st, v.machine_id, d.env.sleep) as waited:
+        if waited:
+            d.env.forget()  # 待つ間に PR の head やマージ先が変わりうる（DB の事象は増えない）
+        else:
+            d.write_if_unchanged(v, _passed(v, m, found))
+    return None
+
+
+def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
+    """手で終えた回答待ちの工程の回答を読み、有効な承認なら終了を書く（工程のステップは流さない）。
+
+    承認の対象が変わっていれば今の対象で質問し直し、設計は承認した PR がマージ済みでなければ終了を書かない。"""
+    assert m.stage is not None and m.step is not None and m.progress is not None and m.progress.held_finish is not None
+    if m.event is None:
+        return d.report(v, replace(m, action=Action.GATE))
+    if event_payload(m.event)["answer"] != APPROVED:
+        d.refuse(v, m, f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）")
+        d.synced()
+        return None
+    got = _standing(d, v, m.stage, m.step, m.event)
+    if got.differences:
+        why = "承認の後に対象が変わった: " + " / ".join(got.differences)
+        if got.merged:
+            why += approval_decide.merged_otherwise(event_payload(m.event).get("seen"), got.head, got.base)
+        wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
+        # 取り消してから境界を進めるまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
+        with store.approval_lock(d.st, v.machine_id):
+            d.env.revoke(approval_decide.stage_revocations(v, m.stage.name))
+            d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
+        d.warn(why)
+        return None
+    if m.step.gate == approval_decide.DESIGN_GATE and not got.merged:
+        detail = (
+            f"承認した設計 PR がマージされていない。承認済みのコミット {got.head} をマージしてから ndf progress next {v.machine_id} を打つ"
+        )
+        return result.stopped(TOOL, "precondition", detail, next=result.command(TOOL, "next", v.machine_id))
+    reason = f"手で終えた工程の承認（回答の事象 {m.event.seq}）を読んだ"
+    payload = {"output": m.progress.held_finish["output"], "approval": m.event.seq}
+    d.write(model.EventDraft(FINISHED, ACTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
     d.synced()
     return None
 
@@ -101,6 +191,11 @@ def approved_seen(answers: StageAnswers, root: Path) -> Optional[dict[str, Any]]
     if ev is None:
         return None
     p = event_payload(ev)
+    if closes_only(p) or approval_decide.saw_another_pr(answers.view, answers.stage, p):
+        return None
+    rows = [e for e in answers.view.events if e.draft.row_key == answers.stage]
+    if approval_decide.rejection_posted_after(rows, p.get("gate"), ev.seq):
+        return None
     seen = p.get("seen")
     if not isinstance(seen, dict):
         return None

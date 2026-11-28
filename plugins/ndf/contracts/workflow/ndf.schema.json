@@ -32,7 +32,8 @@
         "per_unit": {"const": true, "description": "実装計画のレビューの単位ごとに流す工程"},
         "inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が読むスプリントの文脈のキー"},
         "optional_inputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が文脈にあるときだけ読むスプリントの文脈のキー（無くても工程を流す）"},
-        "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈のキー"}
+        "outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "工程が書くスプリントの文脈のキー"},
+        "generated_outputs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "outputs のうち NDF が作るキー。承認ゲートを持つ工程の手で書いた出力（ndf progress finish・check）には求めず、書かれていれば捨てる（#4520）"}
       }
     },
     "step": {

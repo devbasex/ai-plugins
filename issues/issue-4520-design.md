@@ -206,6 +206,7 @@ NDF が足す記録は、すべてステートマシンの DB の事象に置く
 
 | 事象 | 書ける状態 | 後の状態 | payload |
 | --- | --- | --- | --- |
+| `approval_posting`（新設） | 実行中・失敗 | 変えない | 証跡を投稿する前の記録。本番へ反映される承認も、却下と変更要求も、記録の識別子（`record`）を持つ。加えて、本番へ反映される承認は承認の対象（`target`）を、却下と変更要求は承認ゲートの区分（`rejecting`）を持つ |
 | `finish_held`（新設） | 未着手・失敗 | 実行中 | 承認ゲートのステップ、出力のファイル、MVV 判定を打ったときはその結果（決定 7）。デプロイでは `record_pr`・`no_release`・`cd_result`（「リリース済みの確かめ」） |
 | `request_issued`（新設） | ステートマシン全体（工程の行ではない） | 変えない | 出したリリースのリクエスト（「出したリクエストの記録」） |
 | `redo_recorded`（新設） | 同上 | 変えない | 作り直しの記録の今の版（「作り直しの記録」） |
@@ -240,9 +241,50 @@ NDF が足す記録は、すべてステートマシンの DB の事象に置く
 
 `retry` は冪等のキーを持たないので、手順 2 から始める。ただし、確定した開き直しの送り直しは、何も追記せずに結果を返す。確定した開き直しの送り直しは、次のように見分ける。指定した工程が未着手で、同じ工程・理由・`--later` の開き直しの記録があり、開き直した工程にその後の記録が無ければ、何も追記せず GitHub へも要求を送らずに、初回と同じ工程の一覧と警告を返す。指定した工程は `reopened` の `trigger.stage` に残す。この見分けは、作業の排他を取った後に読んだ記録で行う。排他を取るまでの間に別の呼び出しが同じ開き直しを確定しても、送り直しとして結果を返す。排他を取れないときは、記録を読んで見分け、送り直しなら結果を返す。開き直しの直後に起動した作業が排他を持っていても、送り直しは結果を返す。排他を取れる場合は、見分けるための読み取りを増やさない。進み具合の表は書き直さないので、結果の要約で `ndf progress resync` を案内する。
 
-**回答と開き直しの排他。** `ndf answer` は PR へ承認の証跡を書いてから DB へ追記する。間に開き直しが確定すると、記録の無い承認が PR に残り、`ndf ci merge` が通る。そこで、回答（質問の確かめから、証跡の投稿と DB の確定まで）と開き直し（記録の読み取りから、取り消しと DB の確定まで）は、同じ排他（`store.approval_lock`）の中で行う。取れなければ待たずに断る。工程を流す作業の排他とは別なので、作業が流れていても回答できる。記録済みの回答の送り直しでは、工程の直近の開き直しより前の回答には証跡を書き足さない。
+**回答と開き直しの排他。** `ndf answer` は PR へ承認の証跡を書いてから DB へ追記する。間に開き直しが確定すると、記録の無い承認が PR に残り、`ndf ci merge` が通る。そこで、回答（質問の確かめから、証跡の投稿と DB の確定まで）と開き直し（記録の読み取りから、取り消しと DB の確定まで）は、同じ排他（`store.approval_lock`）の中で行う。取れなければ待たずに断る。工程を流す作業の排他とは別なので、作業が流れていても回答できる。
 
-この排他は、証跡を投稿しない回答と記録済みの回答の送り直しも含めて、すべての回答と開き直しが取る。PostgreSQL では、排他を取る操作 1 回につき、DB の接続が 1 本と SQL が 2 文（`pg_try_advisory_lock` と `pg_advisory_unlock`）増える。取れずに断る場合は SQL が 1 文である。SQLite はロックのファイルを使うので、接続も SQL も増えない。確定した開き直しの送り直しは、この排他を取らない。
+開き直しのほかにも、PR の承認を取り消してから DB の承認の境界を進める操作は、取り消しから DB の確定まで同じ排他を持つ。対象が変わった回答を待ちへ戻す操作、対象に結び付かない設計の承認を待ちへ戻す操作、`ndf progress reread`、`finish` が回答待ちを書く操作、手で終えた回答待ちの回答を読んで質問し直す操作である。持たないと、境界が進む前に回答を送り直した別のアカウントが、取り消した承認を自分の証跡として PR に投稿できる。作業の排他も持つ操作は、作業の排他を取った後にこの排他を取る。作業の排他が空くのを待つ間は、回答を受け付けるためである。
+
+自動の流れが先の承認を使い、質問せずに承認ゲートを済ませる書き込みも、同じ排他の中で行う。この状態の承認ゲートは回答も受ける。排他が無いと、却下の証跡を投稿してから DB へ確定するまでの間にゲートが通り、PR の却下が DB に残らない。回答がこの排他を使っていれば、`next` は断らずに、下の `finish` と同じ間隔と上限で排他が空くのを待つ。上限を越えたら何も書かずに断る。待った場合は、排他を取れてもゲートを済ませない。読んだ PR とマージ先の設定を捨て、最新の記録と対象から次の手を決め直す。PR の head やマージ先は、DB の事象を増やさずに変わるためである。待たなかった場合も、排他を取った後に事象が増えていれば、何も書かずに決め直す。事象が増えたかは、ゲートを済ませる追記が読み直す記録で確かめるので、確かめのための接続と問い合わせは増えない。PostgreSQL で増えるのは、先の承認でゲートを済ませる 1 回につき、排他の接続 1 本と SQL 2 文である。回答と重なって待つ場合は、取り直し 1 回につき接続 1 本と SQL 1 文が増える。待った後の決め直しでは、PR の読み取りが増え、先の承認がまだ有効ならもう一度排他を取る。
+
+`finish` が回答待ちを書くときに、回答がこの排他を使っていることがある。この場合、`finish` は断らずに排他が空くのを待つ。待つ間に回答が確定していれば、記録を読み直して決め直すので、利用者は `finish` を打ち直さなくてよい。待つ間に事象が増えたかは、最後の事象の番号だけを問い合わせて確かめる。
+
+待ち方は、一定の間隔で排他を取り直す形にする。間隔と上限は `contracts/limits/progress.approval-lock.json` に置く。回答が排他を持つのは、PR の読み取り、証跡の投稿、DB の確定の間である。待つのは、この間に `finish` か、先の承認でゲートを済ませる `next` が重なった場合だけである。次の表の量は、実装から数えたもので、実測ではない。
+
+| 案 | PostgreSQL の接続と SQL | 排他が空いてから先へ進むまで | 採否と理由 |
+| --- | --- | --- | --- |
+| 間隔を空けて取り直す | 取り直し 1 回につき接続 1 本、SQL 1 文。N 秒待つと最大で約 N ÷ 間隔回 | 最大で間隔の秒 | 採る。SQLite と PostgreSQL で同じ処理になり、作業の排他の待ちと同じ形である |
+| 期限付きで排他の解放を待つ（PostgreSQL の `lock_timeout` と `pg_advisory_lock`） | 接続 1 本のまま、SQL は期限の設定と解除を含めて数文 | すぐ | 採らない。SQLite のファイルのロックには期限付きの待ちが無く、SQLite では取り直しが残るので、待ち方が 2 通りになる。減るのは、重なったまれな場合の接続と SQL だけである |
+
+**記録の無い承認の取り消し。** 次の操作は、DB に記録の無い承認も取り消す。回答は、PR へ証跡を投稿した後の DB の確定に失敗することがある。DB の記録だけから取り消す対象を決めると、この承認が PR に残るためである。
+
+- `finish` が回答待ちを書く操作
+- `ndf progress reread`
+- 回答を待ちへ戻す操作（対象が変わった回答、対象に結び付かない設計の承認、手で終えた回答待ちの回答）
+- 工程を開き直す操作（手で終えた回答待ちの `retry` を含む）。開き直すすべての工程について、DB の回答と投稿前の記録から、取り消す承認を特定する。その承認を取り消し、取り消すときの判定で外すと決まった PR をマージキューから外した後に、`reopened` を追記する。別の有効な承認がある PR をキューに残す条件は、「外への書き込みの順序」の「開き直す工程の承認は、PR 側でも取り消す」にある
+
+投稿前の記録は、証跡の投稿を試みた回答をステートマシンの DB に残すものである。DB に置くのは、回答と取り消しが別の保存先（チェックアウト）で動いても読めるようにするためである。PostgreSQL では、同じステートマシンを複数の保存先から開ける。扱いは次のとおりである。
+
+- `ndf answer` は、本番へ反映される対象への承認の証跡を投稿する前に、事象 `approval_posting` を追記して確定する。事象は工程の行に残るので、資料を出し直して提示の記録が上書きされても、前の承認を指せる
+- `ndf answer` は、却下と変更要求の証跡を投稿する前にも `approval_posting` を追記して確定する。投稿の後に DB の確定が失敗すると、PR には却下が載り、DB には前の承認が残る。そのため、この記録より前の承認は「有効な承認」に数えない。投稿の前に失敗した場合も数えず、承認ゲートで利用者に問う
+- 取り消すのは、承認の投稿前の記録のうち DB に回答の記録が無い承認である。PR に承認の行も失効の行も無ければ（投稿の前に失敗した）、行を書かず、PR をマージキューから外すかの判定にも使わない。別のアカウントが独立した承認でキューに入れた PR を外さないためである
+- 直近の承認の境界（開き直し・手で終えた回答待ち・質問の出し直し）より前の投稿前の記録は数えない。境界を書く操作は、書く前にその承認を取り消している。取り消しかキューからの取り外しに失敗すると境界を書かないので、打ち直しで同じ承認を取り消す。記録を消す操作は要らない
+- 承認の回答が DB に確定した投稿前の記録も数えない。確定した承認は DB の回答から取り消せる。記録済みの回答の送り直しは投稿前の記録を書かない
+- 同じ提示への却下や変更要求が確定しても、投稿前の記録は取り消し対象に残る。確定したのは承認ではないためである。却下と変更要求の証跡は、先に投稿した承認と記録の識別子が同じでも書き、その承認を取り消す
+- 投稿前の記録に該当がある場合は、token の利用者の照会、PR のコメントの読み取り、マージキューの状態の問い合わせが増える。投稿前の記録が無ければ増えない
+- 証跡を投稿する回答（本番へ反映される承認、却下、変更要求）は、DB のトランザクションを 2 回使う。1 回目で回答を確かめ、投稿の後の 2 回目で回答を書く。GitHub への投稿は 2 つの間で行う。SQLite は書くトランザクションの間、同じ DB を使うほかのスプリントの書き込みも止めるためである。投稿の間の開き直しや取り消しは、回答と共有する排他が防ぐ。記録済みの回答の送り直しも、投稿はトランザクションの外で行う
+- 本番へ反映される承認、却下、変更要求の回答は、1 回目に投稿前の記録を追記するので、追記と事象の読み取りが 1 回ずつ増える。証跡を投稿しない回答のトランザクションは 1 回のままである
+- 投稿の前の記録を作業の保存先のファイルに置く案は、採らない。事象の種類と DB への書き込みは増えないが、別の保存先から開いた `finish` や `retry` が未確定の承認を見つけられず、その証跡でマージできてしまう
+
+**送り直しで証跡を投稿しない条件。** 記録済みの回答を送り直しても、その回答より後に次のどれかが記録されていれば、PR に証跡を投稿しない。
+
+- 同じ工程の開き直し
+- 同じ工程の、手で終えた回答待ち
+- 同じ工程の同じ承認ゲートの、質問の出し直し
+- 同じ工程の同じ承認ゲートへの、後の回答（承認・却下・変更要求のどれでも）
+- 同じ工程の同じ承認ゲートへの、却下か変更要求の投稿前の記録（送り直す回答が承認の場合）。回答の確定に失敗していても、PR には却下が載りうる
+
+この排他は、証跡を投稿しない回答と記録済みの回答の送り直しも含めて、すべての回答と開き直しが取る。承認を取り消してから境界を進める操作は、境界を進めるときに取り、取り消す証跡が無くても取る。`finish` と `reread` では、DB へ追記していない回答が PR へ証跡を投稿している途中のことがある。排他を取らないと、取り消した後に証跡が投稿されて PR に残る。工程の開き直しも同じで、DB の回答と投稿前の記録を調べてから `reopened` を追記するまで、この排他を持つ。対象が変わった回答、対象に結び付かない設計の承認、手で終えた回答待ちの回答を待ちへ戻す 3 つの操作も、同じ排他を取り、DB に記録した回答の承認と、投稿前の記録に残る未確定の承認を取り消す。取り消す証跡の有無で排他を取るかを分ける案は、分岐が増え、減るのはまれな操作の接続と SQL だけなので採らない。PostgreSQL では、排他を取る操作 1 回につき、DB の接続が 1 本と SQL が 2 文（`pg_try_advisory_lock` と `pg_advisory_unlock`）増える。取れずに断る場合は SQL が 1 文である。SQLite はロックのファイルを使うので、接続も SQL も増えない。確定した開き直しの送り直しは、この排他を取らない。
 
 | 案 | PostgreSQL で増える量 | 採否と理由 |
 | --- | --- | --- |
@@ -299,6 +341,10 @@ NDF が足す記録は、すべてステートマシンの DB の事象に置く
   - token の利用者の証跡で、対象の最新の行が残す工程や別のステートマシンの承認なら、外さない。その承認は残るためである
   - ただし、別のアカウントが開き直す工程の承認を今も持つ対象の PR は、token の利用者に残る承認があっても外す。キューに入れたのがどちらの承認か分からないためである。別のアカウントの承認は、残る承認には数えない
   - 開き直す対象が同じ PR に複数あり（HEAD が違う）、どれか 1 つに残る承認が無ければ外す。外しても残る承認は消えず、`ndf ci merge` で入れ直せる
+  - ここまでの規則で外す PR でも、次の 2 つがそろえばキューに残す。キューに入っている PR の対象は今の HEAD で、取り消す承認では入っていないためである
+    - PR の今のマージ先と HEAD の組が、取り消す対象のどれとも一致しない（マージ先か HEAD の片方でも違えば、一致しない）
+    - その組に、token の利用者の有効な承認がある
+  - 今のマージ先と HEAD は、キューの状態の問い合わせ（`GitHub.dequeue`）で同じ 1 回に読むので、要求は増えない。REST で PR を取得する案は、PR ごとに要求が 1 回増えるので採らない
 - 取り消しを書けない場合と、キューの状態を読めないか外せない場合は、DB へ何も書かずに断る。書いた後に DB の確定が失敗した場合は、マージが止まるだけで、打ち直すと開き直しが確定する
 - 失敗した工程の `retry` は DB へ事象を書くだけで、GitHub へ要求を送らない。終了した工程の開き直しは、次の表の要求が増える
 
@@ -363,7 +409,7 @@ NDF が足す記録は、すべてステートマシンの DB の事象に置く
 
 **証跡の再利用。** DB に回答が無い打ち直しは、初めての回答と同じ確かめ（質問の id と対象）を通る。そのうえで、同じ対象への**最新の**証跡が、同じ記録の識別子（質問の id と提示の識別子）と同じ回答なら、新しく書かずに使い、`answered` と `reopened` を確定する。それより前の証跡が一致しても使わず、新しく書く。過去の全件から探すと、承認 → 却下 → 承認のように回答を変えて送り直したときに、最後の回答が PR に載らないためである。打ち直しまでに対象や質問が変わっていれば、今と同じく断る。
 
-DB に記録済みの回答の送り直し（同じ冪等のキー）は、今と同じく、証跡が無ければ書く。ただし、同じ識別子・回答・対象の証跡が 1 件でもあるときと、その回答がもう有効でない（後で開き直した、後の回答がある）ときは書かない。古い承認が最新の行になって、もう一度有効になるためである。今の重複の確かめは記録の識別子だけを見るので、回答と対象も見るように変える。`ndf ci answer` の重複の確かめは変えない。
+DB に記録済みの回答の送り直し（同じ冪等のキー）は、今と同じく、証跡が無ければ書く。ただし、同じ識別子・回答・対象の証跡が 1 件でもあるときと、その回答がもう有効でないときは書かない。有効でないのは、「排他と送り直し」の「送り直しで証跡を投稿しない条件」のどれかに当たる回答である。古い承認が最新の行になって、もう一度有効になるためである。今の重複の確かめは記録の識別子だけを見るので、回答と対象も見るように変える。`ndf ci answer` の重複の確かめは変えない。
 
 ## 処理の流れ
 
@@ -429,7 +475,7 @@ graph TD
 
 次をすべて満たす回答を「有効な承認」と呼ぶ。
 
-1. この承認ゲートの最新の回答で、次のうち最も新しいものより後に記録されている。`reopened`、`finish_held`、質問の出し直し（`recheck` や `reread` が、新しい質問の id で待ちを書き直した記録）。`recheck` は回答を読む前に回答者が見た対象と今の対象を比べる処理で、違えば待ちへ戻す。`reread`（`ndf progress reread`）は、承認の前の確認をやり直して待ちを出し直す操作である。この回答が下の条件を満たさなくても、それより前の承認へはさかのぼらない
+1. この承認ゲートの最新の回答で、次のうち最も新しいものより後に記録されている。`reopened`、`finish_held`、質問の出し直し（`recheck` や `reread` が、新しい質問の id で待ちを書き直した記録）。`recheck` は回答を読む前に回答者が見た対象と今の対象を比べる処理で、違えば待ちへ戻す。`reread`（`ndf progress reread`）は、承認の前の確認をやり直して待ちを出し直す操作である。この回答が下の条件を満たさなくても、それより前の承認へはさかのぼらない。また、この回答より後に、同じ承認ゲートへの却下か変更要求の投稿前の記録（`approval_posting` の `rejecting`）があれば数えない
 2. 回答が承認で、`model.mvv_answer_void(回答, 承認ゲートの区分)` が偽である。つまり MVV 判定の回答（`service:mvv`）は、次の両方を満たすときだけ数える。(a) 判定で人の承認を省ける承認ゲート（設計）である。(b) 回答が持つ判定結果の写しで、レビューの保留（人の承認を待つ指摘）を確かめて 0 件である
 3. 回答が見た対象が、今の対象と一致する
     - 対象の PR は、質問を作るときと同じ取り方で決める。設計承認ゲートは `design_pr`（`finish` の出力、無ければ文脈）、リリース承認ゲートは文脈の `pr`（デプロイの工程では入力で、出力には無い）
@@ -443,7 +489,9 @@ graph TD
 
 **マージされたことの確かめ（設計承認ゲート）。** `next` と `finish` は、PR の 1 回の読み取りで、次の 3 つをまとめて確かめる。マージ済みである。HEAD が承認の見た HEAD と同じである。マージ先が承認の見たマージ先と同じである。GitHub は、マージした後の PR の HEAD を、ブランチへの push があっても動かさない。そのため、この組はマージに使われたコミットを表す。HEAD かマージ先が違えば有効な承認ではなく、終了を書かない。承認ゲートは今のマージされた HEAD を対象に質問し直し、結果に「承認と違う HEAD がマージされた」と載せる。
 
-今の `recheck` はマージ先と本番への反映を比べないので、手の経路と MVV 判定の回答ではこの比較を足す。
+今の `recheck` はマージ先と本番への反映を比べないので、承認の対象を持つ回答（人の回答と MVV 判定の回答）ではこの比較を足す。
+
+`next` と `work` は、作業の排他を取った後に `recheck` の比較をする。回答は作業の排他を取らずに確定し、`work` は排他が空くのを待つことがあるので、排他の前に読んだ対象は古くなりうる。排他の中で読んだ結果は後の判定にも使うので、GitHub への要求は増えない。リリースのリクエストへの回答を承認ゲートの回答として書く処理も、`next` と `work` では排他の中で比較の直前に行い、同じ読み取り結果を使う。排他の前にも比べて、排他の中では新しい回答だけを読み直す案は採らない。待つ間に PR の HEAD やマージ先が変わっても、回答の番号は変わらず、気付けないためである。
 
 **対象は 1 回の呼び出しで 1 回だけ読む。** `next` と `finish` は、1 回の呼び出しの中で、対象の PR を 1 回、マージ先の設定を 1 回だけ読む。読んだ結果（ベースリポジトリ・PR の番号・マージ先・HEAD・本文と題・マージ済みか・本番へ反映されるか）を、次のすべてに渡す。
 
@@ -939,7 +987,7 @@ MVV 判定で省くときの順序は次のとおりである。
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/src/ndf/core/release_record.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/github_pulls.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/approval_decide.py`、`plugins/ndf/src/ndf/progress/delivery_decide.py`、`plugins/ndf/src/ndf/progress/run_approval.py`、`plugins/ndf/src/ndf/progress/reopening.py`、`plugins/ndf/src/ndf/progress/redo.py`、`plugins/ndf/src/ndf/progress/redo_decide.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/gate/__init__.py`、`plugins/ndf/src/ndf/progress/gate/targets.py`、`plugins/ndf/src/ndf/progress/gate/finishing.py`、`plugins/ndf/src/ndf/progress/gate/requests.py`、`plugins/ndf/src/ndf/progress/gate/delivery_check.py`、`plugins/ndf/src/ndf/progress/gate/mvv_trail.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/worktree/cli.py`、`plugins/ndf/src/ndf/domains/worktree/merged.py`、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`、`plugins/ndf/tests/progress/test_manual_gate.py`、`plugins/ndf/tests/progress/test_release_confirm.py`、`plugins/ndf/tests/progress/test_redo.py`、`plugins/ndf/tests/progress/test_requests.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
+| #4520 | 実装する | — | `plugins/ndf/contracts/workflow/progress.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/ndf.schema.json`、`plugins/ndf/src/ndf/core/release_record.py`、`plugins/ndf/src/ndf/core/merge_approval.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/adapters/github_pulls.py`、`plugins/ndf/src/ndf/progress/model.py`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/run_view.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/approval_decide.py`、`plugins/ndf/src/ndf/progress/delivery_decide.py`、`plugins/ndf/src/ndf/progress/run_approval.py`、`plugins/ndf/src/ndf/progress/reopening.py`、`plugins/ndf/src/ndf/progress/redo.py`、`plugins/ndf/src/ndf/progress/redo_decide.py`、`plugins/ndf/src/ndf/progress/plan/external.py`、`plugins/ndf/src/ndf/progress/gate/asking.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/progress/gate/rechecking.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/records.py`、`plugins/ndf/src/ndf/progress/gate/release.py`、`plugins/ndf/src/ndf/progress/gate/__init__.py`、`plugins/ndf/src/ndf/progress/gate/targets.py`、`plugins/ndf/src/ndf/progress/gate/finishing.py`、`plugins/ndf/src/ndf/progress/gate/requests.py`、`plugins/ndf/src/ndf/progress/gate/delivery_check.py`、`plugins/ndf/src/ndf/progress/gate/mvv_trail.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/worktree/cli.py`、`plugins/ndf/src/ndf/domains/worktree/merged.py`、`plugins/ndf/tests/progress/test_model.py`、`plugins/ndf/tests/progress/test_command.py`、`plugins/ndf/tests/progress/test_reopen_operations.py`、`plugins/ndf/tests/progress/test_manual_gate.py`、`plugins/ndf/tests/progress/test_release_confirm.py`、`plugins/ndf/tests/progress/test_redo.py`、`plugins/ndf/tests/progress/test_requests.py`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-answer.md`、`plugins/ndf/skills/development-workflow/references/pace.md`、`plugins/ndf/skills/development-workflow/references/parallel.md`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`docs/glossary/glossary.json`、`docs/glossary/ndf-workflow.md`、`docs/glossary.md` |
 
 [#3957](https://github.com/devbasex/ai-plugins/issues/3957)（手で終えると回答を待たずに次の工程が始まる）の受け入れ条件 3 件は、要求仕様の受け入れ条件 1・2・4 に含まれる。
 

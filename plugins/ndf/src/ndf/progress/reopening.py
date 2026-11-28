@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from ndf.core import merge_approval
-from ndf.progress import model, run, stages, store
+from ndf.progress import approval_decide, model, run, stages, store
 from ndf.progress.run_view import ANSWERED, CONDUCTOR, FINISHED, REOPENED, STARTED, STEP_EVENT, View, event_payload
 
 # 後ろの工程の扱い（開き直す・残す）
@@ -66,51 +66,6 @@ def _progressed(v: View, rows: Mapping[str, model.RowState], since: Since, stage
     return state != "pending" or any(ev.draft.rev == v.rev and ev.draft.kind in ran for ev in since[stage])
 
 
-def _target_of(seen: Any, head: Any = None) -> Optional[merge_approval.MergeTarget]:
-    """本番へ反映される承認の対象（事象の `seen` か判定の `target`）。そろっていなければ None（証跡を書かない承認）。"""
-    if not isinstance(seen, Mapping) or seen.get("production") is not True:
-        return None
-    repo, number, base, sha = seen.get("repo"), seen.get("pr"), seen.get("base"), head or seen.get("head")
-    if not (isinstance(repo, str) and type(number) is int and isinstance(base, str) and isinstance(sha, str)):
-        return None
-    return merge_approval.MergeTarget(repo, number, base, sha)
-
-
-def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
-    """事象が証跡を書いた承認の対象と記録の識別子。承認の回答と、省くと決めた MVV 判定の記録（判定のコマンドが証跡を書く）を読む。"""
-    p = event_payload(ev)
-    if ev.draft.kind == ANSWERED:
-        seen = p.get("seen")
-        target = _target_of(seen) if p.get("answer") == run.APPROVED else None
-        if target is None:
-            return None
-        return target, merge_approval.presented_record_id(str(p.get("gate_id")), seen.get("presentation"))
-    if ev.draft.kind != STEP_EVENT:
-        return None
-    report = p.get("report")
-    outputs = report.get("outputs") if isinstance(report, Mapping) else None
-    held = outputs.get(model.MVV_KEY) if isinstance(outputs, Mapping) else None
-    if not isinstance(held, Mapping) or held.get("skip") is not True:
-        return None
-    target = _target_of(held.get("target"), held.get("head"))
-    # 記録の識別子は別のステートマシンの判定と同じになるので、証跡を書いたコメントの URL で指す
-    url = held.get("note_url")
-    return (target, url) if target is not None and isinstance(url, str) and url else None
-
-
-def _revocations(since: Since, machine_id: str, names: list[str]) -> list[merge_approval.Revocation]:
-    found: dict[merge_approval.MergeTarget, merge_approval.Revocation] = {}
-    for name in names:
-        for ev in since[name]:
-            trail = _trail(ev)
-            if trail is None:
-                continue
-            target, approval = trail
-            approvals = found[target].approvals if target in found else frozenset()
-            found[target] = merge_approval.Revocation(target, approvals | {approval}, f"reopen:{machine_id}:{name}:{ev.seq}")
-    return list(found.values())
-
-
 def _outward(step: stages.StepDef) -> bool:
     """外への操作（マージ・リリース）をするステップか。開き直しても、済んだ操作は取り消されない。"""
     return step.kind == "merge" or step.kind == "release"
@@ -142,7 +97,7 @@ def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mappin
     payload = {"trigger": dict(trigger), "notes": notes, "later": later}
     drafts = [model.EventDraft(REOPENED, CONDUCTOR, name, reason=reason, payload=payload, rev=v.rev) for name in names]
     warnings = [f"工程 {s.name} のマージ・リリースは取り消されない" for s in order if s.name in names and _acted(rows, since, s)]
-    return Reopen(drafts, names, warnings, _revocations(since, v.machine_id, names))
+    return Reopen(drafts, names, warnings, approval_decide.revocations(since, v.machine_id, names))
 
 
 def committed_reopen(v: View, *, trigger: Mapping[str, Any], later: str, reason: str) -> list[model.Event]:

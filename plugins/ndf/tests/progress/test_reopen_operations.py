@@ -351,6 +351,17 @@ def test_an_mvv_approval_is_matched_by_its_comment(note, left):
     assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target) is None
 
 
+def test_revoking_an_old_head_leaves_a_pr_queued_with_an_approved_head():
+    hub = merge_hub.MergeHub()
+    old, now = (merge_approval.MergeTarget(merge_hub.REPO, 7, "main", head) for head in (merge_hub.OTHER, merge_hub.HEAD))
+    for record, target in (("old", old), ("now", now)):
+        merge_approval.write_merge_row(hub, merge_approval.MergeRow("approved", "user", target, True, record), hub.viewer())
+
+    merge_approval.write_revocations(hub, [merge_approval.Revocation(old, frozenset({"old"}), "reopen:x")], hub.viewer())
+
+    assert hub.dequeued == []
+
+
 def test_revocations_read_the_comments_of_a_pr_once():
     hub = merge_hub.MergeHub()
     targets = [merge_approval.MergeTarget(merge_hub.REPO, 7, "main", head) for head in (merge_hub.HEAD, merge_hub.OTHER)]
@@ -530,7 +541,7 @@ def test_a_pr_that_cannot_leave_the_merge_queue_records_nothing_and_a_retry_dequ
     tid, target = _approved_design(capsys, repo, st, env)
     before = _events(st, tid)
 
-    def fail(number: int) -> None:
+    def fail(number: int, keep: object = None) -> None:
         raise GitHubError("キューを読めない", 502)
 
     with monkeypatch.context() as m:

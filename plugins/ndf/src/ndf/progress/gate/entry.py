@@ -23,6 +23,7 @@ import shlex
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from string import Template
 from typing import Any, NamedTuple, Optional
@@ -41,19 +42,16 @@ from ndf.contracts.worker_kinds import (
     work_kinds,
 )
 from ndf.core import branch_strategy, route
-from ndf.progress import command, invoke, model, run, store
+from ndf.progress import command, invoke, model, reopening, run, store
 from ndf.progress.gate.answering import (
     Answer,
     Observe,
     Post,
     answer,
-    git_docs_only,
     github_observe,
     github_post,
     lane_env,
     no_post,
-    recheck,
-    reread,
     shared_hub,
 )
 from ndf.progress.gate.asking import (
@@ -65,8 +63,10 @@ from ndf.progress.gate.asking import (
     question,
 )
 from ndf.progress.gate import finishing
+from ndf.progress.gate.rechecking import Recheck, git_docs_only, recheck, reread, standing, verifier
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
+from ndf.progress.gate.targets import TargetReader
 from ndf.progress.plan import external
 
 
@@ -586,15 +586,33 @@ def ask_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _drive_env(st: store.Store, reader: TargetReader, revoke: reopening.Revoke) -> run.Env:
+    """レーンの行を終え、記録した承認を今の対象に照らし、境界の前になる承認を取り消せる `Env`。"""
+    env = lane_env(run.Env(facts=command.facts_of))
+    return replace(env, standing=standing(reader, st.root), forget=reader.forget, revoke=revoke)
+
+
 def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
     """`ndf progress` の工程を流すサブコマンド。レーンの行を終える `Env` で流し、回答を読む前に対象を見直し、承認ゲートの
     待ちは質問と回答ごとのルートの結果にする。"""
     hub = shared_hub(cwd)
-    seen = observe if observe is not None else github_observe(cwd, st.root, hub)
-    took = _took(st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
-    why = recheck(st, a.machine_id, seen, git_docs_only(cwd))
-    out = run.COMMANDS[a.action](run.with_env(a, lane_env(run.Env(facts=command.facts_of))), cwd, st)
-    return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in (took, why) if w])
+    reader = TargetReader(hub)  # 1 回の呼び出しで、対象の PR とマージ先の設定を 1 回だけ読む
+    seen = observe if observe is not None else github_observe(cwd, st.root, hub, reader)
+    take = partial(_took, st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
+    revoke = finishing.revoker(hub, "承認の待ちを書き直さない")
+    # 承認の取り消しと待ちの書き直しは、工程を進める操作だけが作業の排他の中で行う（`verify`）。ほかは違いを知らせるだけ
+    docs_only = git_docs_only(cwd)
+    advancing = a.action in ("next", "work")
+    # リリースのリクエストへの回答を書くのも、工程を進める操作では排他の中にし、照らすときと同じ読み取りを使う
+    before: list[Optional[str]] = []
+    if not advancing:
+        before = [take(), recheck(st, a.machine_id, seen, docs_only, revoke, Recheck(advancing=False))]
+    verify = verifier(st, seen, docs_only, revoke, reader.forget, take if advancing else lambda: None)
+    env = replace(_drive_env(st, reader, revoke), verify=verify)
+    out = run.COMMANDS[a.action](run.with_env(a, env), cwd, st)
+    if a.action == "wait":
+        reader.forget()  # 待ちの間に PR が変わりうるので、承認資料は読み直した対象で作る（`work` はステップを流すたびに捨てる）
+    return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in before if w])
 
 
 def _took(st: store.Store, machine_id: str, observe: Observe, post: Post = no_post) -> Optional[str]:
@@ -609,7 +627,10 @@ def _took(st: store.Store, machine_id: str, observe: Observe, post: Post = no_po
 def _cmd_reread(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
     """`ndf progress reread <ID>`: 承認の前の確認をやり直し、承認ゲートの待ちを今の対象（head・本文・題）で出し直す（#4446）。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
-    out = reread(st, a.machine_id, cwd, lane_env(run.Env(facts=command.facts_of)))
+    hub = shared_hub(cwd)
+    reader, revoke = TargetReader(hub), finishing.revoker(hub, "承認の待ちを書き直さない")
+    verify = verifier(st, seen, git_docs_only(cwd), revoke, reader.forget)
+    out = reread(st, a.machine_id, cwd, replace(_drive_env(st, reader, revoke), verify=verify))
     return present(st, a.machine_id, cwd, out, seen)
 
 

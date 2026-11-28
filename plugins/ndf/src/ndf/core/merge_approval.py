@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from typing import Iterable, Iterator, NamedTuple, Sequence
+from typing import Callable, Iterable, Iterator, NamedTuple, Sequence
 
 from ndf import identity
 from ndf.adapters.github import Authored, GitHub, Viewer, same_repo
@@ -69,11 +69,13 @@ class MergeRow(NamedTuple):
 
 class Revocation(NamedTuple):
     """取り消す承認。`approvals` は開き直す工程が書いた承認を指す値（回答は記録の識別子、MVV 判定はコメントの URL）、
-    `record_id` は取り消しの行の記録の識別子。"""
+    `record_id` は取り消しの行の記録の識別子。`unconfirmed` は、投稿を試みたことしか分からない承認（回答が DB に確定して
+    いない）で、PR に証跡か失効の行がある場合だけ取り消す。"""
 
     target: MergeTarget
     approvals: frozenset[str]
     record_id: str
+    unconfirmed: bool = False
 
 
 def presented_record_id(gate_id: str, presentation: str | None) -> str:
@@ -192,16 +194,31 @@ def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
     return not approvals.isdisjoint((row.record_id, row.url))
 
 
-def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
-    """同じ `record_id` の証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
+def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer, *, latest_only: bool | None = None) -> bool:
+    """重なる証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
+
+    何を重なりとするかは `latest_only` で決まる（`_already_written`）。指定しない呼び手（`ndf ci answer`）は記録の識別子だけを見る。
 
     `viewer` のアカウント ID が読めていなければ、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
-    if any(r.record_id == row.record_id for r in merge_rows(hub, row.target.number, viewer)):
+    if _already_written(merge_rows(hub, row.target.number, viewer), row, latest_only):
         return False
     Publisher(hub).comment(row.target.number, render_merge_row(row))
     return True
+
+
+def _already_written(rows: Sequence[MergeRow], row: MergeRow, latest_only: bool | None) -> bool:
+    """`row` と重なる証跡が `rows`（古い順）にあるか。
+
+    真（DB に無い新しい回答）は、同じ対象の最新の行の識別子と回答が同じときだけ。後に別の識別子の却下があれば、承認を
+    もう一度書く。偽（DB に記録済みの回答の送り直し）は、識別子・回答・対象が同じ行が 1 件でもあるとき（古い回答を最新の
+    行にしない）。None は、同じ識別子の行があるとき。"""
+    if latest_only is None:
+        return any(r.record_id == row.record_id for r in rows)
+    same = [r for r in rows if r.target.same(row.target)]
+    held = same[-1:] if latest_only else same
+    return any((r.record_id, r.answer) == (row.record_id, row.answer) for r in held)
 
 
 def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None:
@@ -212,8 +229,12 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     後で編集・削除されても、取り消した承認を数え直さないためである。`approvals` の承認が無いか、担い手 `reopen` の行で
     失効済みなら書かない（`_not_voided`）。
 
+    `unconfirmed` の取り消しは、PR に指した承認の行か失効の行が無ければ（投稿の前に失敗した）、行も書かず、キューから
+    外すかの判定にも使わない（`_traced`）。
+
     キューから外すのは、残る承認の無い PR と、別のアカウントが `approvals` を今も承認と数える PR（キューに入れたのが
-    どの承認かは分からない）。行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
+    どの承認かは分からない）。ただし PR の今のマージ先と HEAD が取り消す対象と違い、有効な承認を持つ PR は外さない
+    （`_queued_on_another`）。行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
     打ち直しでも外す。
 
     別のアカウントに `reopen` の行で失効させていない `approvals` の承認があるなら、token の利用者の分を書いてキューから外した後に `TrailError`
@@ -228,10 +249,14 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     read: dict[int, list[tuple[Authored, MergeRow]]] = {}
     leaving: dict[int, None] = {}
     others: dict[str, None] = {}
-    for target, approvals, record_id in revocations:
+    applied: list[MergeTarget] = []
+    for target, approvals, record_id, unconfirmed in revocations:
         if target.number not in read:
             read[target.number] = list(_unedited_rows(hub.comments(target.number)))
         found = read[target.number]
+        if unconfirmed and not _traced(found, target, approvals, record_id):
+            continue
+        applied.append(target)
         mine = [row for c, row in found if same_writer(c, viewer)]
         live = _live_approvals(mine, target)
         holders = _other_holders(found, viewer, target, approvals)
@@ -245,10 +270,37 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
             row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id, voids=voids)
             publisher.comment(target.number, render_merge_row(row))
     for number in leaving:
-        hub.dequeue(number)
+        revoked = [t for t in applied if t.number == number]
+        hub.dequeue(number, keep=_queued_on_another(hub.repo, number, viewer, read[number], revoked))
     if others:
         names = "・".join(others)
         raise TrailError(f"取り消す承認の証跡を別のアカウント（{names}）が書いている。承認を書いたアカウントで打ち直す")
+
+
+def _traced(found: Sequence[tuple[Authored, MergeRow]], target: MergeTarget, approvals: frozenset[str], record_id: str) -> bool:
+    """`target` への `approvals` の承認の行か、その失効の行（キューから外すのに失敗した打ち直し）が PR にあるか。書き手は問わない。"""
+    for _, row in found:
+        if not row.target.same(target):
+            continue
+        if row.answer == APPROVED and _points_at(approvals, row):
+            return True
+        if row.by == REOPEN_BY and (row.record_id == record_id or not row.voids.isdisjoint(approvals)):
+            return True
+    return False
+
+
+def _queued_on_another(
+    repo: str, number: int, viewer: Viewer, found: Sequence[tuple[Authored, MergeRow]], revoked: Sequence[MergeTarget]
+) -> Callable[[str, str], bool]:
+    """PR をキューに残すかを、今のマージ先と HEAD（キューに入っている PR はこれが対象）から決める関数（`GitHub.dequeue` の `keep`）。
+    その組が取り消す対象 `revoked` のどれとも一致せず、token の利用者の有効な承認を持つなら残す。"""
+    mine = [row for c, row in found if same_writer(c, viewer)]
+
+    def keep(base: str, head: str) -> bool:
+        now = MergeTarget(repo, number, base, head)
+        return not any(now.same(r) for r in revoked) and bool(_live_approvals(mine, now))
+
+    return keep
 
 
 def _not_voided(rows: Sequence[MergeRow], target: MergeTarget, approvals: frozenset[str]) -> bool:

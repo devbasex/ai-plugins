@@ -25,9 +25,9 @@ def _new(capsys, last_result, *extra: str) -> tuple[int, dict]:
 # --- 工程の出力の確かめ（check。#3856） ---------------------------------------------------------------
 
 
-# 設計の定義のキーを両方持つ出力（mvv_gate の形は workflow/context.schema.json の $defs）
+# 手で書く設計の出力（mvv_gate は NDF が作るので書かない。形は workflow/context.schema.json の $defs）
 MVV_GATE = {"gate": "design", "skip": False, "verdict": None, "why": ["テストでは判定しない"]}
-DESIGN_OUTPUT = {"steps": [], "summary": "設計した", "outputs": {"design_pr": 1, "mvv_gate": MVV_GATE}}
+DESIGN_OUTPUT = {"steps": [], "summary": "設計した", "outputs": {"design_pr": 1}}
 
 
 def _check_result_fits_the_schema(out: dict) -> None:
@@ -133,14 +133,13 @@ def test_check_of_an_unreadable_output_stops_like_finish(repo, capsys, tmp_path,
 
 
 def test_check_lists_the_missing_keys_with_where_to_take_them(repo, capsys, tmp_path, last_result):
-    """受け入れ条件 4（#3908）。欠けた mvv_gate には取り場所が、取り場所の無い design_pr には null が載る。"""
+    """受け入れ条件 4（#3908）。欠けた mvv_gate には取り場所が、取り場所の無い product_version と delivery にも組が載る。"""
     _, made = _new(capsys, last_result)
     tid = made["metrics"]["machine_id"]
-    code, out = _check(capsys, last_result, tmp_path, tid, "設計", {"steps": [], "summary": "x", "outputs": {}})
+    code, out = _check(capsys, last_result, tmp_path, tid, "デプロイ", {"steps": [], "summary": "x", "outputs": {}})
     assert code == 1 and out["cause"]["kind"] == "refused"
     assert out["items"] == [
-        {"kind": "missing", "key": "design_pr", "source": None},
-        {"kind": "missing", "key": "mvv_gate", "source": definition.context_source("mvv_gate")},
+        {"kind": "missing", "key": k, "source": definition.context_source(k)} for k in ("delivery", "product_version", "mvv_gate")
     ]
     assert f"（取り場所: {definition.context_source('mvv_gate')}）" in out["summary"]
     _check_result_fits_the_schema(out)
@@ -176,7 +175,8 @@ def test_finish_writes_the_declared_outputs_after_the_marker(repo, capsys, tmp_p
     assert code == 0 and out["status"] == "ok" and "warnings" not in out
     assert len(out["metrics"]["seqs"]) == 2
     tail = _tail(capsys, last_result, tid, "設計")
-    assert [k for k, _ in tail] == ["manual_finished", "outputs_recorded"]
+    # 設計は承認ゲートを持ち、承認の記録が無いので回答待ちになる
+    assert [k for k, _ in tail] == ["finish_held", "outputs_recorded"]
     assert tail[1][1] == {"outputs": DESIGN_OUTPUT["outputs"]}
 
 

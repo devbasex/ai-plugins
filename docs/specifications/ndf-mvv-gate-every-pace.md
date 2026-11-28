@@ -90,7 +90,7 @@ MVV 判定（`ndf records mvv gate`）を打つ。判定は進め方（`pace`）
 | cross-review の終わり方（`crossreview/drive.py`・`crossreview/finish_decide.py`・`crossreview/cli.py`） | 承認ゲートの判定に要る記録を書けなければ `mvv_record_failed` で止まる |
 | 工程の入力（`contracts/workflow/stage-io.schema.json`・`progress/definition.py`・`progress/invoke.py`・`progress/stage_inputs.py`） | `stage-in` を 1 つの規則にし、プランの入力と `NDF_STAGE_INPUT` の両方をそれで確かめる。ID から判定の入力を組む |
 | リリース承認ゲートの止め（`progress/model.py`・`progress/run.py`・`progress/gate/records.py`） | 省いてよい区分を設計承認ゲートだけにし、数えない `service:mvv` の回答を読まない |
-| プランの承認資料（`progress/gate/asking.py`・`entry.py`・`answering.py`） | 「## MVV 判定」の節を判定の出力から組み、資料を head ごとのファイルにする |
+| プランの承認資料（`progress/gate/asking.py`・`entry.py`・`answering.py`・`rechecking.py`） | 「## MVV 判定」の節を判定の出力から組み、資料を head ごとのファイルにする |
 | 伏せる処理（`adapters/publish.py`・`adapters/run_log.py`） | 書き先へ出す本文と `cite` の結果から、秘密・認証情報付きの URL・非公開の参照を伏せる。値ごとに 1 回だけ照会する包み `publish.Once` |
 | 保存先の閲覧範囲（`progress/store.py`） | 保存先を所有者だけが読める形にし、限れたかを `Store.private` に持つ |
 | GitHub のアダプター（`adapters/github.py`） | 作業場所のブランチを head に持つ開いた PR の候補を検索する（`open_pulls_of_head`）。ruleset とブランチ保護の事実を組む処理は `adapters/github_rules.py` に分けた |
