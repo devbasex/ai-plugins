@@ -400,12 +400,18 @@ class Waiting(Fake):
         self.advances.append((self.now, names))
         return {k for k, n in zip(pulls, names) if self.now >= self.visible.get(n, 0)}
 
+    def held(self, pulls):
+        """`visible` の時刻を過ぎた単位は、手元の HEAD が含むとみなす。"""
+        names = {k: next(u.name for u in self.units if units_flow.key_of(u) == k) for k in pulls}
+        return {k for k, n in names.items() if self.now >= self.visible.get(n, 0)}
+
     def sleep(self, seconds: float) -> None:
         self.slept.append(seconds)
         self.now += seconds
 
     def watching(self) -> units_queue.Watching:
-        return units_queue.Watching(self.read, self.advance, self.tmp / "ingest.json", self.budget, lambda: self.now, self.sleep)
+        ingest = self.tmp / "ingest.json"
+        return units_queue.Watching(self.read, self.advance, ingest, self.budget, lambda: self.now, self.sleep, self.held)
 
     def flow(self, *, limit: int = 6, merged=(), chained: bool = False, landed=()) -> units_flow.Flowed:
         def failed(unit, exc):
@@ -492,8 +498,7 @@ def test_a_take_in_that_goes_over_the_limit_during_the_read_is_not_tried_again(t
 
     got = fake.flow(landed=["A"])
 
-    # 上限を超えた A は、B の反映に含めて確かめるだけで、取り込まれていなければ失敗のまま
-    assert [(t, sorted(names)) for t, names in fake.advances if "A" in names] == [(0, ["A"]), (20, ["A", "B"])]
+    assert [t for t, names in fake.advances if "A" in names] == [0]
     assert [(u.name, e.kind) for u, e in got.failures] == [("A", "ci_pending")]
 
 
@@ -512,6 +517,8 @@ def test_an_overdue_merge_taken_in_with_a_new_merge_is_no_longer_a_failure(tmp_p
     got = fake.flow(landed=["A"])
 
     assert not got.failures and not got.waiting
+    # 上限を超えた A は、反映先を決める呼び出しに渡さない
+    assert [t for t, names in fake.advances if "A" in names] == [0]
     assert fake.names("start") == ["B", "C"]
     assert json.loads((tmp_path / "ingest.json").read_text()) == {}
 

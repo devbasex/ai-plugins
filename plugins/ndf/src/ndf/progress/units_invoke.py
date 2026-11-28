@@ -502,9 +502,15 @@ def _to_take_in(
 
     含む単位は反映を通らないので、反映待ちの記録（前の起動の後に手元へ入ったもの）をここで消す。
     """
-    held = Git(ctx.sprint).contained((p.merge_sha for p in done.values()), "HEAD")
-    units_queue.Board(watching).taken(*(k for k, p in done.items() if p.merge_sha in held))
-    return {k: p for k, p in done.items() if p.merge_sha and p.merge_sha not in held}
+    held = _held_in_head(ctx, done)
+    units_queue.Board(watching).taken(*held)
+    return {k: p for k, p in done.items() if p.merge_sha and k not in held}
+
+
+def _held_in_head(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> frozenset[str]:
+    """マージのコミットを手元の HEAD が含む単位のキー。取得も作業場所の更新もしない。"""
+    held = Git(ctx.sprint).contained((p.merge_sha for p in pulls.values()), "HEAD")
+    return frozenset(k for k, p in pulls.items() if p.merge_sha in held)
 
 
 def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
@@ -568,6 +574,7 @@ def _watching(ctx: Context, ports: Ports, hub: github.GitHub) -> units_queue.Wat
         budget=float(str(budget)),
         clock=ports.clock,
         sleep=ports.sleep,
+        held=lambda pulls: _held_in_head(ctx, pulls),
     )
 
 

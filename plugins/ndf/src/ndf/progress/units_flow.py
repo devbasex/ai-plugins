@@ -326,27 +326,27 @@ class _Flow:
     def take_in(self, retry: bool = False) -> bool:
         """分かったマージ（`retry` なら反映待ちも）を 1 回でまとめて作業場所へ反映する。反映を試したら真。
 
-        上限を超えたマージだけでは反映し直さないが、ほかのマージの反映に含めて確かめ、取り込まれていれば失敗を取り消す。
+        上限を超えたマージは反映先にも反映の成否にも含めず、ほかのマージの反映後の HEAD が含んでいれば失敗を取り消す。
         """
         batch = {**(self.board.ingest if retry else {}), **self.fresh}
         self.fresh.clear()
         if not batch or self.broken is not None:
             return False
         try:
-            taken = set(self.ops.watching.advance({**self.overdue, **batch}))
+            taken = set(self.ops.watching.advance(batch))
         except UnitsStopped as exc:
             self.broken = exc
             return True
-        for key in [k for k in self.overdue if k in taken]:
+        recovered = set(self.ops.watching.held(self.overdue)) if self.overdue else set()
+        for key in recovered:
             del self.overdue[key]
             del self.failures[key]
-            self.board.taken(key)
+        done = [*recovered, *(k for k in batch if k in taken)]
+        self.board.taken(*done)
+        for key in done:
             self.order.finish(key)
         for key, pull in batch.items():
-            if key in taken:
-                self.board.taken(key)
-                self.order.finish(key)
-            elif not self.board.add_ingest(key, pull):
+            if key not in taken and not self.board.add_ingest(key, pull):
                 self._expired_in_ingest(key, pull)
         return True
 

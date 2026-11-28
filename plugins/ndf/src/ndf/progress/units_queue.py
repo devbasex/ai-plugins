@@ -46,7 +46,8 @@ class Ticket(NamedTuple):
 
 class Watching(NamedTuple):
     """待ちの扱いに使う外との接点。`read` は PR の番号ごとの状態を読み、`advance` はマージのコミットを持つ単位をスプリントの
-    作業場所へ反映、反映できた単位のキーを返す。`ingest` は反映待ちの記録、`budget` は待ちの上限の秒。"""
+    作業場所へ反映、反映できた単位のキーを返す。`ingest` は反映待ちの記録、`budget` は待ちの上限の秒。`held` は作業場所を
+    進めずに、手元の HEAD がマージのコミットを含む単位のキーを返す。"""
 
     read: Callable[[Sequence[int]], Mapping[int, State]] = lambda numbers: {n: State(UNKNOWN) for n in numbers}
     advance: Callable[[Mapping[str, github_pulls.MergedPull]], Collection[str]] = lambda pulls: pulls.keys()
@@ -54,6 +55,7 @@ class Watching(NamedTuple):
     budget: float = 3600.0
     clock: Callable[[], float] = time.time
     sleep: Callable[[float], None] = time.sleep
+    held: Callable[[Mapping[str, github_pulls.MergedPull]], Collection[str]] = lambda pulls: ()
 
 
 def read(hub: github.GitHub, numbers: Sequence[int], base: str) -> dict[int, State]:
