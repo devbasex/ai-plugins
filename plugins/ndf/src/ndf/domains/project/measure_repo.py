@@ -388,6 +388,8 @@ def measure_materials(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, 
 
 
 Step = Callable[[str, Callable[[], Any]], Any]
+# 設定の項目でない処理の名前。`step` が失敗の記録をこの名前で `items` へ入れても、結果に出さない
+AUX_STEPS = ("dependencies", "services", "instructions")
 
 
 def measure(tree: Tree, step: Step, items: dict[str, Any]) -> list[str]:
@@ -398,11 +400,13 @@ def measure(tree: Tree, step: Step, items: dict[str, Any]) -> list[str]:
     services = step("services", lambda: service_names(tree))
     if services is None:
         services = []
-    for key, fn in (("test", lambda: measure_test(tree, dep, services)), ("materials", lambda: measure_materials(tree, dep))):
-        got = step(key, fn)
-        if got is not None:
-            items[key] = got
-    notes = step("instructions", lambda: instruction_notes(tree))
-    if notes is None:  # 締め切りか失敗。注記を出さない
-        return []
-    return notes
+    got = step("test", lambda: measure_test(tree, dep, services))
+    if got is not None:
+        items["test"] = got
+    notes = step("instructions", lambda: instruction_notes(tree))  # 素材の README の読み取りが時間を使い切る前に測る
+    got = step("materials", lambda: measure_materials(tree, dep))
+    if got is not None:
+        items["materials"] = got
+    for key in AUX_STEPS:
+        items.pop(key, None)
+    return notes if notes is not None else []  # None は締め切りか失敗。注記を出さない

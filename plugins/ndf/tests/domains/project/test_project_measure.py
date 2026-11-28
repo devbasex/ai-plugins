@@ -59,12 +59,14 @@ def _add_commit(repo: Path, files: dict[str, str]) -> None:
     _git(repo, "commit", "-qm", "add")
 
 
-def _measure_whole(repo: Path, monkeypatch) -> dict:
-    """GitHub の origin を持つリポジトリを `measure_project` で測る。`gh` は呼ばず、必須のチェックだけを返す。"""
+def _measure_whole(repo: Path, monkeypatch, called: list[str] | None = None) -> dict:
+    """GitHub の origin を持つリポジトリを `measure_project` で測る。`gh` は呼ばず、必須のチェックだけを返す。
+    `called` を渡すと、呼ばれた API のパスを記録する。"""
     _git(repo, "remote", "add", "origin", "https://github.com/o/r.git")
     _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
     _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-    monkeypatch.setattr(measure_ci.Gh, "get", lambda self, path: _RULES)
+    paths = called if called is not None else []
+    monkeypatch.setattr(measure_ci.Gh, "get", lambda self, path: paths.append(path) or _RULES)
     return cli.measure_project(repo, 30)
 
 
@@ -85,7 +87,10 @@ def test_regression_test_question_materials_ci_and_old_guide_note(repo, monkeypa
             "README.md": "# 題\n\n説明\n",
         },
     )
-    got = _measure_whole(repo, monkeypatch)
+    called: list[str] = []
+    got = _measure_whole(repo, monkeypatch, called)
+    assert called == ["repos/o/r/rules/branches/main"]  # GitHub の API は必須のチェックだけ（受け入れ条件 5）
+    assert list(got["items"]) == ["test", "ci", "materials"]
     assert got["items"]["test"] == {
         "status": "question",
         "candidates": {
@@ -161,23 +166,25 @@ def test_tree_past_deadline_raises_time_up(repo):
 
 def test_measure_puts_only_test_and_materials_and_returns_the_instruction_notes(repo):
     items: dict = {}
-    notes = measure_repo.measure(_tree(repo), lambda key, fn: fn(), items)
+    steps: list[str] = []
+    notes = measure_repo.measure(_tree(repo), lambda key, fn: steps.append(key) or fn(), items)
+    assert steps == ["dependencies", "services", "test", "instructions", "materials"]  # 注記は素材より先
     assert list(items) == ["test", "materials"]
     assert items["test"]["candidates"]["compose_services"] == ["app", "db"]
     assert len(notes) == 1 and "NDF_PLUGIN_GUIDE_START" in notes[0]
 
 
-@pytest.mark.parametrize("failed", ["dependencies", "services", "instructions"])
-def test_measure_keeps_measuring_after_a_failed_step(repo, failed):
-    items: dict = {}
+@pytest.mark.parametrize("failed", ["dependencies", "service_names", "instruction_notes"])
+def test_measure_keeps_measuring_after_a_failed_step(repo, monkeypatch, failed):
+    def boom(tree):
+        raise RuntimeError("x")
 
-    def step(key, fn):
-        return None if key == failed else fn()
-
-    notes = measure_repo.measure(_tree(repo), step, items)
-    assert list(items) == ["test", "materials"]
-    assert items["test"]["candidates"]["compose_services"] == ([] if failed == "services" else ["app", "db"])
-    assert (notes == []) == (failed == "instructions")
+    monkeypatch.setattr(measure_repo, failed, boom)
+    step = cli._Steps(time.monotonic() + 30)
+    notes = measure_repo.measure(_tree(repo), step, step.items)
+    assert list(step.items) == ["test", "materials"]  # 補助の処理の失敗は項目にしない
+    assert step.items["test"]["candidates"]["compose_services"] == ([] if failed == "service_names" else ["app", "db"])
+    assert (notes == []) == (failed == "instruction_notes")
 
 
 def test_service_names_are_sorted_and_unique_and_skip_unreadable_files(tmp_path):
@@ -258,17 +265,6 @@ def test_measure_calls_only_the_branch_rules(tmp_path, monkeypatch):
     got = _measure(tmp_path)
     assert called == ["repos/o/r/rules/branches/main"]
     assert got == {"ci": forms.measured({"required_checks": ["pytest"]}), "notes": []}
-
-
-def test_measure_project_calls_only_the_branch_rules(repo, monkeypatch):
-    called: list[str] = []
-    _git(repo, "remote", "add", "origin", "https://github.com/o/r.git")
-    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
-    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
-    monkeypatch.setattr(measure_ci.Gh, "get", lambda self, path: called.append(path) or [])
-    got = cli.measure_project(repo, 30)
-    assert called == ["repos/o/r/rules/branches/main"]
-    assert list(got["items"]) == ["test", "ci", "materials"]
 
 
 def test_measure_without_head_skips_the_branch_rules_and_makes_ci_unknown(tmp_path, monkeypatch):
