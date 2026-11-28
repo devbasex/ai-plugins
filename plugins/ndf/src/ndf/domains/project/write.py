@@ -20,6 +20,7 @@ from typing import Any, Callable, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters import git
+from ndf.adapters.secret_lines import MASK
 from ndf.domains.project import analysis_record, check
 from ndf.domains.records import files
 from ndf.domains.project.items import MEASURED, QUESTION, obj, seq, value_digest
@@ -153,7 +154,7 @@ def merge_project(
     answers: dict[str, Any],
     written_before: dict[str, Any],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """新しい `project.json` と出力の行。`analysis` は書いた値の指紋（`written`）だけにし、旧い形の `test_duration` を取り除く。
+    """新しい `project.json` と出力の行。`analysis` は書いた値の指紋（`written`）だけにし、旧い形の項目（`analysis_record.OLD_ITEMS`）を取り除く。
     `written_before` は前の指紋。"""
     doc = dict(existing) if existing else {"version": 1}
     written, rows = {}, []
@@ -336,10 +337,14 @@ def _record_branches(inp: Inputs, now: dict[str, Any], rows: list[dict[str, Any]
 
 
 def _build_record(inp: Inputs, doc: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """書き出す設定 `doc` に対する解析の記録を組み立てる。`rows` は項目の出力の行。形に合わなければ `WriteError`。"""
+    """書き出す設定 `doc` に対する解析の記録を組み立てる。`rows` は項目の出力の行。形に合わなければ `WriteError`。
+    解析器のバージョンは測ったときの値を書く（古いバージョンで測った結果を新しいと判定させない）。"""
+    analyzer = inp.measure.get("analyzer")
+    if type(analyzer) is not int or analyzer < 1:  # 形の確かめのエラー文は検証した値を含むので、その前に値を出さずに止める
+        raise WriteError("測定の結果の analyzer は 1 以上の整数が必要（ndf project measure からやり直す）")
     record = {
         "version": analysis_record.RECORD_VERSION,
-        "analyzer": check.ANALYZER,
+        "analyzer": analyzer,
         "inputs": obj(inp.measure.get("inputs")),
         "branches": _record_branches(inp, _measured_branches(inp), rows),
         "written_digest": analysis_record.written_digest(doc),
@@ -350,18 +355,34 @@ def _build_record(inp: Inputs, doc: dict[str, Any], rows: list[dict[str, Any]]) 
     return record
 
 
+def _mask_unread(existing: dict[str, Any]) -> Optional[str]:
+    """読み手の無い項目の値とその指紋（`analysis.written`）を伏せた、差分の前の側の文。どちらも無ければ None。
+    指紋は値のハッシュなので、形の決まった値は候補をハッシュして照らせば言い当てられる。"""
+    unread, written = analysis_record.UNREAD_ITEMS, analysis_record.written_digests(existing)
+    if not any(k in existing or k in written for k in unread):
+        return None
+    shown = {k: MASK if k in unread else v for k, v in existing.items()}
+    if written:
+        shown["analysis"] = {**existing["analysis"], "written": {k: MASK if k in unread else v for k, v in written.items()}}
+    return dumps(shown)
+
+
 def _project_file(inp: Inputs, doc: dict[str, Any]) -> Optional[File]:
-    """設定の File。今の設定と同じなら None（File を読まない）。"""
+    """設定の File。今の設定と同じなら None（File を読まない）。読み手の無い項目かその指紋が残る設定では、差分の前の側の値と指紋を
+    伏せる（旧い値に認証情報が入っていても、出力に写さない）。"""
     if inp.existing is not None and value_digest(inp.existing) == value_digest(doc):
         return None
     path = files.path(inp.main, "project")
     old = path.read_text(encoding="utf-8") if inp.existing is not None else None
+    if inp.existing is not None:
+        old = _mask_unread(inp.existing) or old
     return File(path, files.relpath("project"), old, dumps(doc))
 
 
 def plan(inp: Inputs) -> Plan:
     """書くファイルと出力の行を決める（何も書かない）。書き出す設定か解析の記録が形に合わなければ `WriteError`。"""
-    questions = {k for k, m in obj(inp.measure.get("items")).items() if obj(m).get("status") == QUESTION}
+    # 回答できるのは、今の解析が書く項目のうち質問のものだけ（旧版の測定の結果が持つ消した項目の回答は無視する）
+    questions = {k for k, m in obj(inp.measure.get("items")).items() if k in ITEM_KEYS and obj(m).get("status") == QUESTION}
     rows = [{"kind": "ignored", "key": k} for k in inp.answers if k not in questions]
     written_before = analysis_record.written_digests(inp.existing)
     doc, item_rows = merge_project(inp.existing, inp.measure, inp.answers, written_before)
@@ -379,16 +400,7 @@ def plan(inp: Inputs) -> Plan:
 
 def p_number(key: str, default: str) -> str:
     """項目のキー（`#` より前を見る）の P の番号。表に無ければ `default`。"""
-    numbers = {
-        "languages": "P1",
-        "test": "P2",
-        "ci": "P4",
-        "services": "P5",
-        "issues": "P8",
-        "checks": "P9",
-        "ndf_policies": "P9",
-        "instructions": "P10",
-    }
+    numbers = {"test": "P2", "ci": "P4"}
     head = key.split("#")[0]
     return numbers[head] if head in numbers else default
 

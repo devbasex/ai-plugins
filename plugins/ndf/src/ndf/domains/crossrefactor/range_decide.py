@@ -18,13 +18,12 @@ from pathlib import PurePosixPath
 from ndf.contracts import facts
 from ndf.domains.crossrefactor.tests_decide import TABLE as TEST_TABLE
 
-LANGUAGES = "languages"
 # 設定のテストの置く場所のうち、範囲に数えないもの（リポジトリ全体）
 WHOLE = frozenset({".", "", "./"})
 
 
 def _code_suffixes() -> tuple[str, ...]:
-    exts = [e for r in facts.rows(LANGUAGES, code=True) for e in r["extensions"]]
+    exts = [e for r in facts.rows("languages", code=True) for e in r["extensions"]]
     return tuple(sorted(exts, key=len, reverse=True))
 
 

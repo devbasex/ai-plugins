@@ -90,7 +90,7 @@ contracts/
 | `plan` | `write.py` | 変更 | シグネチャは今のまま | 回答できる項目を、`status: question` のうち `ITEM_KEYS` にあるものに絞る。ほかの回答は `ignored` の行にする |
 | `p_number` | `write.py` | 変更 | `(key, default) -> str` | 項目と番号（`measure`・`write` の出力で項目を指す `P2` などの表示）の対応表を、`test`（P2）・`ci`（P4）だけにする |
 | `_build_record` | `write.py` | 変更 | シグネチャは今のまま | `analyzer` に測定の結果の `analyzer` を書く。1 以上の整数でない値は、記録の形の確かめより前に止める |
-| `_project_file` | `write.py` | 変更 | `(inp, doc) -> Optional[File]` | 6 項目が残る設定では、差分の前の側を、6 項目の値を `（伏せた）` に置き換えて整形し直した文にする |
+| `_project_file` | `write.py` | 変更 | `(inp, doc) -> Optional[File]` | 6 項目の値かその指紋（`analysis.written`）が残る設定では、差分の前の側を、6 項目の値と指紋を `（伏せた）` に置き換えて整形し直した文にする。指紋は値のハッシュなので、値の候補と照らせる |
 
 - `analysis_record` の定数は、6 項目の並び `UNREAD_ITEMS` を足し、`OLD_ITEMS` を `test_duration` と `UNREAD_ITEMS` にする。`_OLD_IN_ITEMS` から `languages[].files` を消す
 - 6 項目の指紋は、`merge_project` が `analysis.written` を `ITEM_KEYS` の項目だけで作り直すので消える。足す処理は無い
@@ -113,7 +113,7 @@ contracts/
   - 「回答方」の表と例から `issues`・`ndf_policies` を消し、`gh` で呼ぶ API と質問の説明を今の項目に合わせる
   - 旧い形の設定の説明に 6 項目を足し、次を書く
     - `ndf project write` は、人が直した値も取り除く。取り除く前の値の控えは自動で作らない
-    - `ndf project write` が出す差分は、取り除く値を伏せる。Git の差分（`git diff` など）には値がそのまま表示される
+    - `ndf project write` が出す差分は、取り除く値とその指紋を伏せる。Git の差分（`git diff` など）には値がそのまま表示される
     - コミットしていない手の編集は戻せない。打つ前に、利用者本人がメインディレクトリで `git diff --cached -- .ndf/project.json`（ステージした変更）と `git diff -- .ndf/project.json`（ステージしていない変更）の両方を確かめる
     - 設定を git で追跡していなければ、どの値も戻せない。残したい値があれば、打つ前にファイルをコピーする
     - 旧い値には認証情報が入っていることがある。値の入った Git の差分を見るのは、利用者本人が自分だけが見る端末で打つ場合に限り、AI には打たせない。書き写した値やファイルのコピーは、リポジトリの外の本人だけが読める場所に置く
