@@ -298,3 +298,29 @@ def test_the_prompt_keeps_the_given_text_and_order() -> None:
     first = next(i for i, line in enumerate(lines) if line.endswith(" position の説明 "))
     assert lines[first : first + 3] == [f"- {label}:  {key} の説明 " for key, label in reading.READER.items()]
     assert entry == before
+
+
+_PROMPT = {"files": ["a.md"], "reader": READER, "questions_kind": "none"}
+
+
+def test_issue_4543_the_prompt_has_the_distinction_unless_it_is_false() -> None:
+    section = writing.types_section()
+    stripped = writing.without_distinction(section)
+    assert section in reading.prompt(_PROMPT)
+    assert reading.prompt({**_PROMPT, "distinction": True}) == reading.prompt(_PROMPT)
+    without = reading.prompt({**_PROMPT, "distinction": False})
+    assert stripped in without and section not in without
+    assert without == reading.prompt(_PROMPT).replace(section, stripped)
+
+
+@pytest.mark.parametrize("value", ["false", None, 0, 1])
+def test_issue_4543_the_distinction_must_be_a_boolean(value: Any) -> None:
+    with pytest.raises(reading.ReadingInvalid, match="^distinction は"):
+        reading.prompt({**_PROMPT, "distinction": value})
+
+
+def test_issue_4543_unpaired_markers_stop_the_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    broken = f"{writing.TYPES_HEADING}\n{writing.DISTINCTION_BEGIN}\n"
+    monkeypatch.setattr(writing, "criteria", lambda: broken)
+    with pytest.raises(writing.CriteriaBroken):
+        reading.prompt({**_PROMPT, "distinction": False})

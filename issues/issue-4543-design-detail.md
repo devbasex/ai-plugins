@@ -49,7 +49,7 @@ plugins/ndf/
 
 満たす決定: 決定 1・2・3・4・5、受け入れ条件 1・2・4・5
 
-プログラムの関数は無い。足す文は設計文書の「どこを変えるか」の 2 つの表のとおりである。目印は `<!-- ndf:distinction-begin -->` と `<!-- ndf:distinction-end -->` で、それぞれ 1 行を単独で使う。置くのは、`### 現状と改善の案の書き分け` の前と、小見出しの最後（`## 4. 書き方` の前）である。3 章の中に収まるので、`writing.types_section` の切り出しにも入る。
+プログラムの関数は無い。足す文は設計文書の「どこを変えるか」の 2 つの表のとおりである。目印は `<!-- ndf-distinction-begin -->` と `<!-- ndf-distinction-end -->` で、それぞれ 1 行を単独で使う。置くのは、`### 現状と改善の案の書き分け` の前と、小見出しの最後（`## 4. 書き方` の前）である。3 章の中に収まるので、`writing.types_section` の切り出しにも入る。
 
 ## 小見出しを外す処理
 
@@ -75,8 +75,8 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `DISTINCTION_BEGIN` | 定数 | `src/ndf/contracts/writing.py` | `<!-- ndf:distinction-begin -->` |
-| `DISTINCTION_END` | 定数 | `src/ndf/contracts/writing.py` | `<!-- ndf:distinction-end -->` |
+| `DISTINCTION_BEGIN` | 定数 | `src/ndf/contracts/writing.py` | `<!-- ndf-distinction-begin -->` |
+| `DISTINCTION_END` | 定数 | `src/ndf/contracts/writing.py` | `<!-- ndf-distinction-end -->` |
 
 目印は、前後の空白を除いた行の全体が定数と一致するときだけ数える。文の中で目印に触れた行は数えない。
 

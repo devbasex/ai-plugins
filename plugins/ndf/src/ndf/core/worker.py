@@ -237,9 +237,11 @@ def system_prompt(kind: str, state_dir: Path, skills_dir: Path, sources: Sequenc
     rules = "\n".join(WORK_RULES).format(pr_body_draft=pr_body_draft(state_dir), state_dir=shlex.quote(str(state_dir)))
     procedure = "\n".join(KIND_RULES.get(kind, ()))  # noqa: NDF502 利用者の入力: 手順を足さない作業種別は空
     parts = [rules, procedure, skills_section(kind, skills_dir)]
-    if WRITING_SKILL in worker_kinds.work_kinds().get(kind, {}).get("skills", ()):  # noqa: NDF502 利用者の入力: 定義に無い作業種別（sweep など）は文書を書かない
+    row = worker_kinds.work_kinds().get(kind, {})  # noqa: NDF502 利用者の入力: 定義に無い作業種別（sweep など）は文書を書かない
+    if WRITING_SKILL in row.get("skills", ()):  # noqa: NDF502 利用者の入力: 定義に無い作業種別は上で空にした
         try:
-            parts.append(writing.criteria())
+            text = writing.criteria()
+            parts.append(text if row.get("distinction") else writing.without_distinction(text))  # noqa: NDF502 省けば偽の任意のキー
         except writing.CriteriaBroken as exc:
             raise WorkerError("precondition", str(exc)) from None
     if sources:

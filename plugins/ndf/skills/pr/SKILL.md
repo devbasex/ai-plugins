@@ -98,6 +98,9 @@ credential helper が応答しない環境では、`gh auth setup-git` で gh �
 更新のときはブランチの全コミット（`git log origin/<base>..HEAD`）を反映し、既存の関連リンクを保つ。
 本文の末尾には `<!-- I want to review in Japanese. -->` の 1 行を置く。
 
+**概要（`## Summary`・`## 概要`）は、[文書の書き方の基準の「現状と改善の案の書き分け」](../../contracts/data/writing-criteria.md#現状と改善の案の書き分け)に従って書く。** 設計 PR と実装 PR の両方に当たる。
+`## 利用者向けの変化` と `## 移行の手順` は対象外で、下のとおりに書く。
+
 **`standard` の実装 PR は `## 設計と違う点` のセクションを持つ。** 完了判定の設計との突き合わせ（`quality-gates` の
 `references/design-match.md`）で見つけた、設計の決定・設計に名前の出るテスト・既存の確定仕様・受け入れ条件と実装の
 違いを「| 設計の箇所 | 違い | 理由 |」の表で並べる。違いが無ければ「- 無し」、設計文書が無ければ

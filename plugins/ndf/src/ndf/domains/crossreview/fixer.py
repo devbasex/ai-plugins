@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.adapters import agents, claude, claude_choice, git
-from ndf.contracts import limits
+from ndf.contracts import limits, writing
 from ndf.core.converge import participants
 from ndf.domains.crossreview import criteria_decide, experiment, push, resume_decide, store
 from ndf.domains.crossreview import finish_decide as fin
@@ -53,6 +53,8 @@ class FixRun(Protocol):
     fixer_last: Optional[resume_decide.Previous]
     fixer_growth: int
     documents: bool
+    distinction: bool
+    requirements_copy: bool
 
     def round_stem(self, round_no: int, suffix: str) -> Path: ...
 
@@ -80,7 +82,10 @@ def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[f
     )
     lines += criteria_decide.fixer_block(run.cfg.settings.focus, run.snapshot)
     lines += criteria_decide.unit_block(criteria_decide.FIXER, run.cfg.unit)
-    lines += criteria_decide.document_block(criteria_decide.FIXER, run.documents)
+    if run.requirements_copy:
+        lines.append(criteria_decide.fixer_requirements_copy())
+    block = criteria_decide.document_block(criteria_decide.FIXER, run.documents)
+    lines += block if run.distinction else map(writing.without_distinction, block)
     # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）
     if scoped.ci_only(declared.test_section(run.cfg.worktree)):
         lines.append(criteria_decide.fixer_ci_only())

@@ -223,6 +223,11 @@ def fixer_ci_only() -> str:
     return str(_table()["fixer_ci_only"])
 
 
+def fixer_requirements_copy() -> str:
+    """要求仕様のコピーを変える PR で、修正担当への指示に足すコピーへの指摘の扱い（#4543 の決定 7）。"""
+    return str(_table()["document"]["requirements_copy"])
+
+
 def fixer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]:
     """修正担当への「指摘の基準」のセクション。"""
     t = _table()

@@ -41,3 +41,22 @@ def test_plan_file_formats_the_issue_number() -> None:
 )
 def test_plan_issues_reads_the_numbers_in_the_name(path: str, numbers: set[int]) -> None:
     assert issue_docs.plan_issues(path) == frozenset(numbers)
+
+
+@pytest.mark.parametrize(
+    ("path", "numbers"),
+    [
+        ("issues/issue-75-requirements.md", {75}),
+        ("issues/issue-7-8-requirements.md", set()),
+        ("issues/issue-7-design.md", set()),
+        ("issues/issue-7-plan.md", set()),
+        ("issues/sub/issue-7-requirements.md", set()),
+        ("docs/issue-7-requirements.md", set()),
+    ],
+)
+def test_requirements_issues_reads_the_single_number_in_the_name(path: str, numbers: set[int]) -> None:
+    assert issue_docs.requirements_issues(path) == frozenset(numbers)
+
+
+def test_requirements_path_matches_what_is_written() -> None:
+    assert issue_docs.requirements_issues(issue_docs.REQUIREMENTS_FILE.format(number=12)) == frozenset({12})
