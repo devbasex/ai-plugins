@@ -387,13 +387,13 @@ def measure(tree: Tree, step: Step, items: dict[str, Any]) -> list[str]:
     services = step("services", lambda: service_names(tree))
     if services is None:
         services = []
-    got = step("test", lambda: measure_test(tree, dep, services))
-    if got is not None:
-        items["test"] = got
+    test_result = step("test", lambda: measure_test(tree, dep, services))
+    if test_result is not None:
+        items["test"] = test_result
     notes = step("instructions", lambda: instruction_notes(tree))  # 素材の README の読み取りが時間を使い切る前に測る
-    got = step("materials", lambda: measure_materials(tree, dep))
-    if got is not None:
-        items["materials"] = got
+    materials_result = step("materials", lambda: measure_materials(tree, dep))
+    if materials_result is not None:
+        items["materials"] = materials_result
     for key in AUX_STEPS:
         items.pop(key, None)
     return notes if notes is not None else []  # None は締め切りか失敗。注記を出さない
