@@ -19,7 +19,7 @@ plugins/ndf/
     └── domains/
         ├── records/reading.py
         ├── docrebuild/drive.py
-        └── crossreview/{cli.py, criteria_decide.py, drive.py, fixer.py, settings.py}
+        └── crossreview/{criteria_decide.py, drive.py, fixer.py}
 ```
 
 依存の向き: `domains` と `core` が `contracts` を読み、`domains` が `core` を読む一方向で、循環は無い。`domains/crossreview/drive.py` と `fixer.py` は `src/ndf/contracts/writing.py` を直接読む。外す条件は呼ぶ側が持ち、`writing.py` は条件を知らない（決定 6）。
@@ -37,8 +37,6 @@ plugins/ndf/
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の基準の文を表から読む | 表 | `criteria_decide` | `fixer_requirements_copy`（新設） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 変更したファイルから小見出しを渡すかを決め、レビュー担当の指示を組む | `issue_docs`・`writing`・`criteria_decide` | `_Run` | `_prepare_round`・`_review_prompt`（変更） |
 | `src/ndf/domains/crossreview/fixer.py` | 変更 | 修正担当の指示を組む | `writing`・`criteria_decide` | `FixRun` | `_fix_prompt`（変更） |
-| `src/ndf/domains/crossreview/settings.py` | 変更 | 1 回の起動の引数を持つ | — | `RunConfig` | —（値 `repo` を足す） |
-| `src/ndf/domains/crossreview/cli.py` | 変更 | 対象のリポジトリを解決して起動の引数へ入れる | `repo`・`settings` | — | `_ready`（変更） |
 | `skills/design/references/design-template.md` | 変更 | 要約・全体像・目的を書く指示 | 基準の小見出し | — | — |
 | `skills/pr/SKILL.md` | 変更 | PR の概要を書く指示 | 基準の小見出し | — | — |
 | `skills/requirements-design/SKILL.md` | 変更 | 課題の本文の概要を書く指示 | 基準の小見出し | — | — |
@@ -197,18 +195,13 @@ plugins/ndf/
 | `fixer_requirements_copy` | `src/ndf/domains/crossreview/criteria_decide.py` | 新設 | `() -> str` | 要求仕様のコピーへの指摘の扱いの文を表から返す |
 | `_prepare_round` | `src/ndf/domains/crossreview/drive.py` | 変更 | 変えない | 変更したファイルの名前から `run.distinction` と `run.requirements_copy` を決める |
 | `_review_prompt` | `src/ndf/domains/crossreview/drive.py` | 変更 | 変えない | `run.distinction` が偽なら、文書の基準のセクションから小見出しを外す |
-| `_fix_prompt` | `src/ndf/domains/crossreview/fixer.py` | 変更 | 変えない | 同じ条件で小見出しを外し、コピーがあれば扱いの文を足して、指示の 1 行目にレビュー対象のリポジトリを入れる |
-| `_ready` | `src/ndf/domains/crossreview/cli.py` | 変更 | 変えない | `repo.resolve_target_repo`（`--repo`、状態ファイル、worktree のリモートの順）で解決した `<所有者>/<リポジトリ>` を `RunConfig.repo` に入れる |
+| `_fix_prompt` | `src/ndf/domains/crossreview/fixer.py` | 変更 | 変えない | 同じ条件で小見出しを外し、コピーがあれば扱いの文を足す |
 
 - `_prepare_round`
   - 事後条件: `run.distinction` は、次の条件で真になる。変更したファイルのどれかで、`issue_docs.design_issues` か `issue_docs.requirements_issues` の結果が空でない。`run.requirements_copy` は後者に当たるファイルがあるとき真になる
 - `_review_prompt`・`_fix_prompt`
   - `run.distinction` が偽の場合だけ、`document_block` の返す各要素に `writing.without_distinction` を掛ける。真の場合は呼ばない。目印の無い要素は変わらない。`document_block` は変えない
   - 指摘の文や単位の指示など、基準でない部分には掛けない（このリポジトリでは目印の文字列がそこへ現れうる）
-
-- `_fix_prompt` の 1 行目
-  - `run.requirements_copy` が真の場合は、PR の番号と worktree のパスに加えて `RunConfig.repo` を書く。修正担当が作業場所からリポジトリを推測して、別のリポジトリの同じ番号の課題を書き替えることを防ぐためである
-  - `_ready` がリポジトリを解決できない場合（`RepoUnresolved`）は、起動を止めずに `RunConfig.repo` を空にする。指示の 1 行目にリポジトリが無ければ、修正担当は課題と PR の本文を読み書きしない
 
 扱いの文は `fixer_ci_only` と同じく修正担当への指示だけに入れ、基準の全文より前（`unit_block` の後）に置く。
 
@@ -218,7 +211,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `_review_prompt`・`_fix_prompt` | 目印が対にならない | 編集の誤り | `without_distinction` | `CriteriaBroken` を呼び出し元へそのまま送出する | `crossreview/cli.py` の今の `CriteriaBroken` の扱い（`invalid` で止める） | 指示を作る前なので担当を起動しない。直して打ち直せる |
 
-修正担当が扱いの文の手順を終えられない場合（本文を書き替えられないなど）は、プログラムでは検出しない。修正担当が、下の「内部のデータと定数」に挙げる扱いのとおりに、指摘を `deferred`・`defer: needs_user` で返す。結果の形は今のままである。
+修正担当が扱いの文のとおりに動いたかは、プログラムでは検出しない。修正担当は、下の「内部のデータと定数」の扱いに従って指摘を直すか、`deferred`・`defer: needs_user` で返す。結果の形は今のままである。
 
 ### 内部のデータと定数
 
@@ -226,33 +219,26 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_Run.distinction` | 内部の値（真偽）。`FixRun` にも足す | `domains/crossreview/drive.py` | 偽 |
 | `_Run.requirements_copy` | 内部の値（真偽）。`FixRun` にも足す | `domains/crossreview/drive.py` | 偽 |
-| `RunConfig.repo` | 内部の値（`<所有者>/<リポジトリ>` か None） | `domains/crossreview/settings.py` | None |
 | `document.requirements_copy` | 修正担当へ足す文 | `contracts/data/review-criteria.json` | — |
 
-`document.requirements_copy` の文には、要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘の直し方を書く。`summary` にもこのキーの説明を足す。
+`document.requirements_copy` の文には、要求仕様のコピー（`issues/issue-<番号>-requirements.md`）への指摘の扱いを書く。`summary` にもこのキーの説明を足す。
 
-直し方は、指摘された場所で分ける。
+修正担当は、コピーへの指摘があれば、コピーの名前の番号の課題の本文を `gh issue view <番号> --json body --jq .body` で読む。読むだけで、書かない。読んだ本文の `## 進行` より前（`## 進行` が無ければ全文）を、下の表では「要求の範囲」と呼ぶ。扱いは、指摘された場所で分ける。
 
-- コピーのうち課題の本文から写した範囲への指摘は、下の手順で、コピーの名前の番号の課題の本文から直す
-- 実装計画など、コピーにだけあるセクションへの指摘は、そのセクションを直接直してコミットする。課題の本文と PR の本文は変えない
+| 指摘された場所 | 扱い |
+| --- | --- |
+| 課題の本文から写した範囲（要求の範囲の `## ` の見出しと同じ見出しのセクションと、最初の `## ` より前） | 課題の本文、コピー、PR の本文を書き替えない。直す案を見送りの理由に書き、`deferred`・`defer: needs_user` にする |
+| コピーにだけあるセクション（見出しが要求の範囲に無い。実装計画など） | そのセクションを直接直してコミットする。課題の本文と PR の本文は変えない |
+| 見分けられない場合（本文を読めないか、要求の範囲の `## ` の見出しがコピーにそろっていない） | 写した範囲と同じ扱いにする |
 
-下の手順の「要求の範囲」は、課題の本文の `## 進行` より前（`## 進行` が無ければ全文）を指す。同じ課題への指摘は、1 回の起動の中でまとめて 1 度の手順で直す。
+直す案には、直し先の課題の番号、セクションの見出し、直す前の文、直した後の文を書く。利用者がこの理由だけを読んで、直すかを決められるようにするためである。コピーの写した範囲は、ほかの文書への指摘を直すときも書き替えない。
 
-下の手順の `gh` の読み書きには、指示の 1 行目にあるレビュー対象のリポジトリを、すべて `--repo <所有者>/<リポジトリ>` で指定する。手順 1〜3 は課題ごとに行う。
+指示の 1 行目は変えず、レビュー対象のリポジトリは足さない。修正担当は課題と PR の本文へ書かないので、別のリポジトリの本文を書き替える経路が無いためである。本文の読み取りで `gh` が使うリポジトリは、次のとおりに決まる。
 
-1. `gh issue view <番号> --repo <所有者>/<リポジトリ> --json body --jq .body` で本文を読み、直す前の要求の範囲を控える。その範囲に指摘の直しを加えた案を作る
-2. 書き込みの直前に本文をもう一度読む。要求の範囲が控えと違えば、上書きしない。同じなら、案の後ろに、このとき読んだ `## 進行` から末尾までを変えずに付け、`gh issue edit <番号> --repo <所有者>/<リポジトリ> --body-file <ファイル>` で書く
-3. 書いた本文を読み直し、要求の範囲をコマンドの出力のままコピーへ書く（AI が書き写さない）。コピーのうち、直す前の本文に無い `## ` の見出しのセクション（実装計画など）は、後ろにそのまま残す
-4. すべての課題の手順 1〜3 を終えた後に、指示の 1 行目にあるレビュー対象の PR の番号とリポジトリを明示して、`gh pr view <PR の番号> --repo <所有者>/<リポジトリ> --json headRefName,body` を読む。head のブランチ名が `design/` で始まれば設計 PR である。設計 PR でなければ、PR の本文を編集しない。設計 PR の本文に直す前の文が写っていれば、その箇所を直した後の文へ置き換えた送信案を作る。置き換えるのは、本文を書けた課題の直しだけである。送る前に、読んだ本文と送信案を `diff` で比べる。直す箇所がすべて置き換わり、ほかの行が変わっていないことを確かめる。確かめた送信案を `gh pr edit <PR の番号> --repo <所有者>/<リポジトリ> --body-file <ファイル>` で 1 回で書く
-5. コピーをコミットする。コピーの要求の範囲が、手順 3 で読み出した本文と一致することを比べる。手順 4 で PR の本文を書いた場合は、本文を読み直し、送った案と全文が一致する（改行コードの違いは除く）ことを比べる。この比較で確かめるのは、手順 4 の検査を通った案がそのまま保存されたことである。確かめてから指摘を `fixed` にする
+- `--repo` を付けた起動では、`cli.py` が今も子のプロセスへ渡している `GH_REPO` のリポジトリ
+- 付けない起動では、作業場所のリモートから `gh` が決めるリポジトリ
 
-指摘は次の場合に `deferred`・`defer: needs_user` にし、直す案を見送りの理由に書く。
-
-| 場合 | 見送る指摘 | 反映の扱い |
-| --- | --- | --- |
-| 指示の 1 行目にリポジトリが無い | 課題の本文から写した範囲への指摘すべて | 課題の本文、コピー、PR の本文を変えない |
-| ある課題の本文を書き替えられないか、手順 2 で要求の範囲が控えと違う | その課題の指摘だけ | その課題のコピーと、その課題の PR の本文への反映をしない。ほかの課題は、コピーと PR の本文への反映まで進める |
-| 本文を書いた後で、設計 PR かを確かめられないか、送信案の検査を通せないか、PR の本文を直せないか、手順 5 の一致を確かめられない | PR の本文への反映を確かめられなかった指摘 | コピーは書いた課題の本文に合わせてコミットし、残った食い違いを見送りの理由に書く。送信案の検査を通せなければ、PR の本文を書かない |
+別のリポジトリの同じ番号の課題を読んだ場合は、見出しがそろわなければ写した範囲として扱う。見出しがそろう別の課題を読むと、写した範囲をコピーにだけあるセクションと取り違える余地が残る。この場合もコピーの直しはコミットとして PR の差分に残り、課題の本文は変わらない。
 
 2 つの値はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
 
@@ -272,6 +258,6 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `fixer_requirements_copy` | 表の文を返す | — | — |
 | `_prepare_round`・`_review_prompt` | 設計書がある変更で小見出しがある | 要求仕様のコピーだけでもある。どちらも無い Markdown の変更では、小見出しが無く基準の残りがある | — |
-| `_fix_prompt` | コピーがあれば扱いの文と小見出しがあり、1 行目に `RunConfig.repo` がある | 設計書だけなら扱いの文が無い。どちらも無ければ両方無い | 目印が対にならない基準で `invalid` |
+| `_fix_prompt` | コピーがあれば扱いの文と小見出しがある | 設計書だけなら扱いの文が無い。どちらも無ければ両方無い | 目印が対にならない基準で `invalid` |
 
 `tests/domains/crossreview/test_crossreview_documents.py` の「指示に基準の全文がある」の確かめは、変更したファイルの名前に合わせて直す。
