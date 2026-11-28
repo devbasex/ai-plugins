@@ -160,7 +160,7 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     held = prog.waiting is not None or step.id in prog.held
     # 手で終えた回答待ちは、前に流したステップの判定で省かない
     # 手で終えた回答待ちと、承認でない回答が残る承認ゲートは、判定で省かない
-    objected = listen and approval_decide.objection_remains(v.stage_events(s.name), step.gate)
+    objected = listen and approval_decide.skip_barred(v.stage_events(s.name), step.gate, s.mvv_before(step.id))
     skip = listen and not held and not by_hand and not objected and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
     if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
@@ -329,6 +329,8 @@ class Env:
     forget: Callable[[], None] = lambda: None
     # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
     revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None
+    # MVV 判定の承認を確定する前に、判定した対象の PR へ承認の証跡を書く口（GitHub へ書くのは `ndf.progress.gate`）
+    mvv_trail: Callable[[Mapping[str, Any]], None] = lambda _answered: None
     # 回答を対象と照らす口（作業の排他の中で読んだ記録と、読む回答の事象の番号。回答を読まない最初の手は None）。作業の排他の中で打ち、
     # 待ちへ戻したか繰り上げたら理由を返す
     verify: Callable[[View, Optional[int]], Optional[str]] = lambda _view, _seq: None

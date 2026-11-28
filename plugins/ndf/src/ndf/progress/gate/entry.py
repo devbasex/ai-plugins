@@ -30,6 +30,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
 from ndf.adapters.git import Git, GitError
+from ndf.adapters.github import GitHub
 from ndf.contracts import result, worker_paths
 from ndf.contracts.worker_kinds import (
     DELIVERY,
@@ -63,7 +64,7 @@ from ndf.progress.gate.asking import (
     show_question,
     with_presented_pr,
 )
-from ndf.progress.gate import finishing
+from ndf.progress.gate import finishing, mvv_trail
 from ndf.progress.gate.rechecking import Recheck, git_docs_only, recheck, reread, standing, verifier
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
@@ -590,10 +591,11 @@ def ask_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _drive_env(st: store.Store, reader: TargetReader, revoke: reopening.Revoke) -> run.Env:
-    """レーンの行を終え、記録した承認を今の対象に照らし、境界の前になる承認を取り消せる `Env`。"""
+def _drive_env(st: store.Store, reader: TargetReader, revoke: reopening.Revoke, hub: Callable[[], GitHub]) -> run.Env:
+    """レーンの行を終え、記録した承認を今の対象に照らし、境界の前になる承認を取り消せて、MVV の承認の証跡を書ける `Env`。"""
     env = lane_env(run.Env(facts=command.facts_of))
-    return replace(env, standing=standing(reader, st.root), forget=reader.forget, revoke=revoke)
+    trail = partial(mvv_trail.ensure, hub)
+    return replace(env, standing=standing(reader, st.root), forget=reader.forget, revoke=revoke, mvv_trail=trail)
 
 
 def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
@@ -612,7 +614,7 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     if not advancing:
         before = [take(), recheck(st, a.machine_id, seen, docs_only, revoke, Recheck(advancing=False))]
     verify = verifier(st, seen, docs_only, revoke, reader.forget, take if advancing else lambda: None)
-    env = replace(_drive_env(st, reader, revoke), verify=verify)
+    env = replace(_drive_env(st, reader, revoke, hub), verify=verify)
     out = run.COMMANDS[a.action](run.with_env(a, env), cwd, st)
     if a.action == "wait":
         reader.forget()  # 待ちの間に PR が変わりうるので、承認資料は読み直した対象で作る（`work` はステップを流すたびに捨てる）
@@ -634,7 +636,7 @@ def _cmd_reread(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Opti
     hub = shared_hub(cwd)
     reader, revoke = TargetReader(hub), finishing.revoker(hub, "承認の待ちを書き直さない")
     verify = verifier(st, seen, git_docs_only(cwd), revoke, reader.forget)
-    out = reread(st, a.machine_id, cwd, replace(_drive_env(st, reader, revoke), verify=verify))
+    out = reread(st, a.machine_id, cwd, replace(_drive_env(st, reader, revoke, hub), verify=verify))
     return present(st, a.machine_id, cwd, out, seen)
 
 

@@ -110,10 +110,19 @@ def objection_remains(rows: Sequence[model.Event], gate: Optional[str]) -> bool:
     return remains
 
 
+def skip_barred(rows: Sequence[model.Event], gate: Optional[str], judged_step: Optional[str]) -> bool:
+    """MVV 判定で承認ゲート `gate` を省けないか。承認でない回答が残るか、判定のステップ `judged_step` が済んだ後に却下か
+    変更要求の証跡の投稿を試みた記録があれば真（回答の確定に失敗していても、PR には却下が載りうる）。
+
+    `rows` は工程のすべての事象。"""
+    judged = max((ev.seq for ev in rows if ev.draft.kind == STEP_EVENT and event_payload(ev).get("step") == judged_step), default=0)
+    return objection_remains(rows, gate) or rejection_posted_after(rows, gate, judged)
+
+
 def objection_bars_skip(rows: Sequence[model.Event], step_id: str) -> bool:
     """判定のステップ `step_id` の MVV 判定を、省かない指定で打つか。`rows` はその工程のすべての事象。
 
-    判定は省くと決めた時点で承認の証跡を PR へ書くので、後の承認ゲートで省かないだけでは、人の再承認の前にマージできてしまう。
+    省かない指定の判定は読み手役のステップを流し、承認ゲートで人へ問う材料をそろえる。
     工程を流す側（`next`）と `ndf records mvv gate --machine` の両方がここで決める（#4520）。"""
     return step_id == model.MVV_GATE_STEPS[DESIGN_GATE] and objection_remains(rows, DESIGN_GATE)
 
@@ -155,22 +164,31 @@ def _target_of(seen: Any, head: Any = None) -> Optional[merge_approval.MergeTarg
     return merge_approval.MergeTarget(repo, number, base, sha)
 
 
-def _record_of(answer: Mapping[str, Any]) -> str:
-    """回答の payload の、証跡の記録の識別子。"""
+def trail_record_id(answer: Mapping[str, Any]) -> str:
+    """回答の payload の、証跡の記録の識別子。MVV 判定の回答は質問の id と head を入れ、世代の違う証跡を重複とみなさない。"""
     seen = answer.get("seen")
+    if answer.get("by") == model.MVV_SERVICE:
+        head = seen.get("head") if isinstance(seen, Mapping) else None
+        return f"mvv:{answer.get('gate')}:{answer.get('gate_id')}:{head}"
     shown = seen.get("presentation") if isinstance(seen, Mapping) else None
     return merge_approval.presented_record_id(str(answer.get("gate_id")), shown)
 
 
+def judged_note_url(held: Mapping[str, Any]) -> Optional[str]:
+    """判定の出力 `held` が持つ、判定の記録のコメントの URL。無ければ None。"""
+    url = held.get("note_url")
+    return url if isinstance(url, str) and url else None
+
+
 def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
-    """事象が証跡を書いた承認の対象と記録の識別子。承認の回答と、省くと決めた MVV 判定の記録（判定のコマンドが証跡を書く）を読む。"""
+    """事象が証跡を書いた承認の対象と記録の識別子。承認の回答と、省くと決めた MVV 判定の記録（以前の判定のコマンドは自分で証跡を書いた）を読む。"""
     p = event_payload(ev)
     if ev.draft.kind == ANSWERED:
         seen = p.get("seen")
         target = _target_of(seen) if p.get("answer") == invoke.APPROVED and not closes_only(p) else None
         if target is None:
             return None
-        return target, _record_of(p)
+        return target, trail_record_id(p)
     if ev.draft.kind != STEP_EVENT:
         return None
     report = p.get("report")
@@ -180,8 +198,8 @@ def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
         return None
     target = _target_of(held.get("target"), held.get("head"))
     # 記録の識別子は別のステートマシンの判定と同じになるので、証跡を書いたコメントの URL で指す
-    url = held.get("note_url")
-    return (target, url) if target is not None and isinstance(url, str) and url else None
+    url = judged_note_url(held)
+    return (target, url) if target is not None and url else None
 
 
 def revocations(since: Mapping[str, Sequence[model.Event]], machine_id: str, names: Sequence[str]) -> list[merge_approval.Revocation]:
@@ -215,7 +233,7 @@ def _unrecorded(rows: Sequence[model.Event]) -> list[tuple[merge_approval.MergeT
     前の記録は数えない（境界へ移るときに取り消してある）。"""
     cut = max((ev.seq for ev in rows if ends_approvals(ev)), default=0)
     answered = (event_payload(ev) for ev in rows if ev.draft.kind == ANSWERED)
-    recorded = {_record_of(p) for p in answered if p.get("answer") == invoke.APPROVED}
+    recorded = {trail_record_id(p) for p in answered if p.get("answer") == invoke.APPROVED}
     posted = (event_payload(ev) for ev in rows if ev.seq > cut and ev.draft.kind == APPROVAL_POSTING)
     # 却下と変更要求の投稿前の記録（`rejecting`）は、取り消す承認ではない
     approvals = (p for p in posted if REJECTING_KEY not in p)

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import importlib.util
+from dataclasses import replace
 from pathlib import Path
 
 import merge_hub
@@ -428,3 +429,40 @@ def test_an_objection_survives_a_reopen_and_the_mvv_verdict_does_not_skip(repo, 
     assert "design-mvv" in env.calls
     assert out["status"] == "gate" and out["metrics"]["stage"] == DESIGN, out
     assert manual._state(st, tid, DETAIL) == "pending"
+
+
+def _approved_by_mvv(repo, st, env, capsys) -> str:
+    """`auto` のスプリントで、MVV 判定が省くと決め、`service:mvv` の承認を書いた直後（確定の前）のステートマシン。"""
+    command.main(["new", "s1", "--mode", "standard", "--issues", str(manual.ISSUE), "--pace", "auto"])
+    tid = last_result(capsys.readouterr().out)["metrics"]["machine_id"]
+    held = {"gate": "design", "skip": True, "verdict": None, "why": [], "holds": [], "pr": DESIGN_PR, "head": merge_hub.HEAD}
+    values = {**manual.lanes.values(repo, "sprint/s1"), "mvv_gate": held}
+    env.script["design-mvv"] = [lambda r: manual.lanes.ok_result(r, values)]
+    manual._before_design(capsys, repo, tid)
+    manual._next(st, tid, repo, env)
+    assert run.decide(run.read(st, tid)).action == run.Action.CONSUME
+    return tid
+
+
+def test_the_mvv_trail_is_written_when_the_flow_confirms_the_approval(repo, st, env, board, capsys):
+    tid = _approved_by_mvv(repo, st, env, capsys)
+    written: list[str] = []
+    env.env = replace(env.env, mvv_trail=lambda answered: written.append(answered["by"]))
+    assert written == []
+
+    manual._next(st, tid, repo, env)
+
+    assert written == [model.MVV_SERVICE]
+
+
+def test_an_objection_after_the_judgement_stops_the_mvv_approval(repo, st, env, board, capsys):
+    """判定の後に変更要求が確定したら、MVV の承認の証跡を書かず、人へ問う。"""
+    tid = _approved_by_mvv(repo, st, env, capsys)
+    written: list[str] = []
+    env.env = replace(env.env, mvv_trail=lambda answered: written.append(answered["by"]))
+    payload = {"kind": invoke.LISTEN, "gate": "design", "step": "design-gate", "answer": "request_changes", "late": True}
+    run._write(st, tid, model.EventDraft("answered", "conductor", DESIGN, reason="直して", payload=payload, rev=1))
+
+    out = manual._next(st, tid, repo, env)
+
+    assert written == [] and out["status"] == "gate" and out["metrics"]["stage"] == DESIGN, out

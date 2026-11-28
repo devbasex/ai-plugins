@@ -194,17 +194,19 @@ def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
     return not approvals.isdisjoint((row.record_id, row.url))
 
 
-def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer, *, latest_only: bool | None = None) -> bool:
+def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer, *, latest_only: bool | None = None, preface: str = "") -> bool:
     """重なる証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
 
     何を重なりとするかは `latest_only` で決まる（`_already_written`）。指定しない呼び手（`ndf ci answer`）は記録の識別子だけを見る。
+
+    `preface` は同じコメントの証跡の行の前に置く本文（担い手 `mvv` の行は `MVV_NOTE_HEADING` の見出しが無いと数えない）。
 
     `viewer` のアカウント ID が読めていなければ、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
     if _already_written(merge_rows(hub, row.target.number, viewer), row, latest_only):
         return False
-    Publisher(hub).comment(row.target.number, render_merge_row(row))
+    Publisher(hub).comment(row.target.number, preface + render_merge_row(row))
     return True
 
 

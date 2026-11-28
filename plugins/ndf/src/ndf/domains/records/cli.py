@@ -496,7 +496,7 @@ def _add_mvv(sub: Any) -> None:
         help="承認する PR の番号（--gate release のときだけ）。判定に使う入力の PR と違えば、PR を読まず判定もコメントもせずに"
         " not_applicable で止まる",
     )
-    gate.add_argument("--no-skip", action="store_true", help="承認ゲートを省かず、承認の証跡を書かない（承認でない回答が残るとき）")
+    gate.add_argument("--no-skip", action="store_true", help="承認ゲートを省かない（承認でない回答が残るとき）")
     gate.set_defaults(handler=_mvv_gate)
     cite = m.add_parser("cite")
     cite.add_argument(

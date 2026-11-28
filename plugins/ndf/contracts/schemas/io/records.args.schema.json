@@ -298,7 +298,7 @@
         },
         "--no-skip": {
           "type": "boolean",
-          "description": "承認ゲートを省かず、承認の証跡を書かない（承認でない回答が残るとき）"
+          "description": "承認ゲートを省かない（承認でない回答が残るとき）"
         }
       },
       "required": [

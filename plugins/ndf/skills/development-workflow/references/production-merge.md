@@ -59,7 +59,7 @@ CD のある場合のマージの後は、CD の workflow がタグと GitHub Re
 | 回答の取り方 | 証跡を書く側 | 担い手 |
 | --- | --- | --- |
 | 工程の承認ゲート（設計承認ゲート・リリース承認ゲート）への `ndf answer --by human`（オーガナイザーが利用者の回答を中継したときを含む） | 回答を記録する前の `ndf answer` | `user` |
-| `pace: fast` / `auto` の MVV 判定が承認ゲートを通した | MVV 判定の記録のコメント（同じ 1 件に行を入れる） | `mvv` |
+| `pace: fast` / `auto` の MVV 判定が承認ゲートを通した | MVV 判定の承認を確定する前の、工程を進める操作（判定の記録へのリンクを添える） | `mvv` |
 | 単発のプランの承認待ちへの `ndf plan next <プラン> --answer <回答> --by human` | ステップ `approve-*`・`reject-*` の `ndf ci answer` | `user` |
 
 **証跡が無いときの終え方は、プランを組んだ所で決まる**（`ndf ci merge --production-gate`）。
