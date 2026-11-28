@@ -33,7 +33,7 @@ plugins/ndf/
 | `src/ndf/core/worker.py` | 変更 | worker の規則文を組む | `writing`・`worker_kinds` | `worker` | `system_prompt`（変更） |
 | `src/ndf/core/issue_docs.py` | 変更 | 課題の文書の名前の形を持つ | — | `issue_docs` | `requirements_issues`（新設） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 要求仕様のコピーの名前を `issue_docs` から読む | `issue_docs` | `drive` | `requirements_of`（参照先の定数だけ変える） |
-| `src/ndf/domains/records/requirements_copy.py` | 新設 | 要求仕様のコピーのうち直してよいセクションを決める | `adapters.markdown`・`adapters.github`・`issue_docs` | `requirements_copy` | `editable_sections`・`editable_of`・`unchanged_outside`・`all_outside`（新設） |
+| `src/ndf/domains/records/requirements_copy.py` | 新設 | 要求仕様のコピーのうち直してよいセクションを決める | `adapters.markdown`・`adapters.github`・`issue_docs` | `requirements_copy` | `editable_sections`・`editable_of`・`recorded`・`unchanged_outside`・`all_outside`（新設） |
 | `src/ndf/domains/docrebuild/cli.py` | 変更 | 直してよいセクションを返すサブコマンドを持つ | `requirements_copy` | `cli` | `editable`（新設） |
 | `src/ndf/domains/docrebuild/gate.py` | 変更 | 決まったセクションだけを直させ、ほかの範囲の変更を push せずに止める | `requirements_copy` | `gate` | `_allow_fix`・`_outside_sections`・`_only_protected_remain`（新設） |
 | `contracts/data/review-criteria.json` | 変更 | 修正担当へ足す扱いの文を持つ | — | — | — |
@@ -238,7 +238,7 @@ cross-review では、修正担当が扱いの文のとおりに動いたかを�
 3. 候補があるときだけ、本文の編集履歴（GraphQL の `userContentEdits`）を 1 回読む。コピーした後に本文から消したセクションを見分けるためである
 4. どの版の要求の範囲にも無かった候補だけを、直してよいセクションにする
 
-GitHub の説明では、版の `diff` は編集の要約である。実際の応答は版の本文の全文だった（2026-11-28 に、このリポジトリの 7 件の課題で、現在の本文と同じ版があることを確かめた）。そこで、現在の本文と同じ版が無ければ全文でないとみなす。この場合と、本文か履歴を読み切れない場合は、直してよいものは無い。
+GitHub の説明では、版の `diff` は編集の要約である。実際の応答は版の本文の全文だった（2026-11-28 に、このリポジトリの 7 件の課題で、現在の本文と同じ版があることを確かめた）。履歴が空（本文を一度も編集していない）なら、現在の本文だけで判定する。履歴が 1 件以上あり、その中に現在の本文と一致する版が無ければ、直してよいセクションは無い。本文か履歴を読み切れない場合も、直してよいセクションは無い。
 
 | 指摘された場所 | 扱い |
 | --- | --- |
@@ -252,10 +252,12 @@ GitHub の説明では、版の `diff` は編集の要約である。実際の�
 | 経路 | 判定する時点 | 読むリポジトリ | 範囲の外を変えた場合 |
 | --- | --- | --- | --- |
 | cross-review の修正担当 | 指摘がコピーに向くときに、指示を組むプログラムが判定し、結果を指示の文に入れる | `--repo`、状態ファイル、作業場所のリモートの順で決める。決められなければ直してよいものは無い | 検出しない |
-| 承認の前の確認の worker | 直す指摘があるときに `ndf document-rebuild editable --file <コピー>` を打つ | 作業場所のリモート | — |
-| `ndf document-rebuild gate` | worker がコピーを変えたときと、1 回の不合格で終えたときだけ判定する | PR のリポジトリ | push せずに止める |
+| 承認の前の確認の worker | 直す指摘があるときに `ndf document-rebuild editable --file <コピー> --record <ファイル>` を打つ | 作業場所のリモート | — |
+| `ndf document-rebuild gate` | worker がコピーを変えたときと、1 回の不合格で終えたときだけ確かめる。worker が書き残した判定があれば使い、無ければ判定する | PR のリポジトリ | push せずに止める |
 
-`gate` は、見出しの並びが同じで、直してよいセクションの外の中身が同じことを確かめる。コピーを 1 回の不合格で終えてよいのは、残った文の引用がすべて直してよいセクションの外にあるときだけである。
+`gate` は、見出しの並びが同じで、直してよいセクションの外の中身が同じことを確かめる。コピーを 1 回の不合格で終えてよいのは、残った文の引用がすべて直してよい範囲の外にあるときだけである。直してよいセクションでも、`## ` の見出しの行は範囲の外に数える。
+
+worker と `gate` が別々に課題を読むと、読む間に本文が変わった場合に判定が食い違い、読み取りの回数も増える。そこで `editable` は、判定を、読んだリポジトリと直す前のコピーのハッシュと一緒に、`gate` の状態の置き場のファイルへ書き残す。`gate` は、リポジトリが PR のリポジトリと同じで、コピーが起動の前の中身と同じ場合だけ、この判定を使う。それ以外は自分で判定する。前の実行の記録は、worker を起動する前に消す。
 
 2 つの値はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
 

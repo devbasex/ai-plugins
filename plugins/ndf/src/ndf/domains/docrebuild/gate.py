@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import re
+import shlex
 import string
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -406,14 +407,24 @@ def _allow_fix(run: Run, plan: Plan, path: str) -> None:
     （指摘が無ければ課題を読まない。#4543）。"""
     if issue_docs.requirements_issues(path):
         plan.guarded[path] = doc_file(run, path).read_bytes().decode("utf-8", "replace")
+        _editable_record(run, path).unlink(missing_ok=True)
     plan.fixable.append(path)
 
 
+def _editable_record(run: Run, path: str) -> Path:
+    """worker の `editable` が判定を書き残すファイル。"""
+    return run.state(f"editable-{path.replace('/', '__')}.json")
+
+
 def _editable(run: Run, plan: Plan, path: str) -> frozenset[str]:
-    """起動の前のコピーで直してよい見出し（`ndf document-rebuild editable` と同じ判定。1 回の実行で 1 回だけ読む）。"""
+    """起動の前のコピーで直してよい見出し。worker の `editable` が同じリポジトリと同じコピーで書き残した判定があれば使い、
+    無ければ同じ判定をここで行う（課題は 1 回の実行で多くても 1 回だけ読む）。"""
     if path not in plan.editable:
-        number = min(issue_docs.requirements_issues(path))
-        plan.editable[path] = requirements_copy.editable_sections(run.hub, number, plan.guarded[path])
+        before = plan.guarded[path]
+        found = requirements_copy.recorded(_editable_record(run, path), run.repo, before)
+        if found is None:
+            found = requirements_copy.editable_sections(run.hub, min(issue_docs.requirements_issues(path)), before)
+        plan.editable[path] = found
     return plan.editable[path]
 
 
@@ -432,10 +443,10 @@ def write_facts(run: Run) -> Path:
     return _put_file(run.state(FACTS_FILE), json.dumps(facts, ensure_ascii=False, indent=2) + "\n")
 
 
-def _fixable_line(plan: Plan, path: str) -> str:
+def _fixable_line(run: Run, plan: Plan, path: str) -> str:
     if path not in plan.guarded:
         return f"- `{path}`"
-    command = f"{identity.entrypoint(identity.load().root)} document-rebuild editable --file {path}"
+    command = f"{identity.entrypoint(identity.load().root)} document-rebuild editable --file {path} --record {shlex.quote(str(_editable_record(run, path)))}"
     return f"- `{path}`（直す指摘があるときだけ、直す前に `{command}` を打ち、`metrics.editable` に挙がった `## ` の見出しのセクションの中だけを直す）"
 
 
@@ -450,7 +461,7 @@ def gate_prompt(run: Run, plan: Plan, facts: Path) -> str:
         f"- `{t.name}`: `{t.file}`（{t.reader}" + (f"・ハッシュ `{plan.key}`" if t.name == reading.QUESTION else "") + "）"
         for t in plan.targets
     ]
-    fixable = [_fixable_line(plan, p) for p in plan.fixable] or ["- 無し"]
+    fixable = [_fixable_line(run, plan, p) for p in plan.fixable] or ["- 無し"]
     if plan.frozen_body is not None:
         fixable.append("- 承認資料のうち PR の本文から写した行は直さない（変更要求は 1 回まで。残った文として返す）")
     if run.args.no_doc_fix and plan.docs:
@@ -460,7 +471,7 @@ def gate_prompt(run: Run, plan: Plan, facts: Path) -> str:
             "- 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）は、`editable` が挙げたセクションの中のほかは直さない"
             "（正は課題の本文）。見出しは足さない・消さない・動かさない・変えない。直さない範囲への指摘は、直す案（課題の番号・見出し・"
             "直す前の文・直した後の文）を `quotes` の `why` に書き、残った文として返す。`quotes` の `quote` は文書の字のとおりに写し、"
-            "指摘がすべて直さない範囲にあるときだけ 2 回目を立てない"
+            "指摘がすべて直さない範囲（`## ` の見出しの行を含む）にあるときだけ 2 回目を立てず、1 回の `fail` で終える"
         )
     values = {
         "skill": str(root / SKILL_SECTION),

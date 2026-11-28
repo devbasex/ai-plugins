@@ -12,9 +12,9 @@
 - `gate`: 承認ゲートの 1 つ前に打つ（#4446）。決まった形の質問・承認資料・前に読ませた後で変わった文書の部分を読み手役に
   読ませ、質問を止める hook が見る記録へ残す。PR の題と本文は書き換えない
 
-    ndf document-rebuild editable --file <issues/issue-<番号>-requirements.md>
+    ndf document-rebuild editable --file <issues/issue-<番号>-requirements.md> [--record <ファイル>]
 
-- `editable`: 要求仕様のコピーのうち直してよい `## ` の見出しを `metrics.editable` に返す（#4543。gate の worker が直す前に打つ）
+- `editable`: 要求仕様のコピーのうち直してよい `## ` の見出しを `metrics.editable` に返す（#4543。gate の worker が直す前に打つ）。`--record` へは、判定を対象のリポジトリと読んだコピーにひも付けて書き残す（gate が確かめに使う）
 
 結果 JSON を `--out`（`editable` は無し）と標準出力の最後の 1 行へ同じ形で書く。形が違えば両方とも `stopped`（invalid）に差し替える。
 """
@@ -72,6 +72,7 @@ def _parser() -> argparse.ArgumentParser:
     g.add_argument("--out", required=True, help="結果 JSON を書くファイル")
     e = sub.add_parser("editable", help="要求仕様のコピーのうち直してよい見出しを返す")
     e.add_argument("--file", required=True, help="要求仕様のコピーのパス（作業場所からの相対）")
+    e.add_argument("--record", help="判定を書き残すファイル（gate の起動指示が渡す）")
     return p
 
 
@@ -143,16 +144,18 @@ def _form(cwd: Path) -> Optional[str]:
         raise gate.Precondition(str(exc)) from None
 
 
-def _editable(path: str) -> dict[str, Any]:
+def _editable(path: str, record: Optional[str]) -> dict[str, Any]:
     cwd = Path.cwd()
     g = git.Git(cwd)
-    found = sorted(requirements_copy.editable_of(lambda: _github_of(g.remote_repo(g.remote())), cwd, path))
+    found = sorted(
+        requirements_copy.editable_of(lambda: _github_of(g.remote_repo(g.remote())), cwd, path, cwd / record if record else None)
+    )
     return result.result(TOOL, result.OK, f"直してよいセクションは {len(found)} 件", metrics={"editable": found})
 
 
 def _act(a: argparse.Namespace) -> dict[str, Any]:
     if a.action == "editable":
-        return _editable(a.file)
+        return _editable(a.file, a.record)
     if a.action == "run":
         return drive.drive(_run_args(a))
     try:

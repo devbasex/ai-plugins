@@ -3,10 +3,13 @@
 要求の正は課題の本文なので、本文から写した範囲は直させない。直してよいのは、現在の本文にも、本文の編集履歴のどの版にも
 無かった `## ` の見出しのセクション（コピーにだけ足した実装計画など）の中だけである。確かめられなければ、直してよいものは無い。
 承認の前の確認（`ndf document-rebuild gate`・`editable`）と cross-review の修正担当への指示が、ここの判定だけを使う。
+承認の前の確認では、`editable` が判定を対象のリポジトリと直す前のコピーにひも付けて書き残し、`gate` が同じ判定で確かめる。
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -54,12 +57,19 @@ def unchanged_outside(before: str, after: str, editable: frozenset[str]) -> bool
 
 
 def all_outside(quotes: Sequence[str], text: str, editable: frozenset[str]) -> bool:
-    """残った文の引用が、すべて直してよいセクションの外にあると確かめられるか。"""
+    """残った文の引用が、すべて直してよい範囲の外にあると確かめられるか。`## ` の見出しの行は、直してよいセクションでも外に数える。"""
     if not editable:
         return True
     parts = sections(text)
-    inside = [_SPACE.sub(" ", chunk) for title, chunk in parts if title in editable]
-    outside = [_SPACE.sub(" ", chunk) for title, chunk in parts if title not in editable]
+    inside: list[str] = []
+    outside: list[str] = []
+    for title, chunk in parts:
+        if title in editable:
+            heading, *body = chunk.splitlines(keepends=True)
+            outside.append(_SPACE.sub(" ", heading))
+            inside.append(_SPACE.sub(" ", "".join(body)))
+        else:
+            outside.append(_SPACE.sub(" ", chunk))
 
     def kept(quote: str) -> bool:
         found = _SPACE.sub(" ", quote).strip()
@@ -107,8 +117,26 @@ def editable_sections(hub: GitHub, number: int, copy: str) -> frozenset[str]:
     return frozenset(candidates.difference(*(requirement_titles(version) for version in past)))
 
 
-def editable_of(hub_of: Callable[[], GitHub], cwd: Path, path: str) -> frozenset[str]:
-    """作業場所の要求仕様のコピー `path` の直してよい見出し。コピーが読めなければ空で、GitHub へは問い合わせない。"""
+def _digest(copy: str) -> str:
+    return hashlib.sha256(copy.encode("utf-8")).hexdigest()
+
+
+def recorded(record: Path, repo: str, copy: str) -> Optional[frozenset[str]]:
+    """`editable_of` が書き残した判定。無いか、リポジトリか直す前のコピーが違えば None。"""
+    try:
+        data = json.loads(record.read_text(encoding="utf-8"))
+        if data["repo"] != repo or data["copy"] != _digest(copy):
+            return None
+        return frozenset(data["editable"])
+    except (OSError, ValueError, KeyError, TypeError):  # noqa: NDF401 ファイル: 読めない記録は無いのと同じで、呼び出し元が判定する
+        return None
+
+
+def editable_of(hub_of: Callable[[], GitHub], cwd: Path, path: str, record: Optional[Path] = None) -> frozenset[str]:
+    """作業場所の要求仕様のコピー `path` の直してよい見出し。コピーが読めなければ空で、GitHub へは問い合わせない。
+
+    `record` があれば、判定を対象のリポジトリと読んだコピーにひも付けて書き残す（`recorded` が読む）。
+    """
     numbers = issue_docs.requirements_issues(path)
     file = cwd / path
     if not numbers or file.is_symlink():
@@ -118,4 +146,11 @@ def editable_of(hub_of: Callable[[], GitHub], cwd: Path, path: str) -> frozenset
         hub = hub_of()
     except (OSError, GitHubError):  # noqa: NDF401 ファイル: 読めないコピーと認証できない GitHub は、何も直させない
         return frozenset()
-    return editable_sections(hub, min(numbers), text)
+    found = editable_sections(hub, min(numbers), text)
+    if record is not None:
+        data = {"repo": hub.repo, "copy": _digest(text), "editable": sorted(found)}
+        try:
+            record.write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+        except OSError:  # noqa: NDF401 ファイル: 書き残せなければ、gate が自分で判定する
+            pass
+    return found

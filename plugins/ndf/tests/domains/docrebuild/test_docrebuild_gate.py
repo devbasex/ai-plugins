@@ -19,7 +19,7 @@ import pytest
 from ndf.adapters import git
 from ndf.adapters import publish, run_log
 from ndf.domains.docrebuild import cli, gate, gate_decide
-from ndf.domains.records import reading
+from ndf.domains.records import reading, requirements_copy
 from ndf.domains.records import reading_decide as rd
 
 REPO = "o/r"
@@ -842,7 +842,7 @@ def test_only_sections_added_to_the_requirements_copy_are_fixed(
     assert (w.hub.body_reads, w.hub.history_reads) == reads
 
 
-@pytest.mark.parametrize(("quote", "status"), [("要求。", "ok"), ("計画。", "incomplete")])
+@pytest.mark.parametrize(("quote", "status"), [("要求。", "ok"), ("## 実装計画", "ok"), ("計画。", "incomplete")])
 def test_one_failed_check_of_the_copy_ends_only_outside_the_editable_sections(tmp_path: Path, quote: str, status: str) -> None:
     """#4543: 残った指摘がすべて直せない範囲にあるときだけ、コピーは 1 回の不合格で終えてよい。"""
 
@@ -855,6 +855,19 @@ def test_one_failed_check_of_the_copy_ends_only_outside_the_editable_sections(tm
 
     got = world(tmp_path, {COPY: COPY_TEXT}).run(FakeWorker(once))
     assert (got["status"] if status == "ok" else got["cause"]["kind"]) == status, got
+
+
+def test_the_gate_checks_with_the_judgement_the_worker_recorded(tmp_path: Path) -> None:
+    """#4543: worker の `editable` が書き残した判定で確かめ、課題の本文と編集履歴を読み直さない。"""
+    w = world(tmp_path, {COPY: COPY_TEXT})
+
+    def fix(state_dir: Path) -> None:
+        requirements_copy.editable_of(lambda: w.hub, w.cwd, COPY, state_dir / f"editable-{COPY.replace('/', '__')}.json")  # type: ignore[arg-type,return-value]
+        (w.cwd / COPY).write_text(COPY_TEXT.replace("計画。", "直した計画。"), encoding="utf-8")
+
+    got = w.run(FakeWorker(edit=fix))
+    assert got["status"] == "ok", got
+    assert (w.hub.body_reads, w.hub.history_reads) == (1, 1)
 
 
 # --- ndf records reading check の突き合わせ（Task 7、条件 6・7） ---------------------------------------------------
