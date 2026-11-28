@@ -34,7 +34,7 @@ from ndf.adapters.ci import (
     read,
     watch_head,
 )
-from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHub, MergeExpect, MergeOutcome, Pull
+from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHub, MergeExpect, MergeOutcome, Pull, Viewer
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval, production_merge
 from ndf.core.production_merge import Verdict
@@ -442,8 +442,10 @@ def _held_mismatch(args: argparse.Namespace, pull: Pull, target: merge_approval.
 
 
 def _dequeue_queued(hub: GitHub, pull: Pull) -> None:
-    """読んだ PR がマージキューに入っていれば外す（止まると返した後に、GitHub のキューがマージしないようにする）。"""
-    if pull.queued:
+    """読んだ PR がマージキューに入っていれば外す（止まると返した後に、GitHub のキューがマージしないようにする）。
+
+    キューの状態が分からない PR（REST で読んだ。None）は、外すときに読み直す。読めなければその失敗を投げる。"""
+    if pull.queued is not False:
         hub.dequeue(pull.number)
 
 
@@ -470,17 +472,30 @@ def _approved_by(
 def _withdrawn_in_queue(args: argparse.Namespace, hub: GitHub, target: merge_approval.MergeTarget, verdict: Verdict) -> Optional[dict]:
     """PR がキューに入った後に証跡を読み直し、承認が取り消されていればキューから外して `--production-gate` の結果を返す（#4520）。
 
+    別のアカウントが入れた項目で、そのアカウントの承認が項目の対象にあれば、外さずに結果だけを返す。
+
     証跡を読んでからキューへ入れるまでの間の工程の開き直しは、キューにまだ無い PR を外せない。読み直しより後に書かれた
     取り消しは、開き直しの側がキューから外す。読み直せなければ、キューから外してから投げ直す。"""
     try:
-        row = _approval(hub, target)
+        if _approval(hub, target) is not None:
+            return None
+        keep = _approved_by_other_enqueuer(hub, target.number)
     except (merge_approval.TrailError, github_mod.GitHubError):
         hub.dequeue(target.number)
         raise
-    if row is not None:
-        return None
-    hub.dequeue(target.number)
+    if not keep:
+        hub.dequeue(target.number)
     return _unapproved(args, target, verdict)
+
+
+def _approved_by_other_enqueuer(hub: GitHub, number: int) -> bool:
+    """今のキューの項目を別のアカウントが入れ、そのアカウントの `ndf ci merge` が数える承認が項目の対象にあるか。"""
+    holder = hub.queue_holder(number)
+    if holder is None or holder.account_id <= 0 or holder.account_id == hub.viewer().account_id:
+        return False
+    target = merge_approval.MergeTarget(hub.repo, number, holder.base, holder.head)
+    rows = merge_approval.merge_rows(hub, number, Viewer("", holder.account_id))
+    return merge_approval.merge_judgment(rows, target) is not None
 
 
 def _failed_checks(args: argparse.Namespace, hub: GitHub, pull: Pull) -> Optional[dict]:

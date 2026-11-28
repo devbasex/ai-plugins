@@ -12,7 +12,7 @@ from typing import Optional
 import pytest
 
 from ndf import ci_cli
-from ndf.adapters import github
+from ndf.adapters import github, github_merge
 from ndf.contracts import causes
 from ndf.core import merge_approval
 
@@ -205,3 +205,46 @@ def test_a_pr_put_back_by_another_call_after_a_reopen_leaves_the_queue(monkeypat
     _, result = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
 
     assert hub.dequeued == [7] and result["cause"]["kind"] == "approval_stale"
+
+
+@pytest.mark.parametrize(("enqueuer", "approver", "left"), [(2, 2, False), (2, 3, True), (1, 1, True)])
+def test_a_revoked_caller_leaves_an_entry_another_account_approved(monkeypatch, capsys, last_result, enqueuer, approver, left):
+    """自分の承認が取り消されていても、別のアカウントが有効な承認で入れた項目は外さない（#4520）。
+
+    入れたアカウントの承認が無い項目と、自分のアカウントが入れた項目は外す。"""
+    hub = _hub(monkeypatch, AUTO, AUTO)
+    _approve(hub)
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+
+    def merge(number, **_kwargs):
+        merge_approval.write_revocations(hub, [merge_approval.Revocation(target, frozenset({"r0"}), "reopen:x")], hub.viewer())
+        hub.dequeued.clear()
+        body = merge_approval.render_merge_row(merge_approval.MergeRow("approved", "user", target, True, "r1"))
+        if approver != hub.account_id:
+            hub.comments_of[7].append(github.Authored("other", "MEMBER", body, author_id=approver))
+        hub.holders[7] = github_merge.QueueHolder(enqueuer, "main", merge_hub.HEAD)
+        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューの待ち", merge_hub.HEAD, queue_entry="e2")
+
+    monkeypatch.setattr(hub, "merge", merge)
+    _, result = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert hub.dequeued == ([7] if left else []) and result["cause"]["kind"] == "approval_stale"
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_a_stop_dequeues_a_pr_whose_queue_state_is_unknown(monkeypatch, capsys, last_result, unreadable):
+    """REST で読んだ PR はキューの状態が分からないので、止まる前に外す。確かめられなければその失敗を返す（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull()._replace(queued=None)})
+    if unreadable:
+
+        def dequeue(number):
+            raise github.GitHubError("GraphQL の上限")
+
+        monkeypatch.setattr(hub, "dequeue", dequeue)
+    _, result = _run(capsys, last_result, "--production-gate", "stale", "--approved-head", merge_hub.OTHER, "--approved-base", "main")
+
+    assert hub.merged == []
+    if unreadable:
+        assert result["cause"]["kind"] == "unknown" and "GraphQL の上限" in result["cause"]["detail"]
+    else:
+        assert hub.dequeued == [7] and result["cause"]["kind"] == "approval_stale"

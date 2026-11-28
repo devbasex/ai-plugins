@@ -59,7 +59,7 @@ _EMPTIED = {"head_sha": "", "head_ref": "", "base_ref": "", "body": "", "merge_s
 
 
 def test_from_rest_fills_every_field() -> None:
-    assert github.Pull.from_rest(_REST)._asdict() == _EXPECTED
+    assert github.Pull.from_rest(_REST)._asdict() == {**_EXPECTED, "queued": None}
 
 
 def test_from_rest_ignores_cross_repository_keys() -> None:
@@ -78,7 +78,7 @@ def test_from_rest_empties_null_values_and_allows_missing_optional_keys() -> Non
         "user": None,
         "author_association": None,
     }
-    expected = {**_EXPECTED, **_EMPTIED, "state": "", "merged": False, "merge_sha": ""}
+    expected = {**_EXPECTED, **_EMPTIED, "state": "", "merged": False, "merge_sha": "", "queued": None}
     assert github.Pull.from_rest(raw)._asdict() == expected
 
 

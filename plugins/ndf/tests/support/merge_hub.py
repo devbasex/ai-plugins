@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from ndf.adapters import github_merge
 from ndf.adapters.github import Authored, FileAt, MergeExpect, MergeOutcome, Pull, Viewer
+from ndf.adapters.github_merge import QueueHolder
 
 REPO = "o/r"
 HEAD = "a" * 40
@@ -53,6 +54,8 @@ class MergeHub:
     merged: list[int] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
     dequeued: list[int] = field(default_factory=list)
+    # 今のキューの項目を入れたアカウントと項目の対象（PR の番号ごと。無ければキューに無い）
+    holders: dict[int, QueueHolder] = field(default_factory=dict)
     # マージの直前の確かめで返す設定（ブランチ → (本文, oid)）。無ければ `files`
     files_at_merge: Optional[dict[str, tuple[Optional[str], Optional[str]]]] = None
     # 確かめで見せる PR（判定の後に変わった PR）。無ければ `pulls_of`
@@ -110,6 +113,9 @@ class MergeHub:
             self.comments_of.setdefault(number, []).append(Authored(self.login, "OWNER", payload["body"], author_id=self.account_id))
             return {"html_url": f"https://example.invalid/{number}"}
         return {}
+
+    def queue_holder(self, number: int) -> Optional[QueueHolder]:
+        return self.holders.get(number)
 
     def dequeue(self, number: int) -> None:
         self.dequeued.append(number)

@@ -103,7 +103,7 @@ class Pull(NamedTuple):
     author: str
     association: str
     merge_sha: str = ""  # マージで本流へ入ったコミット（squash・rebase のマージでは head と別）。マージされていなければ空
-    queued: bool = False  # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
+    queued: Optional[bool] = False  # マージキューに入っているか（#4409 の決定 8）。REST で読んだ PR は分からないので None
     title: str = ""  # PR の題（承認の質問の文を作る。#4446）
     cross_repository: bool = False  # head のブランチがフォークにあるか
     queue_entry: str = ""  # マージキューの項目の ID（`queue_entry_of`。#4520）
@@ -121,7 +121,7 @@ class Pull(NamedTuple):
             head_ref=text_of(head["ref"]), base_ref=text_of(base["ref"]), body=text_of(raw["body"]), title=text_of(raw.get("title")),
             merge_state=text_of(raw["mergeable_state"]).lower(), author=_login(raw["user"]),
             association=text_of(raw["author_association"]).upper(), merge_sha=text_of(raw.get("merge_commit_sha")) if raw["merged"] else "",
-            cross_repository=_from_fork(head, base),
+            queued=None, cross_repository=_from_fork(head, base),
         )  # fmt: skip
 
     @classmethod

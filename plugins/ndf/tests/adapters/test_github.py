@@ -117,6 +117,13 @@ def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, 
     assert (out.merged, out.kind) == (False, kind)
 
 
+@pytest.mark.parametrize(("entry", "expected"), [({"enqueuer": {"databaseId": 5}}, 5), ({"enqueuer": {}}, 0), (None, None)])
+def test_queue_holder_reads_the_enqueuer_and_the_target(entry: dict | None, expected: int | None) -> None:
+    pr = {"baseRefName": "main", "headRefOid": "abc", "mergeQueueEntry": entry}
+    server = Server({("POST", "/graphql"): [httpx.Response(200, json={"data": {"repository": {"pullRequest": pr}}})]})
+    assert _hub(server).queue_holder(7) == (None if expected is None else (expected, "main", "abc"))
+
+
 @pytest.mark.parametrize(("in_queue", "enqueued", "jump"), [(False, 1, False), (False, 1, True), (True, 0, True)])
 def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued: int, jump: bool) -> None:
     # キュー必須の基底は直接のマージを 405 で断る。HEAD のままキューへ入れ、実際のマージまでは ci_pending で待つ。

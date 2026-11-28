@@ -33,7 +33,7 @@ from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLim
 
 from ndf.adapters import cli_floor, git, github_limits, github_merge, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
-from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, Verified
+from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, QueueHolder, Verified
 
 # 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
@@ -942,6 +942,14 @@ class GitHub:
         """PR `number` が今マージキューに入っているか（キューが外したら偽）。"""
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
         return isinstance(node, dict) and node["isInMergeQueue"] is True
+
+    def queue_holder(self, number: int) -> Optional[QueueHolder]:
+        """PR `number` の今のマージキューの項目を入れたアカウントと、項目の対象。キューに無ければ None。"""
+        node = self.repository(github_merge.QUEUE_HOLDER_QUERY, {"number": int(number)})["pullRequest"]
+        entry = node.get("mergeQueueEntry") if isinstance(node, dict) else None
+        if not isinstance(entry, dict):
+            return None
+        return QueueHolder(account_id_of(entry.get("enqueuer")), *target_of(node))
 
     def dequeue(self, number: int) -> None:
         """PR `number` をマージキューから外す（入っていなければ何もしない）。"""
