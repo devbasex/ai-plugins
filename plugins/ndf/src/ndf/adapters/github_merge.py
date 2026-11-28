@@ -87,13 +87,13 @@ MERGE_QUEUE_VERIFY_QUERY = (
 )
 IN_MERGE_QUEUE_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
-    " pullRequest(number: $number) { id isInMergeQueue } } }"
+    " pullRequest(number: $number) { id isInMergeQueue mergeQueueEntry { id } } } }"
 )
 # 今のキューの項目を入れたアカウントと、その項目の対象（#4520）
 QUEUE_HOLDER_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
     " pullRequest(number: $number) { baseRefName headRefOid"
-    " mergeQueueEntry { enqueuer { ... on User { databaseId } ... on Bot { databaseId } } } } } }"
+    " mergeQueueEntry { id enqueuer { ... on User { databaseId } ... on Bot { databaseId } } } } } }"
 )
 # `jump` は版上げの PR をキューの先頭へ入れる指定（#3672 の決定 18。承認の範囲を版上げの PR の head に固定する）
 ENQUEUE_MUTATION = (
@@ -141,11 +141,12 @@ class MergeOutcome(NamedTuple):
 
 
 class QueueHolder(NamedTuple):
-    """今のマージキューの項目を入れたアカウントの ID（読めなければ 0）と、PR のマージ先・HEAD（`GitHub.queue_holder`）。"""
+    """今のマージキューの項目を入れたアカウントの ID（読めなければ 0）、PR のマージ先・HEAD、項目の ID（`GitHub.queue_holder`）。"""
 
     account_id: int
     base: str
     head: str
+    entry: str = ""
 
 
 class FileAt(NamedTuple):

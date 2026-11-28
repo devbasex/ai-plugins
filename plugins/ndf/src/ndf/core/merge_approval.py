@@ -125,13 +125,15 @@ def same_writer(c: Authored, viewer: Viewer) -> bool:
     return viewer.account_id > 0 and c.author_id == viewer.account_id
 
 
-def merge_rows(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]:
+def merge_rows(hub: GitHub, number: int, viewer: Viewer, comments: Sequence[Authored] | None = None) -> list[MergeRow]:
     """PR のコメントから数える証跡を古い順に返す。書き手が `viewer`（`ndf ci merge` を打つ token の利用者）と同じ
     アカウントで、編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。
 
+    `comments`（読み終えた PR のコメントの一覧）を渡せば読み直さない。一覧の鮮度は呼び手が決める。
     `viewer` のアカウント ID が読めていない（0）なら、数えずに `TrailError`（理由は `NO_LOGIN`）。"""
     _require_login(viewer)
-    return [row for c, row in _unedited_rows(hub.comments(number)) if same_writer(c, viewer)]
+    found = hub.comments(number) if comments is None else comments
+    return [row for c, row in _unedited_rows(found) if same_writer(c, viewer)]
 
 
 def _require_login(viewer: Viewer) -> None:

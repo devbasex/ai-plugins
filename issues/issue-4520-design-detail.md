@@ -32,7 +32,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `adapters/github.py` | 変更 | workflow の実行の一覧を読む。マージの待ちの結果に、この呼び出しが PR をキューへ入れたかを載せる | — | 新設 `GitHub.workflow_runs`。変更 `GitHub._enqueue`、`github_merge.MergeOutcome`（`added_to_queue` を足す） |
 | `adapters/github_pulls.py` | 変更 | コメントの作成時刻を持つ（実行済みの証拠が、開き直しより後の記録かを見る） | — | 変更 `Authored`（`created` を足す） |
 | `core/merge_approval.py` | 変更 | 証跡の重複を、識別子・回答・対象で判定する。開き直しの取り消しの行を書き、PR をマージキューから外す | `adapters` | 変更 `write_merge_row`。新設 `write_revocations` |
-| `ci_cli.py` | 変更 | 承認の要る PR がマージキューの待ちになった後に証跡を読み直し、取り消されていればキューから外す。別のアカウントが有効な承認で入れた項目は外さない。証跡を読む前と同じキューの項目（`mergeQueueEntry.id`）を待つ場合は読み直さない | `core.merge_approval`・`adapters` | 新設 `_withdrawn_in_queue`。変更 `_merge` |
+| `ci_cli.py` | 変更 | 承認の要る PR がマージキューの待ちになった後に証跡を読み直し、取り消されていればキューから外す。承認なしで止まる経路と合わせて、別のアカウントが有効な承認で入れた項目は残し、判定した項目だけを外す。証跡を読む前と同じキューの項目（`mergeQueueEntry.id`）を待つ場合は読み直さない | `core.merge_approval`・`adapters` | 新設 `_withdrawn_in_queue`・`_withdraw_entry`。変更 `_merge`・`_dequeue_queued`、`GitHub.dequeue`（項目の ID を受ける） |
 | `progress/approval_decide.py` | 新設 | 事象の列と対象から、有効な承認と残る否定の回答を決める | `progress.model` | 新設 `boundary`・`latest_answer`・`differences`・`objection_remains` |
 | `progress/delivery_decide.py` | 新設 | リリース記録と CD の実行から、工程を終えてよいかを決める | `core.release_record` | 新設 `pick_records`・`judge_delivery`・`judge_no_release`・`pick_run` |
 | `progress/run_approval.py` | 新設 | 承認ゲートの回答を読む手（`run.py` から分ける） | `run`・`approval_decide` | 移動と変更: `_consume`・`approved_seen`。新設 `consume_held`・`prior_approval` |
@@ -225,7 +225,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- |
 | `plan_reopen` | `_cmd_cancel` の工程の列挙 | `command.py` を読む | 使えない。中止は全工程が対象で、開き直しは指定の工程から後ろである |
 | `work_stopped` | `run.is_live`・`run._launching`・`store.run_lock` | `run.py` を読む | 使う。排他を持ったまま起動のマーカーを見る形にまとめる |
-| `revoke_approvals`・`write_revocations` | `merge_approval.write_merge_row`・`answering._post_trail` | `core/merge_approval.py`・`gate/answering.py` を読む | 行の形と投稿は使う。対象の最新の行が承認のときだけ却下の行を足す関数は無い。キューから外すのは `GitHub.dequeue`（キューの状態を読み、入っていれば外す）を使う。REST の `GitHub.pull` の `queued` は常に偽なので使わない |
+| `revoke_approvals`・`write_revocations` | `merge_approval.write_merge_row`・`answering._post_trail` | `core/merge_approval.py`・`gate/answering.py` を読む | 行の形と投稿は使う。対象の最新の行が承認のときだけ却下の行を足す関数は無い。キューから外すのは `GitHub.dequeue`（キューの状態を読み、入っていれば外す）を使う。REST の `GitHub.pull` はキューの状態が分からない（`queued` が None）ので使わない |
 
 ### 単体テストの観点
 

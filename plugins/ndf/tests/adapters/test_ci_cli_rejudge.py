@@ -237,7 +237,7 @@ def test_a_stop_dequeues_a_pr_whose_queue_state_is_unknown(monkeypatch, capsys, 
     hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull()._replace(queued=None)})
     if unreadable:
 
-        def dequeue(number):
+        def dequeue(number, entry=""):
             raise github.GitHubError("GraphQL の上限")
 
         monkeypatch.setattr(hub, "dequeue", dequeue)
@@ -248,3 +248,42 @@ def test_a_stop_dequeues_a_pr_whose_queue_state_is_unknown(monkeypatch, capsys, 
         assert result["cause"]["kind"] == "unknown" and "GraphQL の上限" in result["cause"]["detail"]
     else:
         assert hub.dequeued == [7] and result["cause"]["kind"] == "approval_stale"
+
+
+def _other_entry(hub: merge_hub.MergeHub, entry: str) -> github_merge.QueueHolder:
+    """別のアカウント（ID 2）の承認を書き、そのアカウントが入れたキューの項目を返す。"""
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    body = merge_approval.render_merge_row(merge_approval.MergeRow("approved", "user", target, True, "r2"))
+    hub.comments_of.setdefault(7, []).append(github.Authored("other", "MEMBER", body, author_id=2))
+    return github_merge.QueueHolder(2, "main", merge_hub.HEAD, entry)
+
+
+@pytest.mark.parametrize("queued", [True, None])
+def test_a_stop_without_approval_keeps_an_entry_another_account_approved(monkeypatch, capsys, last_result, queued):
+    """承認の無いアカウントが止まるときも、別のアカウントが有効な承認で入れた項目は外さない（#4520）。"""
+    queued_pull = merge_hub.pull()._replace(queued=queued, queue_entry="e1" if queued else "")
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: queued_pull})
+    hub.holders[7] = _other_entry(hub, "e1")
+
+    _, result = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert hub.dequeued == [] and result["cause"]["kind"] == "approval_stale"
+    # 項目を確かめた後に読んだ一覧は使い回し、REST で読んで確かめていなければ読み直す
+    assert hub.calls.count("comments") == (1 if queued else 2)
+
+
+def test_an_entry_replaced_before_removal_is_judged_again(monkeypatch, capsys, last_result):
+    """判定した項目を外す前に、別のアカウントが有効な承認で入れ直したら、新しい項目を判定して残す（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull(queued=True)._replace(queue_entry="e1")})
+    hub.holders[7] = github_merge.QueueHolder(3, "main", merge_hub.HEAD, "e1")
+    tried: list[str] = []
+
+    def dequeue(number, entry=""):
+        tried.append(entry)
+        hub.holders[7] = _other_entry(hub, "e2")
+        return False
+
+    monkeypatch.setattr(hub, "dequeue", dequeue)
+    _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert tried == ["e1"] and hub.calls.count("comments") == 2

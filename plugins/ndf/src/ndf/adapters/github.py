@@ -949,13 +949,20 @@ class GitHub:
         entry = node.get("mergeQueueEntry") if isinstance(node, dict) else None
         if not isinstance(entry, dict):
             return None
-        return QueueHolder(account_id_of(entry.get("enqueuer")), *target_of(node))
+        return QueueHolder(account_id_of(entry.get("enqueuer")), *target_of(node), queue_entry_of(node))
 
-    def dequeue(self, number: int) -> None:
-        """PR `number` をマージキューから外す（入っていなければ何もしない）。"""
+    def dequeue(self, number: int, entry: str = "") -> bool:
+        """PR `number` をマージキューから外す（入っていなければ何もしない）。
+
+        `entry`（項目の ID）を渡したときは、今の項目が違えば外さずに偽を返す。GitHub の取り外しは PR を指定するので、
+        項目の読み取りと取り外しの要求の間に入れ替わった項目は区別できない。"""
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
-        if isinstance(node, dict) and node["isInMergeQueue"]:
-            self._leave_queue(node["id"])
+        if not (isinstance(node, dict) and node["isInMergeQueue"]):
+            return True
+        if entry and queue_entry_of(node) != entry:
+            return False
+        self._leave_queue(node["id"])
+        return True
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:

@@ -54,7 +54,7 @@ class MergeHub:
     merged: list[int] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
     dequeued: list[int] = field(default_factory=list)
-    # 今のキューの項目を入れたアカウントと項目の対象（PR の番号ごと。無ければキューに無い）
+    # 今のキューの項目を入れたアカウントと項目の対象（PR の番号ごと）
     holders: dict[int, QueueHolder] = field(default_factory=dict)
     # マージの直前の確かめで返す設定（ブランチ → (本文, oid)）。無ければ `files`
     files_at_merge: Optional[dict[str, tuple[Optional[str], Optional[str]]]] = None
@@ -115,10 +115,12 @@ class MergeHub:
         return {}
 
     def queue_holder(self, number: int) -> Optional[QueueHolder]:
-        return self.holders.get(number)
+        """`holders` に無い番号は、入れたアカウントを読めない項目がキューにあるとみなす。"""
+        return self.holders.get(number, QueueHolder(0, "main", HEAD))
 
-    def dequeue(self, number: int) -> None:
+    def dequeue(self, number: int, entry: str = "") -> bool:
         self.dequeued.append(number)
+        return True
 
     def merge(
         self,

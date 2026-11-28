@@ -34,7 +34,7 @@ from ndf.adapters.ci import (
     read,
     watch_head,
 )
-from ndf.adapters.github import MERGE_QUEUE_PENDING, GitHub, MergeExpect, MergeOutcome, Pull, Viewer
+from ndf.adapters.github import MERGE_QUEUE_PENDING, Authored, GitHub, MergeExpect, MergeOutcome, Pull, Viewer
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval, production_merge
 from ndf.core.production_merge import Verdict
@@ -256,9 +256,11 @@ def _judge_pr(hub: GitHub, pull: Pull) -> tuple[Verdict, Optional[str]]:
     return _verdict_of(hub, pull.base_ref, found.text, found.repo), found.oid
 
 
-def _approval(hub: GitHub, target: merge_approval.MergeTarget) -> Optional[merge_approval.MergeRow]:
+def _approval(
+    hub: GitHub, target: merge_approval.MergeTarget, comments: Optional[list[Authored]] = None
+) -> Optional[merge_approval.MergeRow]:
     """今の承認の対象への有効な承認の証跡（決定 7 の「証跡の判定」）。無ければ None。"""
-    return merge_approval.merge_judgment(merge_approval.merge_rows(hub, target.number, hub.viewer()), target)
+    return merge_approval.merge_judgment(merge_approval.merge_rows(hub, target.number, hub.viewer(), comments), target)
 
 
 def _approval_material(target: merge_approval.MergeTarget, production: bool) -> str:
@@ -441,12 +443,44 @@ def _held_mismatch(args: argparse.Namespace, pull: Pull, target: merge_approval.
     return None
 
 
-def _dequeue_queued(hub: GitHub, pull: Pull) -> None:
+# 入れ替わったキューの項目を判定し直す回数の上限（使い切ったら、判定せずに外す）
+_WITHDRAW_JUDGMENTS = 2
+
+
+def _dequeue_queued(hub: GitHub, pull: Pull, comments: Optional[list[Authored]] = None) -> None:
     """読んだ PR がマージキューに入っていれば外す（止まると返した後に、GitHub のキューがマージしないようにする）。
 
-    キューの状態が分からない PR（REST で読んだ。None）は、外すときに読み直す。読めなければその失敗を投げる。"""
+    キューの状態が分からない PR（REST で読んだ。None）も外しにいく。読めなければその失敗を投げる。
+    `comments` は PR を読んだ後に読んだコメントの一覧（`_withdraw_entry`）。"""
     if pull.queued is not False:
-        hub.dequeue(pull.number)
+        _withdraw_entry(hub, pull.number, pull.queue_entry, comments)
+
+
+def _withdraw_entry(hub: GitHub, number: int, seen_entry: str = "", comments: Optional[list[Authored]] = None) -> None:
+    """今のキューの項目を外す。別のアカウントが入れ、そのアカウントの承認が項目の対象にある項目は残す（#4520）。
+
+    `comments` は項目 `seen_entry` を確かめた後に読んだ一覧。判定する項目が同じなら使い回し、違うか確かめられなければ
+    読み直す（承認は項目より先に書くので、項目を確かめた後の一覧にはその承認がある）。判定した項目の ID を添えて外し、
+    入れ替わっていれば新しい項目を判定し直す。判定のための読み取りに失敗したら、外してから投げ直す。"""
+    for _ in range(_WITHDRAW_JUDGMENTS):
+        try:
+            holder = hub.queue_holder(number)
+            if holder is None:
+                return
+            # token の利用者を読めない（0）ときは、別のアカウントか分からないので残さない
+            if holder.account_id > 0 and hub.viewer().account_id not in (0, holder.account_id):
+                if comments is None or not seen_entry or holder.entry != seen_entry:
+                    comments, seen_entry = hub.comments(number), holder.entry
+                target = merge_approval.MergeTarget(hub.repo, number, holder.base, holder.head)
+                rows = merge_approval.merge_rows(hub, number, Viewer("", holder.account_id), comments)
+                if merge_approval.merge_judgment(rows, target) is not None:
+                    return
+        except (merge_approval.TrailError, github_mod.GitHubError):
+            hub.dequeue(number)
+            raise
+        if hub.dequeue(number, holder.entry):
+            return
+    hub.dequeue(number)
 
 
 def _approved_by(
@@ -457,45 +491,39 @@ def _approved_by(
     if not production_merge.needs_approval(verdict):
         return None, None
     unreadable: Optional[dict] = None
+    comments: Optional[list[Authored]] = None
     try:
-        row = _approval(hub, target)
+        if hub.viewer().account_id > 0:
+            comments = hub.comments(target.number)
+        row = _approval(hub, target, comments)
     except merge_approval.TrailError as exc:
         # token の利用者を読めず証跡を数えられない。承認し直しても変わらないので approval_stale にせず precondition で止まる
         row = None
         unreadable = result.stopped(TOOL, "precondition", str(exc), instance=target.head, items=_pr_item_list(target.number))
     if row is not None:
         return row.by, None
-    _dequeue_queued(hub, pull)
+    _dequeue_queued(hub, pull, comments)
     return None, unreadable if unreadable is not None else _unapproved(args, target, verdict)
 
 
-def _withdrawn_in_queue(args: argparse.Namespace, hub: GitHub, target: merge_approval.MergeTarget, verdict: Verdict) -> Optional[dict]:
+def _withdrawn_in_queue(
+    args: argparse.Namespace, hub: GitHub, target: merge_approval.MergeTarget, verdict: Verdict, seen_entry: str
+) -> Optional[dict]:
     """PR がキューに入った後に証跡を読み直し、承認が取り消されていればキューから外して `--production-gate` の結果を返す（#4520）。
 
-    別のアカウントが入れた項目で、そのアカウントの承認が項目の対象にあれば、外さずに結果だけを返す。
+    外すかは項目ごとに決める（`_withdraw_entry`。残した場合も結果は返す）。`seen_entry` は読み直しの前に確かめた項目の ID。
 
     証跡を読んでからキューへ入れるまでの間の工程の開き直しは、キューにまだ無い PR を外せない。読み直しより後に書かれた
     取り消しは、開き直しの側がキューから外す。読み直せなければ、キューから外してから投げ直す。"""
     try:
-        if _approval(hub, target) is not None:
+        comments = hub.comments(target.number)
+        if _approval(hub, target, comments) is not None:
             return None
-        keep = _approved_by_other_enqueuer(hub, target.number)
     except (merge_approval.TrailError, github_mod.GitHubError):
         hub.dequeue(target.number)
         raise
-    if not keep:
-        hub.dequeue(target.number)
+    _withdraw_entry(hub, target.number, seen_entry, comments)
     return _unapproved(args, target, verdict)
-
-
-def _approved_by_other_enqueuer(hub: GitHub, number: int) -> bool:
-    """今のキューの項目を別のアカウントが入れ、そのアカウントの `ndf ci merge` が数える承認が項目の対象にあるか。"""
-    holder = hub.queue_holder(number)
-    if holder is None or holder.account_id <= 0 or holder.account_id == hub.viewer().account_id:
-        return False
-    target = merge_approval.MergeTarget(hub.repo, number, holder.base, holder.head)
-    rows = merge_approval.merge_rows(hub, number, Viewer("", holder.account_id))
-    return merge_approval.merge_judgment(rows, target) is not None
 
 
 def _failed_checks(args: argparse.Namespace, hub: GitHub, pull: Pull) -> Optional[dict]:
@@ -618,7 +646,7 @@ def _merge(args: argparse.Namespace) -> dict:
     # 項目の ID が違えば、開き直しが外した後に別の呼び出しが古い承認で入れ直した場合がある（入れ直した呼び出しは ID が空）
     same_entry = bool(outcome.queue_entry) and outcome.queue_entry == pull.queue_entry
     if outcome.kind == MERGE_QUEUE_PENDING and not same_entry and rejudge.approved_by is not None:
-        withdrawn = _withdrawn_in_queue(args, hub, target, rejudge.verdict)
+        withdrawn = _withdrawn_in_queue(args, hub, target, rejudge.verdict, outcome.queue_entry)
         if withdrawn is not None:
             return withdrawn
     return _merged(args, target, outcome, rejudge.verdict, rejudge.approved_by)
