@@ -579,7 +579,7 @@ def test_approvals_before_a_reopen_are_not_read_as_the_current_approval(repo, st
 
 
 def test_the_trail_of_an_mvv_verdict_without_a_recorded_answer_is_also_revoked(repo, st, env, capsys):
-    """以前の版の判定のコマンドは、回答を記録する前に証跡を PR へ書いた。その対象も開き直しで取り消す。"""
+    """以前のバージョンの判定のコマンドは、回答を記録する前に証跡を PR へ書いた。その対象も開き直しで取り消す。"""
     tid = _new(capsys)
     lanes.turn(st, tid, repo, env.env)
     v = run.read(st, tid)
