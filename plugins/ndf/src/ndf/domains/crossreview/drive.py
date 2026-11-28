@@ -769,15 +769,21 @@ def _write_diff(run: _Run, round_no: int, suffix: str, base: str, head: str) -> 
     return path
 
 
+def _document_flags(files: Sequence[str]) -> tuple[bool, bool, bool]:
+    """変更ファイルのパスから `_Run` の `documents`・`distinction`・`requirements_copy` を決める。"""
+    documents = any(p.endswith(".md") for p in files)
+    requirements_copy = any(issue_docs.requirements_issues(p) for p in files)
+    distinction = requirements_copy or any(issue_docs.design_issues(p) for p in files)
+    return documents, distinction, requirements_copy
+
+
 def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     """範囲を決めて差分のファイルを書き、PR 全体で足した根拠の記述を確かめる。head が PR に届いていなければ（前の起動の修正担当が
     コミットだけを残して終わった）、結果を指摘にせず手元の状態ファイルだけに残す。"""
     cfg = run.cfg
     changed = changes.changed(run.g, cfg.base_commit, cfg.worktree)
     _oversized_docs(run, changed.docs)
-    run.documents = any(p.endswith(".md") for p in changed.files)
-    run.distinction = any(issue_docs.design_issues(p) or issue_docs.requirements_issues(p) for p in changed.files)
-    run.requirements_copy = any(issue_docs.requirements_issues(p) for p in changed.files)
+    run.documents, run.distinction, run.requirements_copy = _document_flags(changed.files)
     reviewed = scope_decide.reviewed_of(run.data, run.mvv)
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")
