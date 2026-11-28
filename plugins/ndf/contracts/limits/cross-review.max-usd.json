@@ -1,0 +1,7 @@
+{
+  "summary": "cross-review の読めた claude の費用の和の上限の既定（ドル。.ndf/review.json の limits.usd を省いたとき。#2468）",
+  "count": 20,
+  "read_by": [
+    "ndf.domains.crossreview.settings"
+  ]
+}

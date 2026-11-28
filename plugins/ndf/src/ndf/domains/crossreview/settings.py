@@ -22,6 +22,9 @@ from ndf.domains.records import mvv
 # ラウンドの上限の既定の方針（contracts/limits/）。実装の PR と、設計の PR で分ける（#3780）
 MAX_ROUNDS = "cross-review.max-rounds"
 DESIGN_MAX_ROUNDS = "cross-review.max-rounds.design"
+# `.ndf/review.json` が秒と費用の上限を書かないときの既定の方針（#2468）。ラウンド数には置かない
+MAX_SECONDS = "cross-review.max-seconds"
+MAX_USD = "cross-review.max-usd"
 
 
 def default_max_rounds(every_section: bool) -> int:
@@ -76,11 +79,19 @@ def settings_path(root: Path, file_id: str) -> Path:
 class ReviewSettings(NamedTuple):
     """実行者のメインディレクトリの `.ndf/review.json`（同期の前に読む。PR 3944 の r4-1）。`focus` は重点（基準 3。#3941）、
     `raw` はファイルのバイト列（無ければ None。PR の head の同じパスと比べる）。`fixer_sessions` は修正担当の会話を
-    保存して続けるか（#4013。既定は偽）。"""
+    保存して続けるか（#4013。既定は偽）。`limits` は費用と時間の上限で、`read_settings` が秒と費用の既定を入れて返す（#2468）。"""
 
     focus: tuple[str, ...] = ()
     raw: Optional[bytes] = None
     fixer_sessions: bool = False
+    limits: criteria_decide.ProjectLimits = criteria_decide.ProjectLimits()
+
+
+def _with_defaults(declared: criteria_decide.ProjectLimits) -> criteria_decide.ProjectLimits:
+    """書かれた上限に、書かれていない秒と費用の既定を足す（#2468）。"""
+    seconds = limits.value(MAX_SECONDS, "seconds") if declared.seconds is None else declared.seconds
+    usd = limits.value(MAX_USD, "count") if declared.usd is None else declared.usd
+    return declared._replace(seconds=seconds, usd=usd)
 
 
 def _inside(path: Path, tree: Path) -> bool:
@@ -89,17 +100,17 @@ def _inside(path: Path, tree: Path) -> bool:
 
 
 def read_settings(main: Path, worktree: Path) -> ReviewSettings:
-    """`main` の下の `.ndf/review.json`。無ければ空。読めない・形が違えば `ReviewDeclInvalid`。
+    """`main` の下の `.ndf/review.json`。無ければ秒と費用の上限の既定だけを持つ。読めない・形が違えば `ReviewDeclInvalid`。
 
-    `fixer_sessions` が真の設定は、たどった先の実体がレビューする `worktree` の外にあるときだけ受ける（PR が書き換えられる
-    場所の値で会話の保存を有効にしない。#4013）。"""
+    `fixer_sessions` が真の設定と `limits` キーのある設定は、たどった先の実体がレビューする `worktree` の外にあるときだけ
+    受ける（PR が書き換えられる場所の値で会話の保存を有効にせず、上限も変えない。#4013・#2468）。"""
     path = settings_path(main, "review")  # 表 ndf-files の行
     try:
         present = participants.setting_present(path)
     except participants.SettingUnreadable as exc:
         raise criteria_decide.ReviewDeclInvalid(str(exc)) from exc
     if not present:
-        return ReviewSettings()
+        return ReviewSettings(limits=_with_defaults(criteria_decide.ProjectLimits()))
     real = Path(os.path.realpath(path))
     try:
         raw = real.read_bytes()
@@ -108,13 +119,15 @@ def read_settings(main: Path, worktree: Path) -> ReviewSettings:
         raise criteria_decide.ReviewDeclInvalid(f"{path} を読めない: {exc}") from exc
     focus = criteria_decide.focus_of(parsed, str(path))
     saved = criteria_decide.fixer_sessions_of(parsed, str(path))
+    declared = criteria_decide.project_limits_of(parsed, str(path))
     tree = Path(os.path.realpath(worktree))
-    if saved and _inside(real, tree):
+    guarded = [key for key, used in ((criteria_decide.FIXER_SESSIONS, saved), ("limits", "limits" in parsed)) if used]
+    if guarded and _inside(real, tree):
         raise criteria_decide.ReviewDeclInvalid(
             f"{path} の実体 {real} がレビューする worktree {tree} の中にある。PR が書き換えられる場所の "
-            f"{criteria_decide.FIXER_SESSIONS} で会話の保存を有効にしないので、メインディレクトリに通常のファイルとして置く"
+            f"{'・'.join(guarded)} は使わないので、メインディレクトリに通常のファイルとして置く"
         )
-    return ReviewSettings(focus, raw, saved)
+    return ReviewSettings(focus, raw, saved, _with_defaults(declared))
 
 
 # PR の head のレビューの設定が実行者の設定と違うときの注意（PR 3944 の r3-1）

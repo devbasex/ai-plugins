@@ -251,9 +251,9 @@ worktree・チーム・公開・[release.schema.json](../../contracts/schemas/nd
 
 ## `.ndf/review.json`（review）
 
-worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf-settings/review.schema.json)。読む工程: `ndf loop`（レビューの引数を組むとき）・`工程: コードレビュー`（レビューの観点を足すとき）・`ndf cross-review run`（相手役と修正担当へ重点（基準 3）を渡すとき・修正担当の会話を続けるかを決めるとき。version 1 の focus と fixer_sessions だけを読み、version 2・3 は invalid で止める（#3941・#4013））
+worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf-settings/review.schema.json)。読む工程: `ndf loop`（レビューの引数を組むとき）・`工程: コードレビュー`（レビューの観点を足すとき）・`ndf cross-review run`（相手役と修正担当へ重点（基準 3）を渡すとき・修正担当の会話を続けるかを決めるとき。version 1 の focus と fixer_sessions と limits だけを読み、version 2・3 は invalid で止める（#3941・#4013・#2468））
 
-レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。version 1 は focus と fixer_sessions だけを読みほかのキーを無視し、version 2 は focus と profile、version 3 は focus と最上位の criteria・not_written と profiles を読む
+レビューで必ず見る観点の並びと、指摘の基準・見送り・返信を差し替えるプロファイル。ndf cross-review run は、メインディレクトリ（レビュー対象の worktree を作った元の clone）の .ndf/review.json を開き、シンボリックリンクならリンク先を読む。レビュー対象の worktree にある同じ名前のファイルは直接開かない。ただし、リンク先がそのファイルなら、そこに書いた値を読んで検証する。設定ファイルの実体がレビュー対象の worktree の中にある場合は、fixer_sessions を true にできず、limits キーも書けない。true か limits キーがあると、ndf cross-review run は相手役も修正担当も起動せずに invalid で停止する。バージョンごとのキーの必須・許可・禁止の条件は、このスキーマの allOf を参照する。ndf cross-review run が読むキーは、このスキーマの x-ndf-read-by を参照する
 
 | キー | 型 | 既定値 | 取りうる値 | 必須か | 説明 |
 | --- | --- | --- | --- | --- | --- |
@@ -261,6 +261,7 @@ worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf
 | `criteria` | criteria | — | — | 任意 | version 3 で全プロファイルに足す指摘の基準（番号 → 文）。番号はプロファイルか既定の基準と重ならない |
 | `fixer_sessions` | boolean | `false` | — | 任意 | version 1 だけで書ける。真なら ndf cross-review run の修正担当が 2 ラウンド目から前のラウンドの会話を続け（#4013）、claude の設定の保存先の projects/<作業ディレクトリのキー>/<会話の ID>.jsonl に会話の記録が残る。止めるのは Claude の会話の記録だけで、値によらず状態の保存先の round<n>-fix.out・round<n>-fix-new.out の stream-json（修正担当が Tool で読んだファイルの中身と未公開の指摘を含む）は残る |
 | `focus` | array of string | — | — | 任意 | レビューで必ず見る観点の文。version 1 では必須 |
+| `limits` | limits | — | — | 任意 | version 1 だけで書ける。cross-review の上限で、rounds はラウンド数、seconds はラウンドにかかった時間の合計（秒）、usd は計測できた Claude の費用の合計（米ドル）の上限である（#2468）。どのキーも省ける。省いたとき seconds と usd は NDF の既定（contracts/limits/ の cross-review.max-seconds・cross-review.max-usd）を使い、rounds はプロジェクトの上限を置かない。ndf cross-review run は相手役を起動する前に形を検証し、形が違えば止まる。設定ファイルの実体がレビュー対象の worktree の中にある場合は、PR が上限を変えられるので、このキーがあれば値によらず invalid で停止する。今の実装は読み込みと検証までで、設定した値に達してもレビューは停止しない（停止の処理は後の変更で追加する） |
 | `not_written` | not_written | — | — | 任意 | version 3 で全プロファイルに足す、書かないものの並び |
 | `profile` | profile | — | — | 任意 | version 2 のプロファイル（指摘の基準・書かないもの・見送りの種類・返信・観点の区分）。version 3 では書かず profiles に移す |
 | `profiles` | array of profile_entry | — | — | 任意 | version 3 のプロファイルの候補。PR の変更ファイルのパスが paths に当たる先頭の 1 つを選ぶ。name は重ならず、paths を持たない候補は高々 1 つで末尾に置く |
@@ -268,6 +269,7 @@ worktree・チーム・公開・[review.schema.json](../../contracts/schemas/ndf
 
 例: `{"version": 1, "focus": ["処理の回数と所要時間"]}`
 例: `{"version": 1, "focus": [], "fixer_sessions": true}`
+例: `{"version": 1, "focus": [], "limits": {"rounds": 4, "seconds": 3600, "usd": 20}}`
 例: `{"version": 3, "focus": ["処理の回数と所要時間"], "profiles": [{"name": "docs", "paths": ["docs/**"], "criteria": {"1": "読み手が違う手順を踏む食い違い"}}, {"name": "code"}]}`
 
 ## `.ndf/runtimes.json`（runtime-policy）
