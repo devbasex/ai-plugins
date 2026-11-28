@@ -17,7 +17,7 @@ from ndf.adapters import agents, claude, claude_choice, git
 from ndf.contracts import limits, writing
 from ndf.core import issue_docs
 from ndf.core.converge import participants
-from ndf.domains.crossreview import criteria_decide, experiment, push, resume_decide, store
+from ndf.domains.crossreview import criteria_decide, experiment, push, repo, resume_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal
 from ndf.domains.crossreview.settings import RunConfig
@@ -69,6 +69,14 @@ def _where(f: dict[str, Any]) -> str:
     return f"（{'・'.join(parts)}）" if parts else ""
 
 
+def _target_repo(run: FixRun) -> Optional[str]:
+    """課題の本文と編集履歴を読むリポジトリ（PR へ書く口と同じ順で決める）。決められなければ None（コピーを直させない）。"""
+    try:
+        return repo.resolve_target_repo(run.cfg.repo_arg, store.state_repo(run.ref), run.cfg.worktree).slug
+    except repo.RepoUnresolved:  # noqa: NDF401 git: 決められなければ短い制約（利用者の判断へ返す）にする
+        return None
+
+
 def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed], result_path: Path) -> str:
     lines = [
         f"PR #{run.ref.current_pr} の worktree {run.cfg.worktree} で、次を 1 件ずつ直すか、理由を添えて見送る。直したらコミットする（push しない）。"
@@ -86,7 +94,7 @@ def _fix_prompt(run: FixRun, open_: Sequence[dict[str, Any]], handed: Sequence[f
     if run.requirements_copy:
         # 場所の無い指摘と足すべき内容は、コピーに向くかを決められないので全文を渡す
         aimed = bool(handed) or any(not f.get("path") or issue_docs.requirements_issues(f["path"]) for f in open_)
-        lines.append(criteria_decide.fixer_requirements_copy(aimed))
+        lines.append(criteria_decide.fixer_requirements_copy(_target_repo(run) if aimed else None))
     block = criteria_decide.document_block(criteria_decide.FIXER, run.documents)
     lines += block if run.distinction else map(writing.without_distinction, block)
     # 修正担当は hook の無い起動なので、テストを CI に寄せる決まりは指示で伝える（#4030）

@@ -209,7 +209,7 @@ def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Pa
     monkeypatch.setattr(changes, "changed", lambda *_: changes.Changed((path,), {}))
     monkeypatch.setattr(changes, "review_diff", lambda *_: "")
     g = SimpleNamespace(rev_parse=lambda *_: "head", merge_base=lambda *_: "base")
-    cfg = settings.RunConfig(tmp_path, BRANCH, "origin/main", PR, tmp_path, False, ("codex",))
+    cfg = settings.RunConfig(tmp_path, BRANCH, "origin/main", PR, tmp_path, False, ("codex",), repo_arg="o/r")
     run = drive._Run(cfg, g, store.state_pr(tmp_path, PR), {}, FindingJournal(), [], [], [])  # type: ignore[arg-type]
     prep = drive._prepare_round(run, 1)
     review = drive._review_prompt(run, 1, prep)
@@ -219,7 +219,7 @@ def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Pa
         assert (full in prompt) is distinction
         assert (_stripped() in prompt) is not distinction
     # 要求仕様のコピーを変える PR だけが、修正担当へコピーへの指摘の扱いを、基準の全文より前に渡す（決定 7）
-    handling = criteria_decide.fixer_requirements_copy(True)
+    handling = criteria_decide.fixer_requirements_copy("o/r")
     copy = path.endswith("-requirements.md")
     assert handling not in review
     assert (handling in fix) is copy
@@ -227,4 +227,4 @@ def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Pa
         assert fix.index(handling) < fix.index(full)
         # 指摘がほかのファイルだけなら、全文の代わりに短い制約を渡す
         other = fixer._fix_prompt(run, [{**MAJOR, "id": "r1-1", "path": "notes.md"}], (), tmp_path / "result.json")
-        assert handling not in other and criteria_decide.fixer_requirements_copy(False) in other
+        assert handling not in other and criteria_decide.fixer_requirements_copy(None) in other

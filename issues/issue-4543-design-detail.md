@@ -33,6 +33,8 @@ plugins/ndf/
 | `src/ndf/core/worker.py` | 変更 | worker の規則文を組む | `writing`・`worker_kinds` | `worker` | `system_prompt`（変更） |
 | `src/ndf/core/issue_docs.py` | 変更 | 課題の文書の名前の形を持つ | — | `issue_docs` | `requirements_issues`（新設） |
 | `src/ndf/domains/docrebuild/drive.py` | 変更 | 要求仕様のコピーの名前を `issue_docs` から読む | `issue_docs` | `drive` | `requirements_of`（参照先の定数だけ変える） |
+| `src/ndf/domains/docrebuild/requirements_copy.py` | 新設 | 要求仕様のコピーのうち直してよいセクションを決める | `adapters.markdown`・`adapters.github` | `requirements_copy` | `editable_sections`・`protected`（新設） |
+| `src/ndf/domains/docrebuild/gate.py` | 変更 | 決まったセクションだけを直させ、ほかの範囲の変更を push せずに止める | `requirements_copy` | `gate` | `_allow_fix`・`_outside_sections`（新設） |
 | `contracts/data/review-criteria.json` | 変更 | 修正担当へ足す扱いの文を持つ | — | — | — |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の基準の文を表から読む | 表 | `criteria_decide` | `fixer_requirements_copy`（新設） |
 | `src/ndf/domains/crossreview/drive.py` | 変更 | 変更したファイルから小見出しを渡すかを決め、レビュー担当の指示を組む | `issue_docs`・`writing`・`criteria_decide` | `_Run` | `_prepare_round`・`_review_prompt`（変更） |
@@ -192,7 +194,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `fixer_requirements_copy` | `src/ndf/domains/crossreview/criteria_decide.py` | 新設 | `(full: bool) -> str` | 要求仕様のコピーへの指摘の扱いの全文か、短い制約を表から返す |
+| `fixer_requirements_copy` | `src/ndf/domains/crossreview/criteria_decide.py` | 新設 | `(repo: str \| None) -> str` | リポジトリがあれば要求仕様のコピーへの指摘の扱いの全文、無ければ短い制約を表から返す |
 | `_prepare_round` | `src/ndf/domains/crossreview/drive.py` | 変更 | 変えない | 変更したファイルの名前から `run.distinction` と `run.requirements_copy` を決める |
 | `_review_prompt` | `src/ndf/domains/crossreview/drive.py` | 変更 | 変えない | `run.distinction` が偽なら、文書の基準のセクションから小見出しを外す |
 | `_fix_prompt` | `src/ndf/domains/crossreview/fixer.py` | 変更 | 変えない | 同じ条件で小見出しを外し、コピーがあれば扱いの文を足す |
@@ -227,7 +229,7 @@ plugins/ndf/
 
 修正担当は、コピーへの指摘があれば、コピーの名前の番号の課題の本文を `gh issue view <番号> --json body --jq .body` で読む。読むだけで、書かない。読んだ本文の `## 進行` より前（`## 進行` が無ければ全文）を、下の表では「要求の範囲」と呼ぶ。扱いは、指摘された場所で分ける。
 
-現在の本文に無い見出しは、コピーにだけ足したセクションとは限らない。コピーした後に本文から消したセクションもあるためである。そこで本文の編集履歴（GraphQL の `userContentEdits`。版ごとの本文の全文が返る）を読み、どの版の要求の範囲にも無かった見出しだけを、コピーにだけあるセクションとする。
+まず現在の本文の見出しで分ける。要求の範囲にある見出しは、写した範囲と決まる。要求の範囲に無い見出しは、コピーにだけ足したセクションとは限らない。コピーした後に本文から消したセクションもあるためである。そのような見出しへの指摘がある課題に限り、本文の編集履歴（GraphQL の `userContentEdits`。版ごとの本文の全文が返る）を 1 回読む。どの版の要求の範囲にも無かった見出しだけを、コピーにだけあるセクションとする。
 
 | 指摘された場所 | 扱い |
 | --- | --- |
@@ -237,12 +239,9 @@ plugins/ndf/
 
 直す案には、直し先の課題の番号、セクションの見出し、直す前の文、直した後の文を書く。利用者がこの理由だけを読んで、直すかを決められるようにするためである。コピーの写した範囲は、ほかの文書への指摘を直すときも書き替えない。
 
-指示の 1 行目は変えず、レビュー対象のリポジトリは足さない。修正担当は課題と PR の本文へ書かないので、別のリポジトリの本文を書き替える経路が無いためである。本文の読み取りで `gh` が使うリポジトリは、次のとおりに決まる。
+本文と編集履歴を読むコマンドには、cross-review が PR へ書くときと同じ順で決めた対象のリポジトリを指示の文に埋め込む。順は、`--repo`、状態ファイル、作業場所のリモートである。2 つの読み取りが別のリポジトリを指すと、写した範囲をコピーにだけあるセクションと取り違えるためである。リポジトリを決められないときは、短い制約だけを渡す。
 
-- `--repo` を付けた起動では、`cli.py` が今も子のプロセスへ渡している `GH_REPO` のリポジトリ
-- 付けない起動では、作業場所のリモートから `gh` が決めるリポジトリ
-
-別のリポジトリの同じ番号の課題を読んだ場合は、見出しがそろわなければ写した範囲として扱う。見出しがそろう別の課題を読むと、写した範囲をコピーにだけあるセクションと取り違える余地が残る。この場合もコピーの直しはコミットとして PR の差分に残り、課題の本文は変わらない。
+承認の前の確認（`ndf document-rebuild gate`）も同じ見分け方を使う。判定は `domains/docrebuild/requirements_copy.py` が行い、AI には任せない。コピーにだけあるセクションがあるときだけ、コピーを直してよいファイルに入れ、起動指示にそのセクションを挙げる。worker がほかの範囲を変えた場合は、push せずに止める。
 
 2 つの値はラウンドごとに決め直し、状態ファイルへは書かない（`documents` と同じ）。
 

@@ -223,10 +223,14 @@ def fixer_ci_only() -> str:
     return str(_table()["fixer_ci_only"])
 
 
-def fixer_requirements_copy(full: bool) -> str:
-    """要求仕様のコピーを変える PR で、修正担当への指示に足す文（#4543 の決定 7）。`full`（指摘がコピーに向く）なら扱いの全文、
-    違えば写した範囲を書き替えないという短い制約。"""
-    return str(_table()["document"]["requirements_copy" if full else "requirements_copy_keep"])
+def fixer_requirements_copy(repo: Optional[str]) -> str:
+    """要求仕様のコピーを変える PR で、修正担当への指示に足す文（#4543 の決定 7）。`repo`（指摘がコピーに向くときの対象の
+    リポジトリ）があれば扱いの全文、無ければ写した範囲を書き替えないという短い制約。"""
+    if repo is None:
+        return str(_table()["document"]["requirements_copy_keep"])
+    owner, _, name = repo.partition("/")
+    text = str(_table()["document"]["requirements_copy"])
+    return text.replace("{repo}", repo).replace("{owner}", owner).replace("{name}", name)
 
 
 def fixer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]:

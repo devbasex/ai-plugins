@@ -519,6 +519,7 @@ def _run_config(args: argparse.Namespace) -> RunConfig:
         settings=got.settings,
         unit=got.unit,
         check_pr=args.reviewed_pr_out is not None,
+        repo_arg=args.repo,
     )
 
 

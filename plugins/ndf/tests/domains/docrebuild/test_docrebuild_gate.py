@@ -11,6 +11,7 @@ import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 import pytest
@@ -133,8 +134,18 @@ class FakeHub:
     on_fetch: Optional[Callable[[FakeHub], None]] = None
     repo: str = REPO
     visibility: dict[str, str] = field(default_factory=dict)
+    issue: str = "## 目的\n"
+    past: list[str] = field(default_factory=list)
+    history_reads: int = 0
+
+    def issue_body(self, number: int) -> Any:
+        return SimpleNamespace(body=self.issue)
 
     def repository(self, query: str, variables: Optional[dict] = None) -> dict[str, Any]:
+        if "userContentEdits" in query:
+            self.history_reads += 1
+            nodes = [{"deletedAt": None, "diff": body} for body in self.past]
+            return {"issue": {"userContentEdits": {"totalCount": len(nodes), "nodes": nodes}}}
         self.fetches += 1
         if self.on_fetch is not None and self.fetches > 1:
             self.on_fetch(self)
@@ -796,14 +807,26 @@ def test_no_doc_fix_keeps_docs_out_of_the_fixable_files(tmp_path: Path) -> None:
     assert got["cause"]["kind"] == "incomplete" and "文書は直さない" in worker.prompts[0]
 
 
-def test_the_requirements_copy_is_never_fixed_by_the_gate(tmp_path: Path) -> None:
-    """#4543: 要求仕様のコピーは直してよいファイルに入らず、worker が直せば push せずに止める。"""
+@pytest.mark.parametrize(
+    ("past", "edit", "status", "history_reads"),
+    [
+        ([], ("計画。", "直した計画。"), "ok", 1),
+        ([], ("要求。", "直した要求。"), "incomplete", 1),
+        (["## 目的\n\n## 実装計画\n"], ("計画。", "直した計画。"), "incomplete", 1),
+    ],
+)
+def test_only_sections_added_to_the_requirements_copy_are_fixed(
+    tmp_path: Path, past: list[str], edit: tuple[str, str], status: str, history_reads: int
+) -> None:
+    """#4543: コピーにだけあるセクションは直せる。写した範囲（本文から消したセクションを含む）を直せば push せずに止める。"""
     copy = "issues/issue-1-requirements.md"
-    w = world(tmp_path, {copy: "# 要求\n"})
-    worker = FakeWorker(edit=lambda state_dir: (w.cwd / copy).write_text("# 直した\n", encoding="utf-8"))
+    text = "## 目的\n\n要求。\n\n## 実装計画\n\n計画。\n"
+    w = world(tmp_path, {copy: text})
+    w.hub.past = past
+    worker = FakeWorker(edit=lambda state_dir: (w.cwd / copy).write_text(text.replace(*edit), encoding="utf-8"))
     got = w.run(worker)
-    assert got["cause"]["kind"] == "incomplete" and {"outside"} <= {g["kind"] for g in got["gaps"]}
-    assert "要求仕様のコピー" in worker.prompts[0] and w.git.pushed == []
+    assert (got["status"] if status == "ok" else got["cause"]["kind"]) == status, got
+    assert len(w.git.pushed) == (1 if status == "ok" else 0) and w.hub.history_reads == history_reads
 
 
 # --- ndf records reading check の突き合わせ（Task 7、条件 6・7） ---------------------------------------------------
