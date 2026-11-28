@@ -180,7 +180,11 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
   TMP="$(mktemp -d)" || exit 1
   trap 'rm -rf "$TMP"' EXIT
   ndf project measure --out "$TMP/measure.json" || exit
-  ndf project write --measure "$TMP/measure.json" --dry-run || exit
+  ndf --output-format=text project write --measure "$TMP/measure.json" --dry-run > "$TMP/dry-run.txt"
+  rc=$?
+  cat "$TMP/dry-run.txt"
+  [ "$rc" = 0 ] || exit "$rc"
+  grep -q '^書くものが無い' "$TMP/dry-run.txt" && exit 0
   printf '移行する（y/N）: '
   read -r answer
   [ "$answer" = y ] || exit 0
@@ -189,12 +193,13 @@ clone した全員と CI で同じ値のまま効き、変える Pull Request �
 ```
 
 - まず、リポジトリと CI を測り、差分を表示する。差分には取り除くキーが出る（値は伏せる）。ここまでは設定を変えない
-- 差分を確かめて `y` を入力すると移行する。リンクされた worktree から打っても、設定はメインディレクトリへ書く。
+- 差分の表示に `書くものが無い（設定は解析と同じ）` が出たら、移行するものが無いので、確認を求めずに終わる
+- それ以外は、差分を確かめて `y` を入力すると移行する。リンクされた worktree から打っても、設定はメインディレクトリへ書く。
   ほかの入力では、何も書かずに終わる
 - 一時ディレクトリを作れないとき、または測定か差分の表示が失敗したときは、そこで終わり、移行しない
-- 測定の結果を置く一時ディレクトリは、移行した・やめた・失敗した・Ctrl-C で中断した、のどの場合も、まとまりを抜けるときに消える
+- 測定の結果と差分の表示を置く一時ディレクトリは、移行した・移行するものが無い・やめた・失敗した・Ctrl-C で中断した、のどの場合も、まとまりを抜けるときに消える
 
-移行だけなら回答（`--answers`）は要らない。回答が無くても、質問の項目に今の値があれば残る。回答するときは、まとまりの 2 つの `write` に同じ `--answers` を渡す。
+移行だけなら回答（`--answers`）は要らない。回答が無くても、質問の項目に今の値があれば残る。回答するときは、まとまりの 2 つの `write`（`project write` の行）に同じ `--answers` を渡す。
 
 **移行の後は、書き出しの結果をメインディレクトリで確かめ、コミットは移行用のブランチをチェックアウトした作業ディレクトリで行う。**
 移行用のブランチとは、設定の変更を Pull Request にするために作る、既定ブランチ以外のブランチである。
