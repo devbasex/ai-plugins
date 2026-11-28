@@ -240,9 +240,14 @@ def test_mismatches_ignores_actual_lines_only(work):
 
     compared = dr.mismatches(record, uf.Tree(work, "HEAD"), CONTEXT)
     assert compared.differences == []
-    # 比較が読んで解析した対象は、検査が読み直して組む対象と同じ
+    # 比較が読んで解析した対象。単位のファイルは今の中身（実際の行数を含む）を持つ
+    files = (
+        ud.parse(_unit_doc(7, actual_lines=33), "issues/issue-7-plan.units.json"),
+        ud.parse(_unit_doc(8), "issues/issue-8-plan.units.json"),
+    )
+    handled = {n: ("実装する", None) for n in CONTEXT["issues"]}
     assert compared.targets is not None
-    assert compared.targets.found == uf.collect(uf.Tree(work, "HEAD"), CONTEXT["issues"], CONTEXT["plan_omitted"])
+    assert compared.targets.found == uf.Collected(files, (9,), (), (), handled)
 
 
 @pytest.mark.parametrize(

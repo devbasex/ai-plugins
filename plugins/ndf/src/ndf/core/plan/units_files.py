@@ -299,7 +299,7 @@ def _collect(
 ) -> Collected:
     wanted = tuple(sorted(set(issues)))
     if handled is None:
-        handled = _handlings(tree, listing, wanted)[0]
+        handled = _handlings(tree, listing, wanted)
     excluded = tuple(n for n in wanted if handled[n][0] in EXCLUDED_HANDLINGS)
     skipped = tuple(n for n in wanted if n in set(omitted) and n not in excluded)
     rest = [n for n in wanted if n not in excluded and n not in skipped]
@@ -328,8 +328,8 @@ def _design_rows(
 
 def _handlings(
     tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]
-) -> tuple[dict[int, tuple[str, Optional[int]]], tuple[int, ...]]:
-    """課題ごとの（扱い, 統合先）と、独立した単位を持たない課題。
+) -> dict[int, tuple[str, Optional[int]]]:
+    """課題ごとの（扱い, 統合先）。
 
     扱いが割れる課題は独立した単位を持つ扱いを取り、設計書に行の無い課題は「実装する」である。
     """
@@ -338,14 +338,14 @@ def _handlings(
     for issue in issues:
         found = rows[issue] if issue in rows else [(IMPLEMENT_HANDLING, None)]
         out[issue] = next((row for row in found if row[0] not in EXCLUDED_HANDLINGS), found[0])
-    return out, tuple(n for n in issues if out[n][0] in EXCLUDED_HANDLINGS)
+    return out
 
 
 def handlings(
     tree: Tree, issues: Sequence[int], listing: Optional[Mapping[str, Optional[tuple[str, str, str]]]] = None
 ) -> dict[int, tuple[str, Optional[int]]]:
     """課題ごとの、設計書の「設計の結果」の（扱い, 統合先）。`listing` に `tree.listing()` を渡すと、一覧を取り直さない。"""
-    return _handlings(tree, tree.listing() if listing is None else listing, tuple(sorted(set(issues))))[0]
+    return _handlings(tree, tree.listing() if listing is None else listing, tuple(sorted(set(issues))))
 
 
 def project_of(tree: Tree) -> dict[str, Any]:
