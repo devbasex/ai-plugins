@@ -656,8 +656,9 @@ def test_issue_3780_2_nothing_is_filed_unless_the_primary_is_github(
     store.write_object(path, _left_state())
     got = _report_of(state_dir, capsys)
     assert github.calls == [] and any("issues.primary" in w for w in got.get("warnings", ())) is noted
-    # 未設定の見送りは行に残り、打ち直しが公開し直す。GitHub にしない宣言は残さない
-    assert ("issue_error" in store.read_object(path)["findings"][0]) is noted
+    # 未設定の見送りの理由は状態にだけ残す。GitHub にしない設定は残さない
+    state = store.read_object(path)
+    assert ("issue_skipped" in state) is noted and "issue_error" not in state["findings"][0]
 
 
 def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_skipped(tmp_path: Path, monkeypatch, hub) -> None:

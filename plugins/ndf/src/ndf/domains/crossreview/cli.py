@@ -732,9 +732,12 @@ def _report(
     published = got.reused and isinstance(previous, str) and data.get(report_decide.PUBLISHED_KEY) == now
     # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由で見送るだけなら、
     # 公開済みの記録を使う。起票先の照合は見送った後だけにする（ほかは公開の中で照合する。#3780）
-    if published and any(leftover_decide.Filed.ERROR in row for row in leftover.candidates(data)):
+    if published and (rows := leftover.candidates(data)):
         skipped = data.get(leftover.SKIPPED)
-        published = skipped is not None and _filing_target(data, filer)[1] == skipped
+        if skipped is None:
+            published = not any(leftover_decide.Filed.ERROR in row for row in rows)
+        else:
+            published = _filing_target(data, filer)[1] == skipped
     if published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings + ([skipped] if skipped else [])

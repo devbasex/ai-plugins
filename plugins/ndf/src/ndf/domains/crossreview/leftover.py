@@ -20,14 +20,14 @@ from ndf.adapters.github import BOT_SUFFIX, Viewer
 from ndf.adapters.github_pulls import PER_PAGE, Authored, account_id_of
 from ndf.contracts import limits
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import leftover_decide, settings, store, threads
+from ndf.domains.crossreview import leftover_decide, report_decide, settings, store, threads
 from ndf.domains.crossreview.leftover_decide import PARKED, Filed, Listed
 
 # 状態ファイルのキー: 起票に使ったアカウント ID・起票の記録のコメントの番号・一覧が上限を超えたときの上限の値
 ACCOUNT_IDS = "issue_account_ids"
 RECORD_ID = "issue_record_id"
 LIST_FULL = "issue_list_full"
-# 起票を見送った理由の状態のキー（打ち直しが、GitHub への起票の失敗と見送りを分ける）
+# 起票を見送った理由の状態のキー。見送りの理由はここにだけ持ち、行の `issue_error`（起票の失敗）と分ける
 SKIPPED = "issue_skipped"
 # 起票先を GitHub にする `.ndf/project.json` の `issues.primary` の値
 GITHUB = "github"
@@ -136,17 +136,16 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def hold(data: dict[str, Any], rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
-    """起票を見送った理由を状態と候補の行に残し、設定か起票先を直した後の打ち直しが公開し直すようにする。`reason` が None
-    （起票先を GitHub にしないと宣言している）なら、打ち直さないので前の理由を消す。"""
+    """起票を見送った理由を状態に残し、候補の行の前の起票の失敗を消す。`reason` が None（起票先を GitHub にしないと
+    設定している）なら、前の理由を消す。理由が変われば公開済みの記録は古いので、打ち直しが公開し直すようにする。"""
+    if data.get(SKIPPED) != reason:
+        data.pop(report_decide.PUBLISHED_KEY, None)
     if reason is None:
         data.pop(SKIPPED, None)
     else:
         data[SKIPPED] = reason
     for row in rows:
-        if reason is None:
-            row.pop(Filed.ERROR, None)
-        else:
-            row[Filed.ERROR] = reason
+        row.pop(Filed.ERROR, None)
 
 
 def _str_of(row: Mapping[str, Any], key: str) -> str:

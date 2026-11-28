@@ -11,7 +11,7 @@ import pytest
 from ndf.adapters import publish
 from ndf.adapters.github import PUBLIC, GitHub, GitHubError, Viewer
 from ndf.adapters.github_pulls import PER_PAGE
-from ndf.domains.crossreview import leftover, leftover_decide, store
+from ndf.domains.crossreview import leftover, leftover_decide, report_decide, store
 from ndf.domains.crossreview.leftover_decide import Filed, Listed
 
 REPO = "o/r"
@@ -237,6 +237,15 @@ def test_issue_3780_2_files_once_and_writes_the_url_to_the_row() -> None:
     # 別の保存先の打ち直しは、起票の記録の URL を使う
     again = Run(github)
     assert again.go() == [] and again.row[Filed.URL] == url and github.created() == 1
+
+
+@pytest.mark.parametrize(("reason", "kept"), [pytest.param("前の理由", True, id="same"), pytest.param(None, False, id="changed")])
+def test_hold_keeps_the_skip_reason_only_in_the_state(reason: str | None, kept: bool) -> None:
+    row = _row(issue_error="前の失敗")
+    data = {leftover.SKIPPED: "前の理由", report_decide.PUBLISHED_KEY: "公開済み"}
+    leftover.hold(data, [row], reason)
+    assert data.get(leftover.SKIPPED) == reason and Filed.ERROR not in row
+    assert (report_decide.PUBLISHED_KEY in data) is kept
 
 
 def test_only_candidates_call_github() -> None:
