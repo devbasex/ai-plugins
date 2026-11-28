@@ -599,11 +599,13 @@ def test_an_uncommitted_unit_file_stops(sprint, tmp_path):
     ids=["上限を超える", "形が違う", "タスクの本文が無い"],
 )
 def test_unit_files_that_fail_the_check_stop(sprint, tmp_path, doc, plan, word):
+    before = _remote_head(sprint)
     _commit_files(sprint, doc, plan)
 
     stopped = _stopped(_run(sprint), tmp_path / "w", sprint)
 
     assert stopped.kind == "invalid" and word in stopped.detail
+    assert _remote_head(sprint) == before
 
 
 def test_an_approval_without_a_record_stops_before_touching_the_remote(sprint, tmp_path, git_calls):
@@ -646,6 +648,7 @@ def test_the_approved_documents_must_be_in_the_sprint_branch(sprint, tmp_path):
 
 @pytest.mark.parametrize("change", ["中身", "消す", "省いた課題"])
 def test_a_change_after_the_approval_stops(sprint, tmp_path, change):
+    before = _remote_head(sprint)
     head = _commit_files(sprint, _unit_doc())
     approval = _approval(sprint, head, tmp_path, context_omitted=() if change == "省いた課題" else None)
     if change == "中身":
@@ -657,6 +660,7 @@ def test_a_change_after_the_approval_stops(sprint, tmp_path, change):
     stopped = _stopped(_with(_run(sprint), approval), tmp_path / "w", sprint)
 
     assert stopped.kind == "refused" and "承認" in stopped.detail
+    assert _remote_head(sprint) == before
 
 
 def test_the_unit_instruction_holds_the_approved_task_bodies_in_dependency_order(sprint, tmp_path, monkeypatch):
@@ -687,3 +691,9 @@ def test_the_task_bodies_are_cut_at_the_next_task():
     assert sorted(bodies) == [1, 2, 3]
     assert bodies[2] == "### Task 2: 書く\n- 書き手の本文\n\n#### 注意\n- 書き手の注意"
     assert bodies[3] == "### Task 3: 下ごしらえ\n- 下ごしらえの本文"
+
+
+def test_a_task_heading_that_appears_twice_has_no_body():
+    plan = FILE_PLAN.replace("### Task 2: 書く", "### Task 1: 書く")
+
+    assert review_units_decide.task_bodies(plan)[1] is None

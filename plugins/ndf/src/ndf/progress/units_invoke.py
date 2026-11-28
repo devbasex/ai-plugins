@@ -4,7 +4,7 @@
 単位を順に流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR）である。
 開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた単位のファイルか実装計画の単位の見出しがあるかで
 経路を決める。分け方の承認が要るスプリントは常に単位の経路にする。単位の経路なら、手元をリモートに揃え、並びを読んで `units.json` に書く。
-単位のファイルがあるか承認が要れば、ブランチをリモートへ送ってから、承認の記録と照らし、単位のファイルを読んで確かめる
+単位のファイルがあるか承認が要れば、承認の記録と照らし、単位のファイルを読んで確かめてから、確かめたコミットをリモートへ送る
 （issues/issue-3702-design-detail.md の「始める前」）。どちらでもなければ、実装計画の表を読んでから送る。
 表の読み方と順序は docs/specifications/ndf-implement-stage-review-units.md の「開始前の確かめ」、打ち直しの表は同じ文書の「打ち直し」にある。
 
@@ -24,6 +24,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
@@ -37,7 +38,7 @@ from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide, units_files
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import runner as plan_runner
-from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup, unit_key
 from ndf.progress import issue_values, plan_runs, refactor_values
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
 from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
@@ -119,7 +120,7 @@ class Ports(NamedTuple):
 class Context(NamedTuple):
     """単位を流す間に変わらない値。`sprint` はスプリントの作業場所、`branch` はスプリントブランチ、`repo` は選んだリモートの
     `<所有者>/<リポジトリ>`、`review` は単位の PR のレビューの起動（`--pr` を持たない）、`local_tests` は手元のテストを打つか、
-    `source` は担当タスクの本文を読むコミット（`Lineup.source`）。"""
+    `source` は担当タスクの本文を読むコミット（`Lineup.source`）、`bodies` はそのコミットから読んだ単位のキーごとの本文。"""
 
     run: StageRun
     work_dir: Path
@@ -131,6 +132,7 @@ class Context(NamedTuple):
     review: tuple[str, ...]
     local_tests: bool
     source: str = ""
+    bodies: Mapping[str, Sequence[str]] = MappingProxyType({})
 
 
 class _Seen(NamedTuple):
@@ -188,14 +190,15 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
         branch = _checked_branch(run, branch, project)
     source = ""
     if sprint.required or seen.unit_files:
-        _push_sprint(g, remote, branch)
-        units, source = _units_from_files(g, root, sprint, issues, seen.plans, lambda ns: _count_sprint_criteria(g, remote, ns))
+        units, source, checked = _units_from_files(g, root, sprint, issues, seen.plans, lambda ns: _count_sprint_criteria(g, remote, ns))
+        # 送るのは照合と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）
+        _push_sprint(g, remote, branch, checked)
     else:
         if sprint.new_definition:
             detail = "実装計画にレビューの単位の欄があるのに、単位のファイル（issues/issue-<番号>-plan.units.json）が無い"
             raise UnitsStopped("invalid", detail)
         units = _read_units(g, remote, seen.plans, issues)
-        _push_sprint(g, remote, branch)
+        _push_sprint(g, remote, branch, "HEAD")
     found = Lineup(units, _unit_ci(project, branch), source)
     print(
         f"ndf progress: 単位の PR のマージ先 {branch}、待つチェック {', '.join(found.unit_ci['required']) or '無し'}"
@@ -207,9 +210,9 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
     return found
 
 
-def _push_sprint(g: Git, remote: str, branch: str) -> None:
-    """手元の HEAD をスプリントブランチへ送る（単位の作業場所はリモートのスプリントブランチから切る）。"""
-    pushed = g.attempt("push", "-q", "--no-follow-tags", "--", remote, f"HEAD:{HEADS}{branch}")
+def _push_sprint(g: Git, remote: str, branch: str, commit: str) -> None:
+    """手元のコミット `commit` をスプリントブランチへ送る（単位の作業場所はリモートのスプリントブランチから切る）。"""
+    pushed = g.attempt("push", "-q", "--no-follow-tags", "--", remote, f"{commit}:{HEADS}{branch}")
     if pushed.returncode != 0:
         raise UnitsStopped("precondition", f"{remote} の {branch} へ送れない: {mask_urls(pushed.stderr.strip())}")
 
@@ -221,8 +224,10 @@ def _units_from_files(
     issues: Sequence[int],
     plans: Sequence[PlanDoc],
     counted: Callable[[Sequence[int]], dict[int, int]],
-) -> tuple[tuple[Unit, ...], str]:
-    """単位のファイルから読んだ並びと、担当タスクの本文を読むコミット。読み元は開始の HEAD で、承認が要れば記録の値で確かめる。
+) -> tuple[tuple[Unit, ...], str, str]:
+    """単位のファイルから読んだ並びと、担当タスクの本文を読むコミットと、確かめたコミット（開始の HEAD）。
+
+    読み元は開始の HEAD で、承認が要れば記録の値で確かめる。
 
     `counted` は課題の受け入れ条件の数を数える（承認が要れば呼ばず、記録の数を使う）。
     """
@@ -232,24 +237,24 @@ def _units_from_files(
         if sprint.required:
             record, source = _approved(g, tree, sprint, start_head)
             targets = record["targets"]
-            issues, omitted = targets["issues"], list(targets["omitted"])
             limits = ud.Limits(**record["limits"])
             criteria = {int(n): count for n, count in record[ud.CRITERIA_KEY].items()}
+            report = units_files.check(tree, targets["issues"], list(targets["omitted"]), limits, criteria, False)
         else:
             source = start_head
-            omitted = units_files.supplemented(tree, issues, sprint.omitted, plans)
+            collected = units_files.supplemented(tree, issues, sprint.omitted, plans)
             limits = units_files.limits_of(units_files.project_of(tree))
             criteria = counted(issues)
-        report = units_files.check(tree, issues, omitted, limits, criteria, False)
+            report = units_files.check_collected(tree, collected, limits, criteria, False)
         bad = units_files.findings(report)
         if bad:
             reasons = "; ".join(f"{f.rule} {f.unit}: {f.reason}" for f in bad)
             raise UnitsStopped("invalid", f"単位のファイルが確かめを通らない: {reasons}")
         units = units_files.lineup_from_files(report.judgement.views, report.files)
-        units_files.check_bodies(units_files.Tree(root, source), units)
+        units_files.task_texts(units_files.Tree(root, source), units)
     except units_files.UnitsFileError as exc:
         raise UnitsStopped("invalid", f"単位のファイルを読めない: {exc}") from None
-    return units, source
+    return units, source, start_head
 
 
 def _approved(g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str) -> tuple[Mapping[str, Any], str]:
@@ -613,7 +618,8 @@ def _unit_context(run: StageRun, work_dir: Path, cwd: Path, found: Lineup) -> Co
     test = project["test"] if isinstance(project.get("test"), Mapping) else {}
     review = _review_command(project, f"{remote}/{branch}")
     repo = g.remote_repo(remote)
-    return Context(run, work_dir, root, branch, remote, repo, found.unit_ci, review, not scoped.ci_only(test), found.source)
+    bodies = _task_texts(root, found.source, found.units) if found.source else {}
+    return Context(run, work_dir, root, branch, remote, repo, found.unit_ci, review, not scoped.ci_only(test), found.source, bodies)
 
 
 def _review_command(project: Mapping[str, Any], base: str) -> tuple[str, ...]:
@@ -814,7 +820,7 @@ def unit_run(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: O
     issued = issue_values.issue_values(ctx.run.inputs, ctx.work_dir, worktree, number=unit.issue, repo=ctx.repo)
     if issued is None:
         raise UnitsStopped("precondition", f"課題 #{unit.issue} の作成者に書き込み権限が無く、題と本文を作業へ渡さない")
-    bodies = _task_texts(ctx, unit) if ctx.source and not unit.supplemented else []
+    bodies = ctx.bodies[unit_key(unit.issue, unit.name)] if ctx.source and not unit.supplemented else []
     unit_file = "" if unit.supplemented else str(_write_unit_file(round_dir, unit, ctx.source, bodies))
     overrides: dict[str, route.Value] = {
         **issued,
@@ -837,10 +843,10 @@ def unit_run(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: O
     return replace(plain, inputs=inputs, overrides=overrides, template=template, env_extra=env, start=start)
 
 
-def _task_texts(ctx: Context, unit: Unit) -> list[str]:
-    """担当タスクの本文を、`ctx.source` のコミットの実装計画から読む。"""
+def _task_texts(root: Path, source: str, units: Sequence[Unit]) -> dict[str, list[str]]:
+    """全単位の担当タスクの本文を、コミット `source` の実装計画からまとめて読む（`units_files.task_texts`）。"""
     try:
-        return units_files.task_texts(units_files.Tree(ctx.sprint, ctx.source), unit)
+        return units_files.task_texts(units_files.Tree(root, source), units)
     except units_files.UnitsFileError as exc:
         raise UnitsStopped("invalid", str(exc)) from None
 

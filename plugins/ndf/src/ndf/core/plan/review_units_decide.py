@@ -183,17 +183,21 @@ def _task_numbers(doc: _Doc) -> list[int]:
     return [int(m.group(1)) for m in titles if m]
 
 
-def task_bodies(text: str) -> dict[int, str]:
-    """「タスク分解」の `### Task N` ごとの本文（見出しの行を含み、次の同じか上のレベルの見出しの手前まで）。同じ番号は最初のもの。"""
+def task_bodies(text: str) -> dict[int, Optional[str]]:
+    """「タスク分解」の `### Task N` ごとの本文（見出しの行を含み、次の同じか上のレベルの見出しの手前まで）。
+
+    同じ番号の見出しが 2 つ以上あれば、どの本文を採るか決められないので None にする。
+    """
     doc = _parse(text)
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     section = _named_section(doc, TASKS_HEADING)
-    out: dict[int, str] = {}
+    out: dict[int, Optional[str]] = {}
     for h in doc.headings:
         found = _TASK_TITLE.match(h.title) if h.at in section and h.level == 3 else None
         if found:
             body = lines[h.at : min(_section(doc, h).stop, len(lines))]
-            out.setdefault(int(found.group(1)), "\n".join(body).rstrip())
+            number = int(found.group(1))
+            out[number] = None if number in out else "\n".join(body).rstrip()
     return out
 
 

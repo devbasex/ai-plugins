@@ -162,6 +162,13 @@ class Collected(NamedTuple):
     handlings: Mapping[int, tuple[str, Optional[int]]]
 
 
+class Targets(NamedTuple):
+    """読み元から 1 度集めた、`issues/` の項目の一覧（`Tree.listing`）と課題の振り分け。"""
+
+    listing: Mapping[str, Optional[tuple[str, str, str]]]
+    found: Collected
+
+
 class TaskGap(NamedTuple):
     """実装計画と単位のファイルのタスクの食い違い。`duplicated` は実装計画で 2 回以上現れる番号。"""
 
@@ -341,7 +348,12 @@ def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.
     実装計画を省いた課題は、課題全体の 1 単位（`units_decide.single`）として判定に加える。
     """
     listing = tree.listing()
-    found = _collect(tree, listing, issues, omitted)
+    return check_collected(tree, Targets(listing, _collect(tree, listing, issues, omitted)), limits, criteria, docs)
+
+
+def check_collected(tree: Tree, targets: Targets, limits: ud.Limits, criteria: Mapping[int, int], docs: bool) -> Report:
+    """`check` を、同じ `tree` から集め済みの対象（`supplemented`）に当てる。単位のファイルは読み直さない。"""
+    listing, found = targets
     files = [*found.files, *map(ud.single, found.omitted)]
     judged = _report(tree, listing, files, ud.judge(files, limits, criteria), criteria, docs)
     return judged._replace(missing=found.missing, handlings=found.handlings)
@@ -408,17 +420,18 @@ def rendered(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: 
 # --- 流す単位の並び ------------------------------------------------------------------------------
 
 
-def supplemented(tree: Tree, issues: Sequence[int], omitted: Sequence[int], plans: Sequence[PlanDoc]) -> list[int]:
-    """課題 1 つの 1 単位にする課題（実装計画を省いた課題と、単位のファイルも単位の欄も無い課題）。
+def supplemented(tree: Tree, issues: Sequence[int], omitted: Sequence[int], plans: Sequence[PlanDoc]) -> Targets:
+    """単位のファイルも単位の欄も無い課題を、実装計画を省いた課題と同じ課題 1 つの 1 単位にした対象（`check_collected` に渡す）。
 
     単位の欄があるのにファイルが無い課題は、分けたはずの変更を 1 本にしないために止める（#3702 の決定 10）。
     """
-    missing = collect(tree, issues, omitted).missing
-    split = [n for n in missing if any(n in p.issues and has_units(p.text) for p in plans)]
+    listing = tree.listing()
+    found = _collect(tree, listing, issues, omitted)
+    split = [n for n in found.missing if any(n in p.issues and has_units(p.text) for p in plans)]
     if split:
         names = "、".join(f"#{n}" for n in split)
         raise UnitsFileError(f"{names} は実装計画にレビューの単位の欄があるのに、単位のファイルが無い")
-    return [*omitted, *missing]
+    return Targets(listing, found._replace(omitted=tuple(sorted((*found.omitted, *found.missing))), missing=()))
 
 
 def lineup_from_files(views: Sequence[ud.View], files: Sequence[ud.UnitFile]) -> tuple[Unit, ...]:
@@ -446,21 +459,26 @@ def lineup_from_files(views: Sequence[ud.View], files: Sequence[ud.UnitFile]) ->
     return tuple(units)
 
 
-def task_texts(tree: Tree, unit: Unit) -> list[str]:
-    """担当タスクの「タスク分解」の本文（依存の順）。読めないタスクがあれば止める。"""
-    text = tree.read(unit.plan)
-    bodies = task_bodies(text) if text is not None else {}
-    lack = [f"Task {n}" for n in unit.tasks if n not in bodies]
-    if lack:
-        raise UnitsFileError(f"{unit.plan}: 単位 {unit.name} の {'、'.join(lack)} の本文が無い（コミット {tree.commit}）")
-    return [bodies[n] for n in unit.tasks]
+def task_texts(tree: Tree, units: Sequence[Unit]) -> dict[str, list[str]]:
+    """単位のキー（`unit_key`）ごとの、担当タスクの「タスク分解」の本文（依存の順）。補った単位は入らない。
 
-
-def check_bodies(tree: Tree, units: Sequence[Unit]) -> None:
-    """担当タスクの本文がすべて読めることを、単位を始める前に確かめる。"""
-    for unit in units:
-        if not unit.supplemented:
-            task_texts(tree, unit)
+    実装計画はまとめて 1 回で読み、1 度だけ解析する。本文が無いか、見出しが 2 つ以上あるタスクがあれば止める。
+    """
+    held = [u for u in units if not u.supplemented]
+    texts = tree.read_all(list(dict.fromkeys(u.plan for u in held)))
+    parsed = {path: task_bodies(text) if text is not None else {} for path, text in texts.items()}
+    out: dict[str, list[str]] = {}
+    for unit in held:
+        bodies = parsed[unit.plan]
+        lack = [f"Task {n}" for n in unit.tasks if n not in bodies]
+        if lack:
+            raise UnitsFileError(f"{unit.plan}: 単位 {unit.name} の {'、'.join(lack)} の本文が無い（コミット {tree.commit}）")
+        found = [(n, bodies[n]) for n in unit.tasks]
+        twice = [f"Task {n}" for n, body in found if body is None]
+        if twice:
+            raise UnitsFileError(f"{unit.plan}: 単位 {unit.name} の {'、'.join(twice)} の見出しが 2 つ以上ある（コミット {tree.commit}）")
+        out[unit_key(unit.issue, unit.name)] = [body for _, body in found if body is not None]
+    return out
 
 
 # --- 結果の項目 ---------------------------------------------------------------------------------
