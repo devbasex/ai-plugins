@@ -24,10 +24,10 @@ from ndf.adapters.github import GitHub, GitHubError
 from ndf.adapters.publish import Publisher, redacted_pattern
 from ndf.contracts import result
 from ndf.core import issue_docs
-from ndf.domains.docrebuild import drive, requirements_copy
+from ndf.domains.docrebuild import drive
 from ndf.domains.docrebuild import gate_decide as gd
 from ndf.domains.docrebuild.drive import Precondition, Stop
-from ndf.domains.records import mvv, pull_view, reading
+from ndf.domains.records import mvv, pull_view, reading, requirements_copy
 from ndf.domains.records.pull_view import PullView
 from ndf.domains.release import approval_decide
 
@@ -111,8 +111,9 @@ class Plan:
     fixable: list[str] = field(default_factory=list)
     title_file: Optional[Path] = None
     previous: Optional[Path] = None
-    # 要求仕様のコピーのうち直してよい見出しと、それを除いた起動の前の残り
-    guarded: dict[str, tuple[frozenset[str], str]] = field(default_factory=dict)
+    # 直してよいファイルに入れた要求仕様のコピーの起動の前の中身と、要った時に決めた直してよい見出し
+    guarded: dict[str, str] = field(default_factory=dict)
+    editable: dict[str, frozenset[str]] = field(default_factory=dict)
     # 変更要求を 1 回したので、PR の本文から写した行を直させない（そのときの写した本文）
     frozen_body: Optional[str] = None
 
@@ -401,16 +402,19 @@ def _plan_doc(run: Run, plan: Plan, rows: Sequence[Mapping[str, Any]], path: str
 
 
 def _allow_fix(run: Run, plan: Plan, path: str) -> None:
-    """文書を直してよいファイルに入れる。要求仕様のコピーは、コピーにだけあると確かめたセクションがあるときだけ入れ、
-    ほかの範囲は変えさせない（正は課題の本文。#4543）。"""
-    numbers = issue_docs.requirements_issues(path)
-    if numbers:
-        text = doc_file(run, path).read_bytes().decode("utf-8", "replace")
-        editable = requirements_copy.editable_sections(run.hub, min(numbers), text)
-        if not editable:
-            return
-        plan.guarded[path] = (editable, requirements_copy.protected(text, editable))
+    """文書を直してよいファイルに入れる。要求仕様のコピーは中身を控え、直してよい範囲は直すものが出てから決める
+    （指摘が無ければ課題を読まない。#4543）。"""
+    if issue_docs.requirements_issues(path):
+        plan.guarded[path] = doc_file(run, path).read_bytes().decode("utf-8", "replace")
     plan.fixable.append(path)
+
+
+def _editable(run: Run, plan: Plan, path: str) -> frozenset[str]:
+    """起動の前のコピーで直してよい見出し（`ndf document-rebuild editable` と同じ判定。1 回の実行で 1 回だけ読む）。"""
+    if path not in plan.editable:
+        number = min(issue_docs.requirements_issues(path))
+        plan.editable[path] = requirements_copy.editable_sections(run.hub, number, plan.guarded[path])
+    return plan.editable[path]
 
 
 def write_facts(run: Run) -> Path:
@@ -431,8 +435,8 @@ def write_facts(run: Run) -> Path:
 def _fixable_line(plan: Plan, path: str) -> str:
     if path not in plan.guarded:
         return f"- `{path}`"
-    names = "・".join(f"`## {title}`" for title in sorted(plan.guarded[path][0]))
-    return f"- `{path}` のうち {names} のセクションだけ"
+    command = f"{identity.entrypoint(identity.load().root)} document-rebuild editable --file {path}"
+    return f"- `{path}`（直す指摘があるときだけ、直す前に `{command}` を打ち、`metrics.editable` に挙がった `## ` の見出しのセクションの中だけを直す）"
 
 
 def gate_prompt(run: Run, plan: Plan, facts: Path) -> str:
@@ -453,9 +457,10 @@ def gate_prompt(run: Run, plan: Plan, facts: Path) -> str:
         fixable.append("- 文書は直さない（設計のレビューへ戻すのは 1 回まで。残った文として返す）")
     if any(issue_docs.requirements_issues(p) for p in plan.docs):
         fixable.append(
-            "- 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）は、上でセクションを挙げた所のほかは直さない"
-            "（正は課題の本文）。そこへの指摘は、直す案（課題の番号・見出し・直す前の文・直した後の文）を `quotes` の `why` に書き、"
-            "残った文として返す。直せる指摘が無ければ 2 回目を立てない"
+            "- 要求仕様のコピー（`issues/issue-<番号>-requirements.md`）は、`editable` が挙げたセクションの中のほかは直さない"
+            "（正は課題の本文）。見出しは足さない・消さない・動かさない・変えない。直さない範囲への指摘は、直す案（課題の番号・見出し・"
+            "直す前の文・直した後の文）を `quotes` の `why` に書き、残った文として返す。`quotes` の `quote` は文書の字のとおりに写し、"
+            "指摘がすべて直さない範囲にあるときだけ 2 回目を立てない"
         )
     values = {
         "skill": str(root / SKILL_SECTION),
@@ -552,15 +557,23 @@ def _as_whole(run: Run, plan: Plan, t: Read, rec: Mapping[str, Any]) -> Mapping[
     return {**rec, "checks": renamed}
 
 
+def _only_protected_remain(run: Run, plan: Plan, name: str, rec: Optional[Mapping[str, Any]]) -> bool:
+    """要求仕様のコピーの 1 回の不合格で、残った指摘がすべて直してよいセクションの外にあるか。"""
+    checks = rec.get("checks") if rec is not None else None
+    if name not in plan.guarded or not isinstance(checks, list) or len(checks) != 1 or not isinstance(checks[0], Mapping):
+        return False
+    quotes = [q["quote"] for q in gd.quotes_of(checks[0])]
+    return bool(quotes) and requirements_copy.all_outside(quotes, plan.guarded[name], _editable(run, plan, name))
+
+
 def _target_gap(run: Run, plan: Plan, t: Read, found: Mapping[str, Mapping[str, Any]]) -> Optional[dict[str, str]]:
     rec = found[t.name] if t.name in found else None
     # 直してよいファイルに入らない文書は、2 回目を立てられないので 1 回の不合格で終えてよい（#4599）。
     # 質問の文も同じ（#4621）。読ませるファイルは直してよいファイルに入らず、題の案は質問の文を変えず変更要求の材料になる
-    # 一部のセクションだけ直せるコピーも、残りの指摘は直せないので 1 回で終えてよい
     fixed_never = (
-        t.name in plan.guarded
-        or (t.name in plan.docs and t.name not in plan.fixable)
+        (t.name in plan.docs and t.name not in plan.fixable)
         or (t.name == reading.QUESTION and str(t.file) not in plan.fixable)
+        or _only_protected_remain(run, plan, t.name, rec)
     )
     why = "記録が無い" if rec is None else gd.record_gap(rec, one_fail_ends=fixed_never)
     if why is None and rec is not None and rec["checks"][-1]["hash"] != current_hash(run, plan, t.name):
@@ -576,12 +589,12 @@ def _outside_fixable(run: Run, plan: Plan, before: Mapping[str, Optional[str]]) 
 
 
 def _outside_sections(run: Run, plan: Plan) -> list[dict[str, str]]:
-    """worker が、要求仕様のコピーの直してよいセクションの外を変えていれば、その欠け。"""
+    """worker が、要求仕様のコピーの直してよいセクションの中のほかを変えていれば、その欠け。"""
     out = []
-    for path, (editable, kept) in plan.guarded.items():
+    for path, before in plan.guarded.items():
         now = doc_file(run, path).read_bytes().decode("utf-8", "replace")
-        if requirements_copy.protected(now, editable) != kept:
-            out.append({"kind": "outside", "name": path, "reason": "課題の本文から写した範囲を変えた"})
+        if now != before and not requirements_copy.unchanged_outside(before, now, _editable(run, plan, path)):
+            out.append({"kind": "outside", "name": path, "reason": "課題の本文から写した範囲か、見出しの並びを変えた"})
     return out
 
 

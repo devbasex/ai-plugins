@@ -137,8 +137,10 @@ class FakeHub:
     issue: str = "## 目的\n"
     past: list[str] = field(default_factory=list)
     history_reads: int = 0
+    body_reads: int = 0
 
     def issue_body(self, number: int) -> Any:
+        self.body_reads += 1
         return SimpleNamespace(body=self.issue)
 
     def repository(self, query: str, variables: Optional[dict] = None) -> dict[str, Any]:
@@ -807,26 +809,52 @@ def test_no_doc_fix_keeps_docs_out_of_the_fixable_files(tmp_path: Path) -> None:
     assert got["cause"]["kind"] == "incomplete" and "文書は直さない" in worker.prompts[0]
 
 
+COPY = "issues/issue-1-requirements.md"
+COPY_TEXT = "## 目的\n\n要求。\n\n## 実装計画\n\n計画。\n"
+
+
 @pytest.mark.parametrize(
-    ("past", "edit", "status", "history_reads"),
+    ("past", "edit", "status", "reads"),
     [
-        ([], ("計画。", "直した計画。"), "ok", 1),
-        ([], ("要求。", "直した要求。"), "incomplete", 1),
-        (["## 目的\n\n## 実装計画\n"], ("計画。", "直した計画。"), "incomplete", 1),
+        ([], None, "ok", (0, 0)),
+        ([], ("計画。", "直した計画。"), "ok", (1, 1)),
+        ([], ("要求。", "直した要求。"), "incomplete", (1, 1)),
+        ([], ("要求。", "## 実装計画\n\n要求。"), "incomplete", (1, 1)),
+        (["## 目的\n\n## 実装計画\n", "## 目的\n"], ("計画。", "直した計画。"), "incomplete", (1, 1)),
+        (["見出しを 1 つ消した"], ("計画。", "直した計画。"), "incomplete", (1, 1)),
     ],
 )
 def test_only_sections_added_to_the_requirements_copy_are_fixed(
-    tmp_path: Path, past: list[str], edit: tuple[str, str], status: str, history_reads: int
+    tmp_path: Path, past: list[str], edit: Optional[tuple[str, str]], status: str, reads: tuple[int, int]
 ) -> None:
-    """#4543: コピーにだけあるセクションは直せる。写した範囲（本文から消したセクションを含む）を直せば push せずに止める。"""
-    copy = "issues/issue-1-requirements.md"
-    text = "## 目的\n\n要求。\n\n## 実装計画\n\n計画。\n"
-    w = world(tmp_path, {copy: text})
+    """#4543: 直せるのはコピーにだけあるセクションの中だけ。写した範囲・同じ名前のセクションの新設・本文から消したセクション・
+    版の全文でない編集履歴は push せずに止める。直しが無ければ課題を読まない。"""
+    w = world(tmp_path, {COPY: COPY_TEXT})
     w.hub.past = past
-    worker = FakeWorker(edit=lambda state_dir: (w.cwd / copy).write_text(text.replace(*edit), encoding="utf-8"))
-    got = w.run(worker)
+
+    def fix(state_dir: Path) -> None:
+        if edit is not None:
+            (w.cwd / COPY).write_text(COPY_TEXT.replace(*edit), encoding="utf-8")
+
+    got = w.run(FakeWorker(edit=fix))
     assert (got["status"] if status == "ok" else got["cause"]["kind"]) == status, got
-    assert len(w.git.pushed) == (1 if status == "ok" else 0) and w.hub.history_reads == history_reads
+    assert len(w.git.pushed) == (1 if status == "ok" and edit else 0)
+    assert (w.hub.body_reads, w.hub.history_reads) == reads
+
+
+@pytest.mark.parametrize(("quote", "status"), [("要求。", "ok"), ("計画。", "incomplete")])
+def test_one_failed_check_of_the_copy_ends_only_outside_the_editable_sections(tmp_path: Path, quote: str, status: str) -> None:
+    """#4543: 残った指摘がすべて直せない範囲にあるときだけ、コピーは 1 回の不合格で終えてよい。"""
+
+    def once(state_dir: Path, targets: list[tuple[str, Path]]) -> list[dict[str, Any]]:
+        out = failing(COPY, quote)(state_dir, targets)
+        for rec in out:
+            if rec["name"] == COPY:
+                rec["checks"] = rec["checks"][:1]
+        return out
+
+    got = world(tmp_path, {COPY: COPY_TEXT}).run(FakeWorker(once))
+    assert (got["status"] if status == "ok" else got["cause"]["kind"]) == status, got
 
 
 # --- ndf records reading check の突き合わせ（Task 7、条件 6・7） ---------------------------------------------------

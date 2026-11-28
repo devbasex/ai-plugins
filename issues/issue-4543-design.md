@@ -145,7 +145,7 @@ graph TD
 - **選んだ案**: PR の変更に要求仕様のコピーがあるときは、修正担当への指示に次の扱いを足す（2026-11-28 に利用者が選んだ）。指示の文は、ほかの指摘の基準と同じ `contracts/data/review-criteria.json` に置く。手順の細部は詳細設計の「cross-review の指示」にある
   - コピーのうち課題の本文から写した範囲への指摘では、課題の本文、コピー、PR の本文を書き替えない。直す案を見送りの理由に書き、利用者の判断が要る指摘（`deferred`・`defer: needs_user`）として返す
   - 実装計画など、コピーにだけあるセクションへの指摘は、そのセクションを直接直す
-  - どちらの範囲かは、コピーの名前の番号の課題の現在の本文で見分ける。現在の本文に無い見出しへの指摘があるときだけ、編集履歴も読む。読むだけで、書かない。見分けられないときは、写した範囲として扱う
+  - どちらの範囲かは、AI ではなくプログラムが、課題の現在の本文と編集履歴から決める。編集履歴は、現在の本文に無い見出しがコピーにあるときだけ読む。読むだけで、書かない。見分けられないときは、写した範囲として扱う
   - 扱いの全文は、指摘がコピーに向くときだけ渡す。ほかの指摘だけのときは、写した範囲を書き替えないという短い制約を渡す
   - 承認の前の確認（`ndf document-rebuild gate`）は、コピーにだけあるセクションだけを直させる。写した範囲への指摘は、直す案を残った文として返す
   - 利用者が直すと決めた場合は、課題の本文を直し、`requirements-design` の手順 7 でコピーを作り直す。要求の変更が要る指摘を扱う今の手順書（`fix`）と同じ形である
@@ -314,6 +314,7 @@ graph TD
 | `plugins/ndf/src/ndf/core/worker.py` と `plugins/ndf/contracts/worker/kinds.json` | 決定 6 の表の「渡すとき」の 4 つの作業の定義にだけ、小見出しを渡す値を持たせる。ほかの作業へ渡す全文からは外す | 6 |
 | `plugins/ndf/src/ndf/core/issue_docs.py` と `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` に置く。`drive.py` の `REQUIREMENTS_FILE` は定義をやめ、`issue_docs.py` の定義を参照する | 6 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` | 変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す。変更に要求仕様のコピーがあれば、修正担当への指示に決定 7 の扱いを足す | 6・7 |
+| `plugins/ndf/src/ndf/domains/records/requirements_copy.py`（新設）と `plugins/ndf/src/ndf/domains/docrebuild/` の `gate.py`・`cli.py` | 要求仕様のコピーの直してよい範囲を 1 か所で判定し、承認の前の確認はその範囲だけを直させる。worker 向けに `ndf document-rebuild editable` を足す | 7 |
 | `plugins/ndf/contracts/data/review-criteria.json` と `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を JSON に置き、`criteria_decide.py` がそれを読む | 7 |
 | `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、変更履歴と、現状か案の片方だけを扱い概要欄・承認資料・質問を含まない文書では `distinction` を `false` にすると足す | 6 |
 | `plugins/ndf/skills/design/references/design-template.md` | 「承認する人が読む欄」のセクションに「要約の段落と解き方の全体像は書き分けの小見出しに従って書く」という指示を足し、その小見出しを指す。テンプレート本体のコードブロックにある「解き方の全体像」の説明は、「この設計では〜」と分かる形で書くように直す。`legacy-refactor` の「目的」「目指す姿」にも同じ指示を足す | 1 |
