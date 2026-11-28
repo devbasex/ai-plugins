@@ -91,7 +91,8 @@ WORKTREES = ".worktrees"
 _PARAM = re.compile(r"\{\{([a-z_][a-z0-9_]*)\}\}")
 # 受け入れ条件の確かめ（`ndf loop acceptance check`）の引数の旗。`--issue` は必ず含め、どちらも後に値を 1 つ持つ
 ACCEPTANCE_ISSUE = "--issue"
-ACCEPTANCE_FLAGS = (ACCEPTANCE_ISSUE, "--criteria")
+ACCEPTANCE_CRITERIA = "--criteria"
+ACCEPTANCE_FLAGS = (ACCEPTANCE_ISSUE, ACCEPTANCE_CRITERIA)
 # 補い（`launch_values`）が値を作る差し込み → 作るのに読む差し込み。ステップで使わなくても、補いの元としてテンプレートが受ける
 LAUNCH_SOURCES = {"acceptance": ("issue",)}
 # 設定（`workflow.launch.review`）が無いときの `{{review}}`: 設計のテンプレートは purpose design、ほかは code の
@@ -718,7 +719,7 @@ def _review_value(t: Template, values: Mapping[str, Value]) -> Optional[list[str
 def launch_values(t: Template, values: Mapping[str, Value], *, issues: Sequence[str] = ()) -> dict[str, Value]:
     """テンプレートが使う差し込みのうち値の無い `review`・`acceptance`・`issue` の補い（単発の経路と工程から組む経路で共有する）。
 
-    実装のテンプレートで `issue` が無く `acceptance` があれば、その `--issue` の最小の番号にする（代表の課題。最初の確かめの
+    実装のテンプレートで `issue` が無く `acceptance` があれば、その `--issue` の最小の番号にする（代表の課題。実装前の確かめの
     `guard` が読む。課題を束ねた単位は `acceptance` だけで組める）。
 
     `review` は `review_launch` で組み、`acceptance` は `issue` があれば `--issue <issue>`（課題の条件をすべて照らす）。
@@ -732,21 +733,20 @@ def launch_values(t: Template, values: Mapping[str, Value], *, issues: Sequence[
             out["review"] = review
     issue = values.get("issue")
     if t.name == "impl" and _omitted(t, values, "issue"):
-        smallest = _smallest_issue(values.get("acceptance"))
-        if smallest is not None:
-            out["issue"] = smallest
+        named_issues = acceptance_issues(values.get("acceptance"))
+        if named_issues:
+            out["issue"] = min(named_issues, key=int)
     if _omitted(t, values, "acceptance") and isinstance(issue, str) and issue:
         named = sorted({issue, *issues}, key=int) if len(issues) > 1 else [issue]
         out["acceptance"] = [arg for n in named for arg in (ACCEPTANCE_ISSUE, n)]
     return out
 
 
-def _smallest_issue(acceptance: Optional[Value]) -> Optional[str]:
-    """`acceptance` の並びの `--issue` の最小の番号。無ければ None（欠けは `check_acceptance` が断る）。"""
+def acceptance_issues(acceptance: Optional[Value]) -> list[str]:
+    """`acceptance` の並びの `--issue` の番号。"""
     if not isinstance(acceptance, list):
-        return None
-    named = [value for flag, value in zip(acceptance, acceptance[1:]) if flag == ACCEPTANCE_ISSUE and value.isdigit()]
-    return min(named, key=int) if named else None
+        return []
+    return [value for flag, value in zip(acceptance, acceptance[1:]) if flag == ACCEPTANCE_ISSUE and value.isdigit()]
 
 
 def check_acceptance(values: Mapping[str, Value]) -> None:

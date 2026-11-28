@@ -428,7 +428,7 @@ def test_unit_template_drops_the_done_check_and_gives_the_repository_to_ci():
     assert ids[:2] == ["guard", "work"] and "done-check" not in ids
     assert next(s for s in plan["steps"] if s["id"] == "ci")["run"][-2:] == ["--repo", "o/r"]
     # 元のテンプレートは変えない
-    assert [s["id"] for s in plan_of("implement")["steps"]][:2] == ["guard", "done-check"]
+    assert [s["id"] for s in plan_of("implement")["steps"]][:2] == ["done-check", "guard"]
     assert "--repo" not in next(s for s in plan_of("implement")["steps"] if s["id"] == "ci")["run"]
 
 

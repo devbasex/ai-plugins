@@ -820,7 +820,9 @@ def sprint_plan(v: View, s: stages.StageDef, root: Path) -> Optional[plan_runs.S
         omitted=omitted,
         new_definition="plan_omitted" in s.optional_inputs,
         work_root=work,
-        launched=None if record is None else functools.partial(units_guard.record_launch, work, record=record),
+        launched=None
+        if record is None
+        else functools.partial(units_guard.record_launch, work, approval=units_guard.Approval(record, design_record.approval_seq_of(v))),
     )
 
 

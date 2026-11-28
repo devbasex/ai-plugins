@@ -399,7 +399,7 @@ contracts/
 | `design-pr-review`（新設） | `repo`・`worktree`・`branch`・`remote`・`review` | `review`（`{{review}} --follow-base --findings {state_dir}/findings.json`。`{state_dir}` はプランの実行器が置き換える保存先で、差し込みではない。`incomplete` は `push` へ）・`push` |
 | `docs-ci`（新設） | `repo`・`reviewed_repo`・`reviewed_pr`・`reviewed_head`・`required`・`tests`・`ci_budget` | `ci`（`ndf ci watch --repo {{reviewed_repo}} --pr {{reviewed_pr}} --head {{reviewed_head}} --required={{required}} --test={{tests}} --budget {{ci_budget}}`）。CI の失敗は直さずに工程を止める |
 | `design-merge-approved`（新設） | `repo`・`approved_repo`・`approved_pr`・`approved_head`・`approved_base`・`merge_method`・`production_gate` | `merge`（`ndf ci merge --repo --pr --approved-head --approved-base --method --production-gate --verify-merged`）。`probe` を置かない |
-| `impl`（変更） | 変えない | 先頭に `guard`（`ndf progress units guard --issue {{issue}} --base {{base}} --branch {{branch}} --unit-file={{unit_file}}`）を足す |
+| `impl`（変更） | 変えない | `done-check` の次に `guard`（`ndf progress units guard --issue {{issue}} {{acceptance}} --base {{base}} --branch {{branch}} --unit-file={{unit_file}}`）を足す。`done-check` を先にするのは、マージ済みのプランの打ち直しを、終わったスプリントを探さない `guard` で止めないためである |
 | `implementation-plan`（変更） | 変えない | 変えない（指示は `kinds.json` が持つ） |
 | `implementation-plan-convert`（新設） | `implementation-plan` の差し込みと `convert` | `work`（`implementation-plan` の作業）だけ。push のステップを持たない |
 
@@ -930,11 +930,14 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `record_launch` | `units_guard.py` | 新設 | `(work_root, branch, base, record, issue, unit_file: Optional[Path]) -> None` | `units/guard/<ブランチの sha256 の先頭 16 字>.json` に `{"branch", "base", "record_head", "issue", "unit_sha256"}` を書く。`base` は単位の PR の宛先で、スプリントブランチである |
-| `guard` | 同上 | 新設 | `(st, repo, issue, base, branch, unit_file) -> list[str]` | 設計書の決定 12 の表の判定。空なら通す |
-| `read_machines` | `store.py` | 新設 | `(conn, repo) -> list[dict]` | そのリポジトリのスプリントの一覧 |
+| `record_launch` | `units_guard.py` | 新設 | `(work_root, branch, base, approval: Approval, issues, unit_file: Optional[Path]) -> None` | `units/guard/<ブランチの sha256 の先頭 16 字>.json` に `{"branch", "base", "record_head", "approval_seq", "issues", "unit_sha256"}` を書く。`approval_seq` は承認の回答の事象の番号、`issues` は代表の課題と `acceptance` の課題である。`base` は単位の PR の宛先で、スプリントブランチである |
+| `guard` | 同上 | 新設 | `(st, repo, issues, base, branch, instructions: Instructions) -> list[str]` | 設計書の決定 12 の表の判定。空なら通す |
+| `read_sprint_definitions` | `store.py` | 新設 | `(conn, repo) -> dict[str, tuple[int, dict]]` | そのリポジトリのスプリントと最新の定義。SQL は 1 回 |
+| `read_events_of_kind` | 同上 | 新設 | `(conn, machine_ids, kind) -> dict[str, list[Event]]` | 指定した種類の事象。SQL は 1 回 |
 
-- 対象のスプリントは、終わっていないもののうち、文脈の `issues` に `--issue` があるか、文脈の `branch` が `--base` のものである
+- 対象のスプリントは、終わっていないもののうち、文脈の `issues` に `--issue` のどれかがあるか、文脈の `branch` が `--base` のものである。全事象は当たるスプリントの分だけ読む。出力の事象（`branch` を書く）は、`--base` がスプリントブランチのときだけ読む
+- 承認が要るスプリントでは、環境変数 `NDF_UNIT_FILE`（cross-review が読む指示）の中身が `--unit-file` の中身と違えば止める
+- 承認は、承認した HEAD に加えて承認の回答の事象の番号で照合する。同じ HEAD の承認し直しの後は、起動し直すまで通さない
 - 対象のスプリントを見つけた後の照合でも、`--base` を記録の `base` と比べる。課題・作業ブランチ・指示が起動の記録と同じでも、宛先が違うプランは通さない。承認した単位を、承認していない宛先へマージさせないためである
 - 「宛先がスプリントブランチ」は、`--base` が `model.branch_prefix("sprint")`（`sprint/`）で始まることである
 - 指示のファイル（`--unit-file` に渡すファイル。#4369 の `unit_file` で、`unit_run` が担当タスクの本文を足す `unit.md`。JSON の単位のファイルとは別のファイル）は、中身の sha256 を比べる。指示の無い単位は空文字である

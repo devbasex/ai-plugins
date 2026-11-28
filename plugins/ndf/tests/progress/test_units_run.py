@@ -248,11 +248,11 @@ def test_units_run_in_order_on_their_own_branches_and_each_is_cut_after_the_prev
 
 
 def test_each_unit_plan_is_recorded_as_launched_before_it_runs(world):
-    """#3702 の決定 12: 実装のプランの最初の確かめが照らす起動の記録を、単位を起動する前に残す。"""
+    """#3702 の決定 12: 実装のプランの確かめが照らす起動の記録を、単位を起動する前に残す。"""
     launched: list[tuple] = []
 
-    def record(branch, base, *, issue, unit_file):
-        launched.append((branch, base, issue, None if unit_file is None else str(unit_file), len(world.impl_runs())))
+    def record(branch, base, *, issues, unit_file):
+        launched.append((branch, base, issues[0], None if unit_file is None else str(unit_file), len(world.impl_runs())))
 
     plain = world.stage_run
 

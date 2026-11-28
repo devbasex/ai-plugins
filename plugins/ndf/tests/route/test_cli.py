@@ -200,7 +200,7 @@ def test_render_does_not_write_through_an_existing_symlink(tmp_path):
 
 
 def test_the_implement_issue_is_filled_from_the_acceptance_for_the_guard():
-    """課題を束ねた単位は `issue` を渡さなくても組める。最初の確かめ（guard）が読む `issue` は acceptance の最小の番号にする。"""
+    """課題を束ねた単位は `issue` を渡さなくても組める。実装の前の確かめ（guard）が読む `issue` は acceptance の最小の番号にする。"""
     t = route.choose("implement")
     assert "issue" in route.needed(t)
     assert route.launch_values(t, {"acceptance": ["--issue", "4", "--issue", "3"]})["issue"] == "3"

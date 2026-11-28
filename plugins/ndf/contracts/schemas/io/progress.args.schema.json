@@ -380,8 +380,11 @@
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
         "--issue": {
-          "type": "integer",
-          "description": "プランの課題の番号"
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "プランの課題の番号（繰り返せる）"
         },
         "--base": {
           "type": "string",
@@ -393,7 +396,18 @@
         },
         "--unit-file": {
           "type": "string",
-          "description": "担当への指示を書いたファイル。指示の無いプランは空"
+          "description": "担当への指示を書いたファイルのパス。指示がない場合は `--unit-file=` を指定する"
+        },
+        "--criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "受け付けるが使わない（受け入れ条件の確かめの引数）"
+        },
+        "--no-criteria": {
+          "type": "boolean",
+          "description": "受け付けるが使わない（受け入れ条件の確かめの引数）"
         },
         "--cwd": {
           "type": "string",

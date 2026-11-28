@@ -318,7 +318,7 @@ def test_impl_with_an_acceptance_of_several_issues_takes_the_representative_issu
     work = tmp_path / "w"
     work.mkdir()
     got = invoke.template_values(route.choose("implement"), run, work, repo, project=PROJECT, local_tests=True)
-    # 最初の確かめ（guard）が読む issue は代表の課題になる（#3702）
+    # 実装の前の確かめ（guard）が読む issue は代表の課題になる（#3702）
     assert got["issue"] == "3" and got["title"] == "#3 の題"
 
 

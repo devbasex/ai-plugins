@@ -145,7 +145,7 @@ I5 の実行対象は、次を指す。
 | コマンド（`ndf plan units render`・`check`。`core/plan/cli.py`） | 読み書きと判定を呼び、結果 JSON を返す |
 | 単位を流す処理（`progress/units_invoke.py`。#4369 が作る） | 単位の並びを表からでなく単位のファイルから得る。承認した中身と比べ、先に要る単位をすべてマージした単位を並列に流す。この変更より前のスプリントでは、単位のファイルへの変換を呼ぶ（決定 10）。マージキューの待ちは、状態を読んで後の単位を始める（決定 9） |
 | 実装を流すコマンド（`ndf progress units run`・`sync`。`progress/units_cli.py` を新設し、`progress/command.py` に登録する） | supervisor の入口。`run` は工程「実装」と同じ関数を呼び、`sync` は承認したファイルを取り込む。承認の要否・承認の記録・実行対象は、スプリントの保存した状態から読む |
-| 実装のプランの最初の確かめ（`contracts/templates/impl.json` のステップ。`ndf progress units guard`） | 分け方の承認が要るスプリントでは、単位を流す処理が起動した単位だけを通す。どの入口が組んだプランにも当たる |
+| 実装のプランの実装前の確かめ（`contracts/templates/impl.json` のステップ。`ndf progress units guard`） | 分け方の承認が要るスプリントでは、単位を流す処理が起動した単位だけを通す。どの入口が組んだプランにも当たる |
 | #4369 の、表を読むコード（`core/plan/review_units_decide.py`） | このコードを呼ぶのは、この変更より前に承認した表と変換した結果を照合する処理だけにする（決定 10）。単位を流す処理は表を読まない |
 | 工程の定義（`stages/design.json`・`document-review.json`） | `standard`・`legacy-refactor` のマージ・MVV 判定・承認の前の確認・ゲートを、設計からドキュメントレビューへ移す |
 | 工程の出力と判定の入力（`progress/definition.py`・`domains/records/{cli,mvv_gate}.py`） | MVV 判定のステップを流さないモードでは、その工程の出力から `mvv_gate` を外す。設計の MVV 判定の入力は、工程「設計」の形でも工程「ドキュメントレビュー」の形でも受ける。工程「ドキュメントレビュー」の判定は、レビューしたリポジトリの PR を対象にする |
@@ -238,7 +238,7 @@ flowchart TB
 | `ndf plan units render --issue N [--issue N]... [--omitted N]...` | `--issue` はスプリントの全課題、`--omitted` は計画の担当が実装計画を省くと決めた課題（工程の出力 `plan_omitted` と同じ値）。計画の担当が打つのはこのコマンドだけである | 全課題の単位のファイルを 1 つのグラフにして実行順を導き、読んだ単位のファイルと組の実装計画すべての「レビューの単位」と「並列と直列」の表を書き直す。省いた課題には何も書かない。続けて同じプロセスで、同じ入力の `check --docs` をして、その結果を返す |
 | `ndf progress units run` | 実装を始める。スプリントは、ほかの `ndf progress` のコマンドと同じ指定で選ぶ。工程「実装」と同じ処理で、承認の照合・確かめ・単位の実行・打ち直しをする。始められるのは、`ndf progress next` が次に実装を流す状態のときだけで、工程の記録も `next` と同じに残す（下の「実装を始められる時点」）。承認した HEAD や、承認が要らないという指定は引数で受けない | `ndf progress next` で工程「実装」を流したときと同じ（成功・失敗・回答の待ち・作業が動いている）。開始の条件か承認の照合に落ちれば `stopped` |
 | `ndf progress units sync` | 下の「取り込みの前の確かめ」の 3 つを確かめてから、ゲートの記録の HEAD の単位のファイル・実装計画・設計文書を、スプリントブランチへ取り込んで push する。工程「ドキュメントレビュー」の `design-sync` も同じ関数を通る | どれかを満たさなければ、取り込みも push もせずに `stopped`。スプリントブランチ側の変更と競合するときと、取り込んだ内容が記録の HEAD と違うときは、push せずに `stopped`（下の「取り込みの競合」） |
-| `ndf progress units guard --issue <N> --base <ブランチ> --branch <ブランチ> --unit-file <ファイル>` | 実装のプランが最初に打つ（決定 12）。`--unit-file` は担当の worker への指示を書いたファイル（#4369 の `unit_file`。JSON の単位のファイルとは別）で、指示の無い単位では空にする。人は打たない | 通せないプランなら `stopped` |
+| `ndf progress units guard --issue <N>... --base <ブランチ> --branch <ブランチ> --unit-file <ファイル>`（受け入れ条件の確かめの引数の並びも足せる） | 実装のプランが実装の前に打つ（決定 12）。`--unit-file` は担当の worker への指示を書いたファイル（#4369 の `unit_file`。JSON の単位のファイルとは別）で、指示の無い単位では空にする。人は打たない | 通せないプランなら `stopped` |
 
 #### 実装を始められる時点
 
@@ -741,7 +741,7 @@ flowchart TB
   - `agent-layers.md` の、AI が表を読んで単位ごとにプランを組む手順は、このコマンドを打つ手順に置き換える
   - `doc_prs: base` では、どちらの経路も先に `ndf progress units sync` で取り込む
   - 実行計画（スプリントの作業の順と進み具合の予定表）の実装の行は、`check` の `items` から置く
-- 手で組んだプランは、実装のテンプレート（`impl.json`）の最初のステップ `ndf progress units guard` が確かめる。`ndf route render implement` など、どの入口で組んだプランもこのテンプレートを使う
+- 手で組んだプランは、実装のテンプレート（`impl.json`）のステップ `ndf progress units guard`（マージ済みの確かめの次で、実装の前）が確かめる。`ndf route render implement` など、どの入口で組んだプランもこのテンプレートを使う
   - 単位を流す処理は、単位を起動する前に、次をスプリントの保存した状態に書く。打ち直しでは指示のファイルを書き直すので、起動のたびに書き直す
     - 単位のブランチ
     - 単位の PR の宛先（スプリントブランチ）
