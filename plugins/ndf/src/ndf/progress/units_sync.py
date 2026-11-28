@@ -75,12 +75,12 @@ def destination_errors(
     context: Mapping[str, Any],
     machine_repo: str,
     url: Optional[str] = None,
-    settings_at: Optional[str] = None,
+    project: Optional[Mapping[str, Any]] = None,
 ) -> tuple[Optional[str], list[str]]:
     """確かめた URL と、送り先のリポジトリとブランチがゲートの記録とスプリントの状態に合わない点。合わない点があれば URL は None。
 
     `git` はスプリントの作業場所、`machine_repo` はステートマシンの `repo`（作成の時点のリモートの URL）。
-    リリース先はコミット `settings_at` の設定で照らす。None なら作業場所の設定を読む。
+    リリース先は設定 `project`（読んだ `.ndf/project.json`）で照らす。None なら作業場所の設定を読む。
     """
     repo = str(record["review"]["repo"])
     checked, errors = push_url(git, repo, url)
@@ -97,7 +97,7 @@ def destination_errors(
         if now != branch:
             errors.append(f"送り先のブランチが違う（承認 {branch}、{label} {now or '無し'}）")
     try:
-        released = released_branches(_strategy(git, settings_at).section)
+        released = released_branches(_strategy(git, project).section)
     except contracts.ContractError as exc:
         errors.append(f"ブランチ戦略の設定を読めない: {exc}")
     else:
@@ -106,11 +106,11 @@ def destination_errors(
     return (None if errors else checked), errors
 
 
-def _strategy(git: Git, commit: Optional[str]) -> branch_strategy.Strategy:
-    root = Path(git.run("rev-parse", "--show-toplevel").strip())
-    if commit is None:
-        return branch_strategy.of_project(command.ndf_settings_in(root, command.PROJECT_FILE))
-    return branch_strategy.of_project(units_files.project_of(units_files.Tree(root, commit)))
+def _strategy(git: Git, project: Optional[Mapping[str, Any]] = None) -> branch_strategy.Strategy:
+    if project is None:
+        root = Path(git.run("rev-parse", "--show-toplevel").strip())
+        project = command.ndf_settings_in(root, command.PROJECT_FILE)
+    return branch_strategy.of_project(project)
 
 
 def outgoing_errors(git: Git, tip: str, head: str, allowed: Sequence[str]) -> list[str]:
@@ -250,7 +250,7 @@ def _check_merged(s: _Sync, hub: Hub) -> None:
     if not pull.merged:
         raise _Stop("precondition", f"PR #{number} がマージされていない")
     try:
-        strategy = _strategy(s.git, None)
+        strategy = _strategy(s.git)
         # 設計 PR の head がスプリントブランチ自身なら、スプリントの PR と同じマージ先である
         target = strategy.pr_target("sprint") if pull.head_ref == s.branch else strategy.pr_target("doc", s.branch)
     except contracts.ContractError as exc:

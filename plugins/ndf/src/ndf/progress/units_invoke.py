@@ -152,20 +152,25 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
         raise UnitsStopped("precondition", detail)
     project = ndf_settings_in(root, PROJECT_FILE)
     branch = _checked_branch(run, branch, project)
+    # 手元か取得先に単位の欄があれば変換を通す。取得先に単位のファイルだけが残っていても、照合の前に実装へ進めない
+    converting = sprint.convert is not None and not sprint.new_definition and (at_head.has_headings() or at_tip.has_headings())
+    if converting and ports is None:
+        # 起動の前は経路の判定まで。取得の URL の HEAD は送り先と違いうるので、祖先関係とリリース先は実行の時に送り先で照らす
+        return Lineup((), {})
     # 変換するスプリントは、再承認の回答と却下の前に手元を動かさない。実装へ進むと決めた変換が進める
-    move = not (sprint.convert is not None and not sprint.new_definition and at_tip.has_headings())
-    behind = tip is not None and _catch_up(g, remote, branch, head, tip, move)
+    behind = tip is not None and _catch_up(g, remote, branch, head, tip, not converting)
     seen = at_tip if behind else at_head
     if not (sprint.required or seen.has_units()):
         return _plain_route(work_dir)
-    converting = sprint.convert is not None and not sprint.new_definition and seen.has_headings()
     # 変換は push するので、手元と取得先の HEAD が同じでも、取得先のコミットの設定でリリース先を確かめる
     pushing = converting and tip is not None
+    # コミットの設定は 1 回だけ読み、ここと変換の push の直前の確かめで使い回す
+    project_at = functools.cache(lambda commit: units_files.project_of(units_files.Tree(root, commit)))
     if behind or pushing:
-        project, branch = _checked_ahead(run, root, branch, str(tip) if pushing else None)
+        project, branch = _checked_ahead(run, root, branch, functools.partial(project_at, str(tip)) if pushing else None)
     count = _counted_once(g, remote)
-    request = ConvertRequest(run, root, branch, tuple(issues), sprint.omitted, count, checked_to)
-    asked, seen = _converted(g, sprint, seen, request, ports)
+    request = ConvertRequest(run, root, branch, tuple(issues), sprint.omitted, count, checked_to, project_at)
+    asked, seen = _converted(g, sprint if converting else None, seen, request, ports)
     if asked is not None:
         return asked
     found = _start_lineup(g, remote, sprint, request, seen, converting)
@@ -197,14 +202,13 @@ def _counted_once(g: Git, remote: str) -> Callable[[Sequence[int]], dict[int, in
 
 
 def _converted(
-    g: Git, sprint: SprintPlan, seen: units_flow.Seen, request: ConvertRequest, ports: Optional[Ports]
-) -> tuple[Union[Lineup, StageResult, None], units_flow.Seen]:
-    """古い定義のスプリントで実装計画に単位の欄があれば変換を通し（#3702 の決定 10）、（ここで返して終える値, 変換の後の読み取り）を返す。
-    実装へ進むなら前者は None。担当を起動できない呼び出し（`ports` が無い）は並びを持たない `Lineup` を返し、単位を流すときに変換する。"""
-    if sprint.convert is None or sprint.new_definition or not seen.has_headings():
+    g: Git, sprint: Optional[SprintPlan], seen: units_flow.Seen, request: ConvertRequest, ports: Optional[Ports]
+) -> tuple[Optional[StageResult], units_flow.Seen]:
+    """変換を通るスプリント（`sprint`。通らなければ None）の変換を行い（#3702 の決定 10）、（ここで返して終える値, 変換の後の読み取り）を返す。
+    実装へ進むなら前者は None。"""
+    if sprint is None:
         return None, seen
-    if ports is None:
-        return Lineup((), {}), seen
+    assert sprint.convert is not None and ports is not None, "起動の前の確かめは、変換の前に返る"
     asked = sprint.convert(request, ports, ports.answer)
     # 変換がコミットを足すので読み直す
     return asked, seen if asked is not None else units_flow.seen_at(g, "HEAD", request.issues)
@@ -333,12 +337,14 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
     return registered
 
 
-def _checked_ahead(run: StageRun, root: Path, branch: str, commit: Optional[str]) -> tuple[Mapping[str, Any], str]:
+def _checked_ahead(
+    run: StageRun, root: Path, branch: str, read: Optional[Callable[[], Mapping[str, Any]]]
+) -> tuple[Mapping[str, Any], str]:
     """取得先の設定でリリース先（I4）を確かめ直し、（設定, ブランチ）を返す。手元が遅れていたときと、変換が push する前に呼ぶ。
 
-    設定は `commit` から読む（変換の経路）。None なら進めた後の作業場所から読む。"""
+    設定は `read`（取得先のコミットの設定。変換の経路）で読む。None なら進めた後の作業場所から読む。"""
     try:
-        project = ndf_settings_in(root, PROJECT_FILE) if commit is None else units_files.project_of(units_files.Tree(root, commit))
+        project = ndf_settings_in(root, PROJECT_FILE) if read is None else read()
     except units_files.UnitsFileError as exc:
         raise UnitsStopped("invalid", str(exc)) from None
     return project, _checked_branch(run, branch, project)

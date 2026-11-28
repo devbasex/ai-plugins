@@ -545,7 +545,9 @@ def _push_conversion(r: _Run, url: str, tip: str, send: str, report: units_files
     """承認した文書の反映と同じ送り先と送るコミットの確かめを通してから push する。強制はしない。"""
     record = _converted_record(r, send, report)
     # リリース先は、手元の作業場所でなく、確かめた送り先の HEAD の設定で照らす（未コミットの設定が覆い隠さないように）
-    _, errors = units_sync.destination_errors(r.git, record, r.job.context, r.job.machine_repo(), url, tip)
+    read = r.request.project_at
+    project = units_files.project_of(units_files.Tree(r.root, tip)) if read is None else read(tip)
+    _, errors = units_sync.destination_errors(r.git, record, r.job.context, r.job.machine_repo(), url, project)
     names = units_files.Tree(r.root, send).names()
     allowed = [*units_files.paths_naming(names, r.issues), *(p.path for p in _plans(r, send))]
     errors += units_sync.outgoing_errors(r.git, tip, send, allowed)

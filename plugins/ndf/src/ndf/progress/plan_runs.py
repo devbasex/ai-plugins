@@ -31,6 +31,8 @@ class ConvertRequest(NamedTuple):
     count: Callable[[Sequence[int]], Mapping[int, int]]
     # 開始前の確かめが確かめて読んだ（送り先の URL, スプリントブランチの HEAD。ブランチが無ければ None）。無ければ変換が読む
     destination: Optional[tuple[str, Optional[str]]] = None
+    # コミットの `.ndf/project.json` を読む。開始前の確かめが読んだコミットは読み直さない。無ければ変換が読む
+    project_at: Optional[Callable[[str], Mapping[str, Any]]] = None
 
 
 @dataclass(frozen=True)

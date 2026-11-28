@@ -611,6 +611,9 @@ def changes(before: Optional[ud.UnitFile], after: Optional[ud.UnitFile]) -> list
     found: list[str] = []
     for kind, attr, key, labels in (("タスク", "tasks", "id", _TASK_LABELS), ("単位", "units", "name", _UNIT_LABELS)):
         was, now = ({getattr(x, key): x for x in (getattr(f, attr) if f else ())} for f in (before, after))
+        # 宣言の順は単位のマージの順に効くので、両方にあるものの順が変われば旧い順と新しい順を出す
+        if [n for n in was if n in now] != [n for n in now if n in was]:
+            found.append(f"{kind}の並び順: {_shown(tuple(was))} → {_shown(tuple(now))}")
         for name in dict.fromkeys([*was, *now]):
             if name in was and name in now:
                 found += [

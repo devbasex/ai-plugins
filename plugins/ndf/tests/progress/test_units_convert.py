@@ -844,6 +844,8 @@ def test_the_changes_of_the_definitions_name_the_target_files_and_dependencies()
     assert any("T2" in line and "src/b.py" in line and "src/c.py" in line for line in got), got
     assert any("書き手" in line and "読み手" in line for line in got), got
     assert units_files.changes(old, old) == []
+    [line] = units_files.changes(old, old._replace(units=old.units[::-1]))
+    assert line.index("読み手") < line.index("書き手") < line.rindex("読み手"), line
 
 
 @pytest.mark.parametrize("head", ["local", "tip"], ids=["手元が遅れている", "手元と取得先が同じ"])
@@ -865,3 +867,32 @@ def test_a_release_branch_declared_at_the_tip_stops_before_the_conversion(tmp_pa
 
     with pytest.raises(UnitsStopped, match="リリース先"):
         units_invoke.prepare(stage_run, tmp_path / "w", tmp_path, units_invoke.Ports(None, None))
+
+
+@pytest.mark.parametrize("at_run", [False, True], ids=["起動の前は経路の判定まで", "実行の時は単位のファイルだけの送り先も変換へ"])
+def test_units_seen_locally_go_to_the_conversion_even_if_the_tip_keeps_only_unit_files(tmp_path, monkeypatch, at_run):
+    headed = units_flow.Seen([PlanDoc(PLAN, frozenset({3}), OLD_PLAN)], False)
+    only_files = units_flow.Seen([], True)
+    # 起動の前は、手元と分かれた HEAD（取得の URL の先端）を渡しても止めない
+    git = SimpleNamespace(
+        run=lambda *args: str(tmp_path),
+        remote=lambda: "origin",
+        is_ancestor=lambda a, b: at_run and a == "local",
+        merge_ff=lambda commit: pytest.fail("進めない"),
+    )
+    monkeypatch.setattr(units_invoke, "Git", lambda path: git)
+    monkeypatch.setattr(units_flow, "branch_here", lambda g: SPRINT)
+    monkeypatch.setattr(units_invoke, "_uncommitted", lambda g, issues: [])
+    monkeypatch.setattr(units_flow, "read_start", lambda *args: units_flow.Start("local", "tip", headed, only_files, None))
+    monkeypatch.setattr(units_flow, "worktree_plans", lambda root, paths: [])
+    monkeypatch.setattr(units_invoke, "ndf_settings_in", lambda root, name: {})
+    monkeypatch.setattr(units_files, "project_of", lambda tree: {})
+    monkeypatch.setattr(units_invoke.branch_strategy, "of_project", lambda project: SimpleNamespace(section=project))
+    monkeypatch.setattr(units_invoke, "released_branches", lambda section: set())
+    asked = StageResult({"status": "gate"}, {})
+    sprint = plan_runs.SprintPlan(convert=lambda *args: asked)
+    stage_run = StageRun("plan", "impl", {"issues": [3], "branch": SPRINT}, (), "s", "i", sprint=sprint)
+
+    got = units_invoke.prepare(stage_run, tmp_path / "w", tmp_path, units_invoke.Ports(None, None) if at_run else None)
+
+    assert got is asked if at_run else got == units_invoke.Lineup((), {})
