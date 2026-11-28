@@ -1,6 +1,6 @@
 # PR の単位: 分け方・順序・並列を設計承認ゲートで見て、大きすぎる単位を機械で止める（#3702）
 
-これまで、大きな課題の分け方・順序・並列は設計の承認の後に決まり、大きさを確かめる仕組みも無かった。この設計では、実装計画を詳細設計の直後に書いて設計 PR に載せ、単位（レビューの単位。1 本の PR として実装・レビュー・マージするタスクのまとまり）を機械が読むファイルでも出し、実行順をそこから決めて、上限を超える単位があれば、分け方の案を示して止める。
+これまで、大きな課題の分け方・順序・並列は設計の承認の後に決まり、大きさを確かめる仕組みも無かった。この設計では、実装計画を詳細設計の直後に書いて設計 PR に載せ、単位（レビューの単位。1 本の PR として実装・レビュー・マージするタスクのまとまり）を機械が読むファイルでも出し、実行順をそこから決める。見込みの行数が目安の 400 行を超える単位には警告し、上限の 1,000 行を超える単位があれば止める。どちらも分け方の案を示す。
 単位を順に流す部分は [#4369 の設計](https://github.com/devbasex/ai-plugins/pull/4546) を前提にし、この設計は、単位の並列、承認した中身の確かめ、大きさの確かめを足す。採らなかった案は決定ごとに、調査は末尾にある。
 
 ## 今の姿
@@ -30,7 +30,7 @@ flowchart LR
 - **工程の終わりの確かめは、定義の `outputs` のキーがすべてあることを求める。** 工程「設計」の `outputs` は `design_pr` と `mvv_gate`（判定の結果）である
 - **`ndf progress next` の経路では、設計 PR の head はスプリントブランチで、宛先はスプリントの PR の宛先（ベースブランチ）である。** 文書の PR の宛先を定める宣言 `doc_prs`（`.ndf/project.json` の `branch_strategy.sprint.doc_prs`。値は `base` と `sprint`）は読まない。
   - `doc_prs` を読むのは `Strategy.pr_target("doc")`（`core/branch_strategy.py`）で、`ndf progress next` の外（supervisor か人）で、スプリントブランチとは別のブランチから設計 PR を出すときの宛先である。2026-11-26 に `git grep pr_target -- plugins/ndf/src` を引くと、`"doc"` を渡す呼び手はコードに無かった
-  - リリース方式の表（`contracts/domains/branch-flows.json`）では、既定の `merge_base_branch` が `base`、`trunk` と `release_branch` が `sprint` である
+  - `doc_prs` の値は、本番へのリリース方式（設定の `release_strategy`）ごとに決まる（表は `contracts/domains/branch-flows.json`）。方式が `merge_base_branch`（指定が無いときの方式）なら `base`、`trunk` と `release_branch` なら `sprint` である
   - `base` のとき、設計 PR はベースブランチへマージされるので、スプリントブランチは承認した文書をまだ持たない。そのため、この経路でだけ、後の「取り込みの前の確かめ」の `sync` が取り込むものを持つ。`ndf progress next` の経路と `doc_prs: sprint` の経路では、スプリントブランチがすでに承認した文書を持ち、`sync` は確かめだけで終わる
 - **工程「計画」は実装のフェーズにある**（`stages/plan.json` の `phase: implement`）
 - **ステップはモードごとに流す・流さないを指定できる**（`metadata.ndf.modes`）
@@ -149,11 +149,11 @@ I5 の実行対象は、次を指す。
 | #4369 の、表を読むコード（`core/plan/review_units_decide.py`） | このコードを呼ぶのは、この変更より前に承認した表と変換した結果を照合する処理だけにする（決定 10）。単位を流す処理は表を読まない |
 | 工程の定義（`stages/design.json`・`document-review.json`） | `standard`・`legacy-refactor` のマージ・MVV 判定・承認の前の確認・ゲートを、設計からドキュメントレビューへ移す |
 | 工程の出力と判定の入力（`progress/definition.py`・`domains/records/{cli,mvv_gate}.py`） | MVV 判定のステップを流さないモードでは、その工程の出力から `mvv_gate` を外す。設計の MVV 判定の入力は、工程「設計」の形でも工程「ドキュメントレビュー」の形でも受ける。工程「ドキュメントレビュー」の判定は、レビューしたリポジトリの PR を対象にする |
-| 設計 PR をレビューするテンプレート（`contracts/templates/design-pr-review.json`。新設） | cross-review を流し、レビューしたリポジトリ・PR・HEAD・マージ先を書き出させる |
+| 設計 PR をレビューするテンプレート（`contracts/templates/design-pr-review.json`。新設） | cross-review を流し、レビューしたリポジトリ・PR・HEAD・マージ先を結果の出力に返させる |
 | 工程「計画」の定義（`stages/plan-design.json`。新設） | `phase: design` の「計画」。`standard`・`legacy-refactor` の工程表が、詳細設計と再構成の間で呼ぶ |
 | CI を待つテンプレート（`contracts/templates/docs-ci.json`。新設） | 承認の前に、設計 PR の最後の HEAD の CI を待つ |
 | 承認した設計 PR をマージするテンプレート（`contracts/templates/design-merge-approved.json`。新設） | ゲートの記録の対象だけをマージする。マージ済みの場合も同じ対象かを確かめる |
-| 承認の記録（`progress/design_record.py`。新設） | ゲートの記録を組み、今の PR と比べ、承認の回答に結ばれた記録を読む。承認の要否も返す |
+| 承認の記録（`progress/design_record.py`。新設） | ステップのイベントの値からゲートの記録を組み、今の PR と比べ、承認の回答に結ばれた記録を読む。承認の要否も返す |
 | 承認ゲートとのつなぎ（`progress/gate/{entry,answering}.py`・`progress/{run,invoke}.py`） | 承認資料を出す時点と回答を確定する時点で記録と比べ、違えばステップを未了に戻す。承認の回答に記録を添える。MVV 判定が人の承認を省いて作った回答にも添える |
 | 承認した文書の取り込み（`progress/units_sync.py`。新設。ステップ `design-sync` と `ndf progress units sync`） | 送り先のリポジトリとブランチがゲートの記録と一致することを確かめ、スプリントブランチがまだ持たない承認した文書を取り込んで push する |
 | 送り先の URL の読み取り（`adapters/git.py`） | push の URL を読み、URL の全体を解析してリポジトリと認証情報の有無を返す。git がもう一度書き換える URL かも返す |
@@ -238,7 +238,7 @@ flowchart TB
 | `ndf plan units render --issue N [--issue N]... [--omitted N]...` | `--issue` はスプリントの全課題、`--omitted` は計画の担当が実装計画を省くと決めた課題（工程の出力 `plan_omitted` と同じ値）。計画の担当が打つのはこのコマンドだけである | 全課題の単位のファイルを 1 つのグラフにして実行順を導き、読んだ単位のファイルと組の実装計画すべての「レビューの単位」と「並列と直列」の表を書き直す。省いた課題には何も書かない。続けて同じプロセスで、同じ入力の `check --docs` をして、その結果を返す |
 | `ndf progress units run` | 実装を始める。スプリントは、ほかの `ndf progress` のコマンドと同じ指定で選ぶ。工程「実装」と同じ処理で、承認の照合・確かめ・単位の実行・打ち直しをする。始められるのは、`ndf progress next` が次に実装を流す状態のときだけで、工程の記録も `next` と同じに残す（下の「実装を始められる時点」）。承認した HEAD や、承認が要らないという指定は引数で受けない | `ndf progress next` で工程「実装」を流したときと同じ（成功・失敗・回答の待ち・作業が動いている）。開始の条件か承認の照合に落ちれば `stopped` |
 | `ndf progress units sync` | 下の「取り込みの前の確かめ」の 3 つを確かめてから、ゲートの記録の HEAD の単位のファイル・実装計画・設計文書を、スプリントブランチへ取り込んで push する。工程「ドキュメントレビュー」の `design-sync` も同じ関数を通る | どれかを満たさなければ、取り込みも push もせずに `stopped`。スプリントブランチ側の変更と競合するときと、取り込んだ内容が記録の HEAD と違うときは、push せずに `stopped`（下の「取り込みの競合」） |
-| `ndf progress units guard --issue <N> --base <ブランチ> --branch <ブランチ> --unit-file <ファイル>` | 実装のプランが最初に打つ（決定 12）。`--unit-file` は担当の指示のファイルで、指示の無い単位では空にする。人は打たない | 通せないプランなら `stopped` |
+| `ndf progress units guard --issue <N> --base <ブランチ> --branch <ブランチ> --unit-file <ファイル>` | 実装のプランが最初に打つ（決定 12）。`--unit-file` は担当の worker への指示を書いたファイル（#4369 の `unit_file`。JSON の単位のファイルとは別）で、指示の無い単位では空にする。人は打たない | 通せないプランなら `stopped` |
 
 #### 実装を始められる時点
 
@@ -367,20 +367,20 @@ push するときは、照合した URL を相手にし、ゲートの記録の�
 
 - 承認資料には、`check` の `items` と `warnings` から作る単位の表を載せる
 - 承認ゲートの入力は、cross-review が収束したリポジトリ・設計 PR・HEAD に固定する
-  - cross-review は、実際にレビューしたリポジトリと PR の番号（`--reviewed-pr-out`。#4369 が足す）・HEAD（`--reviewed-out`）・マージ先（`--reviewed-base-out`。この変更が足す）を書き出す。後の手順はこの値を入力にし、PR から読み直した値を代わりに使わない
+  - cross-review は、実際にレビューしたリポジトリ・PR の番号・HEAD・マージ先を、結果の `outputs.reviewed` に返す（`--follow-base`。この変更が足す）。後の手順はこの値を入力にし、PR から読み直した値を代わりに使わない
   - 設計 PR のレビューは、差分の比較元も PR の今の宛先（マージ先）に合わせる。宛先の名前を記録し、宛先が変わったら前のレビューの収束（指摘が残らず終わった結果）を使わないようにするだけでは足りない。それだけでは、レビューの相手役の AI が、古い宛先との差分を読み続けるためである
-    - `--reviewed-base-out` を渡した起動は、始めに PR の今の宛先を読み、そのブランチを取得して、差分の比較元にする。呼び出し側が起動時に決めた比較元は使わない
+    - `--follow-base` を渡した起動は、始めに PR の今の宛先を読み、そのブランチを取得して、差分の比較元にする。呼び出し側が起動時に決めた比較元は使わない
     - 前のラウンドの記録と宛先が違えば、前回の収束の結果も、前の HEAD からの差分も使わない。新しい宛先に対する PR 全体の差分をレビューし直す。比較元のコミットと merge-base も、新しい宛先から求め直す
-    - 書き出すマージ先は、相手役の全員が読んだ最後のラウンドで比較元にした宛先のブランチ名である。ラウンドの記録にも残す。起動の途中で宛先が変われば、後の照合が違いを見つけ、cross-review をやり直す
-  - CI を待つ対象のリポジトリ・PR の番号・HEAD は、cross-review が書き出した値を使う。待ちの開始と成功の確定の時点で PR の HEAD が違えば、成功にしない（`ndf ci watch --head`。この変更が足す引数）
+    - 返すマージ先は、相手役の全員が読んだ最後のラウンドで比較元にした宛先のブランチ名である。ラウンドの記録にも残す。起動の途中で宛先が変われば、後の照合が違いを見つけ、cross-review をやり直す
+  - CI を待つ対象のリポジトリ・PR の番号・HEAD は、cross-review が返した値を使う。待ちの開始と成功の確定の時点で PR の HEAD が違えば、成功にしない（`ndf ci watch --head`。この変更が足す引数）
   - 工程「ドキュメントレビュー」の入力の `design_pr`（工程「設計」の出力）は任意のままにする。値があれば、cross-review がレビューした PR の番号と一致することを `units-check` が確かめる
-  - MVV 判定にも、cross-review が書き出したリポジトリと PR の番号を渡す。判定の直前に PR の HEAD とマージ先を照合し、違えば判定せずにレビューからやり直す
+  - MVV 判定にも、cross-review が返したリポジトリと PR の番号を渡す。判定の直前に PR の HEAD とマージ先を照合し、違えば判定せずにレビューからやり直す
   - `check --docs`・CI・MVV 判定・承認資料は、その HEAD とマージ先に当てる。設計 PR の HEAD かマージ先がレビューの結果と違えば、cross-review からやり直す
-  - ゲートの記録（`design-target.json`）は次を持つ
+  - ゲートの記録は、レビューと単位の確かめのステップのイベントから組み、次を持つ。ファイルには書かない（決定 13）
 
     | 記録するもの | 中身 |
     | --- | --- |
-    | レビューの結果 | cross-review が書き出したリポジトリ・PR の番号・HEAD・マージ先 |
+    | レビューの結果 | cross-review が返したリポジトリ・PR の番号・HEAD・マージ先 |
     | スプリントブランチ | 承認の時点のスプリントのブランチ。承認した文書の取り込み先になる |
     | 実行対象 | スプリントの課題、課題ごとの扱いと統合先、実装計画を省いた課題 |
     | 大きさの上限 | `check --docs` が使った目安と上限の値 |
@@ -439,7 +439,7 @@ flowchart TB
 - `gathered` は、すべての単位をスプリントブランチへ集めた時点の記録で、後のコードレビューの起点になる
 - 単位 1 つ分の作業場所・プラン・レビュー・マージ・打ち直し（止まった後の流し直し）は #4369 の処理を呼ぶ。作業場所の起点・マージする時点・キューの待ちの確かめ方は決定 9 に合わせる
 - この変更より前に作ったスプリントで、実装計画に単位の欄があり、単位のファイルへの変換が終わっていないときは、始める前に変換する（決定 10）
-- 単位の欄がある課題と無い課題が混ざるときは、欄の無い課題は、課題全体を 1 つの単位にする。この単位は触るファイルが分からないので、単位のファイルの単位に実行中や待ち（上限を超えてキューに残る PR を含む）が無くなった後に、課題の番号の順に 1 つずつ流す。単位のファイルの単位が失敗していても流す。実装計画を省いた課題の単位も同じである
+- 単位の欄がある課題と無い課題が混ざるときは、欄の無い課題は、課題全体を 1 つの単位にする。この単位は触るファイルが分からないので、ほかの単位と並列にしない。単位のファイルに書いた単位に実行中や待ちが無くなった後に、課題の番号の順に 1 つずつ流す。待ちの上限の時間を超えてキューに残る PR も、待ちに数える。単位のファイルに書いた単位が失敗していても流す。実装計画を省いた課題の単位も同じである
 - この変更より後に作ったスプリントで、実装計画に単位の欄があるのに単位のファイルが無いときは、始めずに止まる
 
 ## 決定の記録
@@ -452,6 +452,7 @@ flowchart TB
 | 2 | 安く使える |
 | 3 | 同じ手順は毎回同じ結果になる |
 | 5 | 速く届く |
+| 6 | 使うほど散らからない |
 | 8 | 正しいデータ構造で作られる |
 | 9 | 責務の分かれた設計で作られる |
 | 11 | 重複と冗長が無い |
@@ -616,7 +617,7 @@ flowchart TB
   - 実行中の単位が無くなっても待ちがあれば、同じ読み取りで待ち続ける
   - 待ちには、CI の待ちの上限（`ci_budget`。既定 3600 秒）を置く。PR ごとに、最初にキューの待ちになった時刻から数える。この時刻は作業の保存先に書き、ほかの単位が動いている間も、打ち直した後も、同じ時刻から数える。次の問い合わせの時刻を決めるたびに確かめる
   - 上限を超えた PR は、読むのをやめて `ci_pending` の失敗にする。利用枠が戻る時刻がこの上限より後なら、`infra_wait` と再開できる時刻を返す失敗にする。ほかの単位は流し続け、残りがあれば最後に止まる
-  - 上限を超えた PR は、キューから外れたと確かめるまで、残っているとみなす。打ち直しで `ndf ci merge` を打ち直した場合は、その結果まで見て判断する。再送でキューに入り直した場合と、状態を取得できない場合は、残っているとみなす。この間は、触るファイルが分からない単位（実装計画を省いた課題と、単位の欄が無い課題の単位）を始めない
+  - 上限を超えた PR は、キューから外れたと確かめるまで、残っているとみなす。実装を打ち直して `ndf ci merge` を送り直した場合は、その結果も見て、残っているかを判断する。再送でキューに入り直した場合と、状態を取得できない場合は、残っているとみなす。この間は、触るファイルが分からない単位（実装計画を省いた課題と、単位の欄が無い課題の単位）を始めない
   - 打ち直しでも、先に同じ読み取りで状態を確かめる。#4369 の「`ndf ci merge` だけを打ち直す」は、開いたままキューに無い PR にだけ当てる
   - 作業場所の用意も 1 つずつ行う
   - 成否は単位ごとに判定する。ある単位だけの失敗で始めないのは、その単位に依存する単位（間接を含む）だけである。ほかの単位は始めて終わりまで流す
@@ -669,14 +670,14 @@ flowchart TB
   - **旧い承認の対象**: 保存した設計承認ゲートの承認の回答が見た HEAD から、実装計画を読む（`git show`）。その HEAD に単位の表があれば、利用者が承認した分け方である
   - **照合**: 表を #4369 の読み手で読み、単位のファイルと比べる。比べるのは、単位の名前、含むタスク、単位ごとの先に要る単位である。実行順の番号は比べない。番号が同じでも、待つ相手が減ることがあるためである
     - 旧い表の先に要る単位は、旧い実行の規則から戻す。「実行順」の列があれば、値がその単位より小さい単位のすべてである。列が無ければ、#4369 の順（行の順。プレリファクタリングをするならその単位が先頭）で前にある単位のすべてである。対象は同じ表の中の単位とする
-    - 旧い表の先に要る単位が、新しい依存（間接を含む）にすべて含まれていれば、順序は保たれている
+    - 旧い表の先に要る単位が、新しい依存（間接を含む）にすべて含まれていれば、順序は保たれている。旧い表でたどれる待ちが 1 組でも新しい依存でたどれなくなれば違いに数え、再承認を求める
     - 新しい依存で増えてよい待ちは、根拠のある待ちだけである。旧い方式で並行して始められた単位を、根拠なく先行の単位のレビュー・CI・マージに待たせないためである（MVV の Value 5「並べられる作業は並べて進め」）。比べるのは直接の依存の辺ではなく、間接を含めた「どの単位がどの単位を待つか」の組である
       - 根拠のある待ちは、次の 2 種類の辺をつないだグラフで、間接を含めてたどれる組である。1 つは旧い表の先に要る単位、もう 1 つは触るファイル（`touches`）が重なる 2 つの単位の間の、新しい依存と同じ向きの辺（規則 U4 が依存を求める）である
       - 新しい依存で間接を含めてたどれる組のうち、根拠のある待ちに無い組が 1 つでもあれば違いに数え、再承認を求める
       - 例: 旧い表で B が A を待ち、C は待たないとする。B と C の触るファイルが重なり、C を B の後にすると、C は A も間接に待つ。A→B（旧い順序）と B→C（U4）をつなぐとたどれるので、根拠のある待ちである。一方、B と C の触るファイルが重ならないのに C を B の後にすれば、C が B と A を待つ組はどちらも根拠が無いので、違いになる
     - 変換では、名前と含むタスクを表のまま移し、旧い順序を理由つきの依存（理由は「承認した表の順」）で書く
   - **再承認**: 照合が違えば（確かめの違反を直すために変えた場合を含む）、旧い表と新しい分け方を並べて、工程「実装」の回答の待ちとして記録し、承認を求める。資料には、再承認が必要になった理由と、前回承認した内容から変わった実装計画と実行対象も載せる。変えた設計の承認の取り直しであり、承認ゲートの種類は増やさない。再承認の記録と確かめ方は、次の 1 通りである
-    - 変換の処理が、`design-target.json` と同じ形の記録を作る。レビューの HEAD の代わりに単位のファイルを含むコミット（手元に持つコミット）を持ち、実行対象・上限・受け入れ条件の数を持つ
+    - 変換の処理が、ゲートの記録と同じ形の記録を作る。レビューの HEAD の代わりに単位のファイルを含むコミット（手元に持つコミット）を持ち、実行対象・上限・受け入れ条件の数を持つ
     - 回答は、人が `ndf progress next` の承認の待ちに `ndf answer` で返す。回答のイベントがこの記録を持つ。回答できる者の決まりは今の `ndf answer` のままである
     - `ndf progress units run` は回答を引数で受けない。再承認が要れば、`ndf progress next` と同じく回答の待ちを記録して返す
     - 有効かは、決定 11 の表の 4 つの比較をこの記録に当てて確かめる。単位のファイルが同じでも、実行対象が変われば問い直す
@@ -737,7 +738,7 @@ flowchart TB
     - 承認の記録
     - 単位の代表の課題。その単位の実装のプランに `--issue` で渡す 1 件の課題で、単位のタスクの所属の課題のうち番号が最も小さいものである（理由は詳細設計にある）
     - 担当の指示のファイルのハッシュ（指示の無い単位では空）
-  - guard は、プランの課題か宛先のブランチを持つ、終わっていないスプリントを探して、次の表のとおりに扱う。プランが渡す指示のファイルは、中身を読んでハッシュを比べる
+  - guard は、終わっていないスプリントのうち、プランの課題を含むものか、スプリントブランチがプランの宛先と同じものを探して、次の表のとおりに扱う。プランが渡す指示のファイルは、中身を読んでハッシュを比べる
   - 打ち直しで途中のステップから流すときも、このステップは毎回通す（`queue_decide.RESUME_ALWAYS` に足す）
 
   | guard が見つけた状態 | 扱い |
@@ -755,6 +756,20 @@ flowchart TB
 - **代償**: 同じ処理の入口が 2 つになる。実装のプランの起動と打ち直しごとに、確かめのコマンドの起動が 1 回増える（AI と API は呼ばない。1 つの実装のプランは worker・テスト・レビュー・CI の確認で多くのプロセスを起動するので、この 1 回の時間は小さい）。テンプレートを使わずにプランの JSON を一から書くことや、保存した状態を書き換えることまでは防がない
 - 根拠: Value 3 / Value 15（MVV バージョン 11）
 
+### 決定 13: 承認の根拠を書き換えられない形で受け渡すため、承認の記録はファイルを介さずイベントから組む
+
+- **質問**: 承認の根拠になる値（レビューした対象と、単位の確かめの結果）を、ステップの間でどう受け渡すか
+- **選んだ案**: ステップの結果の出力に返し、ステップのイベント（SSOT の DB）から読む。受け渡しのファイルと、それを置く保存先を作らない
+- **前の案で起きたこと**: この設計の前の版は、値を工程の保存先のファイル（`reviewed-head`・`reviewed-base`・`checked.json`・`design-target.json`）に書いて読み戻した。その版の承認の記録を実装した PR [#4686](https://github.com/devbasex/ai-plugins/pull/4686) では、レビューで指摘が出続けた。#4686 は、この直した設計の承認とマージの後に閉じる。指摘が出続けた原因は 3 つである
+  - ファイルは書き換えられるので、読むたびに本物かの守り（種別・指紋・所有者・リンク）が要り、書くたびに他人のものを消さない守りが要る
+  - 打ち直しで同じパスを使うので、書く前に前のファイルを消す必要があり、削除の承認が要る
+  - `design-target.json` には読み手が無かった（組んだ値は戻り値と回答のイベントで足りる）
+- **採らなかった案**: ファイルの守りを足し続ける案。守りの対象はファイルを使う限り残り、どの守りもレビューの指摘を増やした。値はステップのイベントにすでに入るので、ファイルは同じ値の 2 つ目の置き場だった
+- **対象にしないもの**: 変更要求を cross-review へ渡す `findings.json` は入力の受け渡しで、承認の根拠ではない。打ち直しのたびに NDF が書き直す
+- **守らないもの**: NDF 自身の状態の保存先の書き換えは防がない。ほかのステップの結果と同じ扱いである
+- **代償**: 工程の中で前のステップの出力を後のステップへ渡す経路（`stages.carried`）が 1 つ増える。差し替えのレビューの起動は、ファイルではなく結果の出力を返す契約になる
+- 根拠: Value 3 / Value 6（MVV バージョン 11）
+
 ## 影響と危険
 
 - **働く範囲**: 利用先のリポジトリでも働く
@@ -764,11 +779,11 @@ flowchart TB
   - `standard`・`legacy-refactor` で工程「ドキュメントレビュー」を無効にする宣言（`workflow.stages`）は、断られるようになる
   - 工程「設計」の出力から `standard`・`legacy-refactor` の `mvv_gate` が無くなり、ドキュメントレビューが持つ。出力を読む側とテストを同じ単位で直す
   - 手順や変更の中には、工程「設計」の終わりに設計 PR がマージ済みだと仮定するものがある。これらは、ドキュメントレビューの後を前提にするように直す。[#4295](https://github.com/devbasex/ai-plugins/issues/4295) の設計は、並行で進める作業ごとに計画の時点で予想した「触るファイル」の一覧を、設計書の触るファイルの一覧へ置き換える。置き換える時点はドキュメントレビュー（設計 PR のマージ）の後なので、この順と合う
-  - `.ndf/project.json` の `workflow.launch.review` でレビューの起動を差し替えたプロジェクトは、起動を直すまで `standard`・`legacy-refactor` のドキュメントレビューで止まる。設計 PR のレビューは、起動の後ろに `--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out`・`--findings` を足して打つためである。直し方は、設定を削って既定の起動に戻すか、起動に 4 つの引数を受けさせて 3 つのファイルを書き、`--reviewed-base-out` を受けたら PR の今の宛先を比較元にすることである
+  - `.ndf/project.json` の `workflow.launch.review` でレビューの起動を差し替えたプロジェクトは、起動を直すまで `standard`・`legacy-refactor` のドキュメントレビューで止まる。設計 PR のレビューは、起動の後ろに `--follow-base`・`--findings` を足して打ち、結果の `outputs.reviewed` を読むためである。直し方は、設定を削って既定の起動に戻すか、起動に 2 つの引数を受けさせ、`--follow-base` を受けたら PR の今の宛先を比較元にして、結果の `outputs.reviewed` に `{"repo","pr","head","base"}` を返すことである
   - push の URL が次のどれかだと、`design-sync`（取り込むものが無い場合も確かめる）と変換が止まる。認証情報を URL に埋めている（CI や devcontainer の `x-access-token` の形）、ssh の設定の別名（`git@github-work:`）や `ssh.github.com`、push の URL が 2 つ以上、`insteadOf`・`pushInsteadOf` がもう一度当たる。直し方は「送り先の URL」にある
   - URL を相手に push するので、手元の `refs/remotes/<remote>/<ブランチ>` は進まない。次の開始前の確かめの取得で進む
   - 送り先の照合が見るのは git に渡す URL までである。ssh の設定の `HostName`、`core.sshCommand`、プロキシ、GitHub のリポジトリ改名の転送、照合の後に利用者が git の設定を書き換えることは防がない。利用者の環境の設定であり、承認した人の意図と別の相手を仕込める者は、ほかの経路でも送れるためである
-  - **設計 PR のマージで、宛先の照合とマージ要求の間の隙間は受け入れる（承認で確かめる）**。GitHub がマージとキュー投入の条件にできるのは HEAD だけである
+  - **設計 PR のマージで、宛先の照合とマージ要求の間の隙間は、防がずに受け入れる案である。受け入れてよいかは、設計の承認で人が決める**。GitHub がマージとキュー投入の条件にできるのは HEAD だけである
     - 起きる条件: `ndf ci merge` が宛先を照合してから要求を送るまでの間に、誰かが設計 PR の宛先を変える。主に直接のマージで起きる
     - キュー経由の場合: 投入の後に PR を読み直し、宛先が変わっていればキューから外す（今の `GitHub.merge` の動き）
     - 採らなかった案 1: 直接のマージの後にも宛先を読み直し、違えば人へ戻す（検出だけで、マージは防げない）
@@ -821,6 +836,7 @@ flowchart TB
 | I1・I3 | U1〜U4 の違反（依存の無い単位どうしの重なりは実行順が違っても含み、別のファイルどうしの重なりも含む）で、それぞれの規則の番号を返す。別のファイルの同じ `T1` と、同じ単位の中のタスクの依存は通る | 輪・重なり・覆われない依存を見逃す・通る形を止めると落ちる |
 | I5 | 承認の後に単位のファイルを足す・消す・変えると実装が始まらない（欄とファイルが共に消えた場合を含む）。承認の後に扱い・統合先・省略した課題が変わっても始まらない。承認が要るのに記録が無ければ、`ndf progress units run` でも始まらない。実際の行数だけの追記では始まる。承認の後に実装計画のタスクの本文を書き換えても、指示のファイルは承認した本文を持つ。承認が要るスプリントで手で組んだ実装のプランは、登録済みのブランチを使っても、課題か指示が違えば最初の確かめで止まる（途中から流した場合も同じ） | 比べない・単位のファイルだけを比べる・照合の両側を記録から作る・作業場所の本文を指示に使う・記録が無ければ比べずに流す・実際の行数で止める・ブランチだけを見て手で組んだプランを通すと落ちる |
 | I7 | 設計 PR の HEAD かマージ先がレビューの結果と違えば cross-review からやり直す。レビューの後に宛先が変われば、新しい宛先に対する PR 全体の差分を読む。記録と違えば、資料を出さず、回答を確定せず、マージしない。テンプレート `design-merge-approved` は、マージ済みの PR も記録の対象と照合する。承認の記録を持たないモードと古い定義のスプリントの設計 PR は、今のままマージできる | レビューを通っていない HEAD や宛先で承認へ進む・旧い宛先との差分や前の HEAD からの差分を読む・レビューの後の宛先を記録する・古い HEAD の資料で承認が通る・承認と違う対象でマージ済みの PR を完了にする・`design-merge` に承認の引数を求めると落ちる |
+| 決定 13 | レビューと単位の確かめの値はステップのイベントから後のステップへ渡り、工程の保存先に受け渡しのファイルを作らない。レビューした値が決まらない起動と打ち直しは、前の回の値を使わず止まる | 保存先のファイルを読む・文脈の古い値を使う・`reviewed` を省いた結果で前の値が残ると落ちる |
 | 欠落の確かめ | 省いていない課題の単位のファイルが 1 件でも無ければ、`check --docs` が止まる。省いた課題と、扱いが「マージする」（他の課題へ統合する）「閉じる」の課題では止まらない。実装計画か単位のファイルの片方にしかないタスクがあれば止まる。実装計画に同じ番号のタスクが 2 つあれば止まる | 見つかったファイルだけを確かめる・JSON から漏れたタスクを見逃す・番号の重なりを集合にして通すと落ちる |
 | 利用上限 | 1 つの単位が `usage_limit` を返すと新しい単位を始めず、起動済みの結果を保存する。ほかの理由の失敗では、依存していない単位を始める | 利用上限の後も起動する・起動済みの結果を捨てると落ちる |
 | `doc_prs: base` | 承認の回答が無い・変更要求の後・設計 PR が未マージのときは、`sync` は取り込みも push もしない。スプリントブランチ側も同じファイルを変えていれば、その変更を残して止まる。取り込み済みの打ち直しは何もしない。`sync` の後、承認した内容と同じときだけ実装が始まる | 回答の前に push する・取り込まずに進む・違う内容を push する・スプリント側の追記を上書きする・未コミットの編集を上書きする・push の失敗の後にリモートへ届かないまま完了にすると落ちる |
@@ -842,7 +858,7 @@ flowchart TB
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #3702 | 実装する | — | `plugins/ndf/contracts/workflow/review-units.schema.json`（新設）、`plugins/ndf/contracts/limits/review-units.target-lines.json`（新設）、`plugins/ndf/contracts/limits/review-units.max-lines.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/contracts/schemas/io/`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/stages/plan.json`、`plugins/ndf/contracts/workflow/stages/plan-design.json`（新設）、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/templates/design-pr-review.json`（新設）、`plugins/ndf/contracts/templates/docs-ci.json`（新設）、`plugins/ndf/contracts/templates/design-merge-approved.json`（新設）、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/contracts/templates/implementation-plan.json`、`plugins/ndf/contracts/templates/implementation-plan-convert.json`（新設）、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/src/ndf/core/plan/units_decide.py`（新設）、`plugins/ndf/src/ndf/core/plan/units_files.py`（新設）、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/src/ndf/core/plan/queue_decide.py`、`plugins/ndf/src/ndf/core/plan/review_units_decide.py`、`plugins/ndf/src/ndf/progress/design_record.py`（新設）、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/units_queue.py`（新設）、`plugins/ndf/src/ndf/progress/units_convert.py`（新設）、`plugins/ndf/src/ndf/progress/units_sync.py`（新設）、`plugins/ndf/src/ndf/progress/units_guard.py`（新設）、`plugins/ndf/src/ndf/progress/units_cli.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/tests/core/plan/test_units_decide.py`（新設）、`plugins/ndf/tests/core/plan/test_units_files.py`（新設）、`plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`（新設）、`plugins/ndf/tests/core/plan/test_inputs.py`、`plugins/ndf/tests/progress/test_design_record.py`（新設）、`plugins/ndf/tests/progress/gate/test_gate_design_record.py`（新設）、`plugins/ndf/tests/progress/test_units_invoke.py`、`plugins/ndf/tests/progress/test_units_parallel.py`（新設）、`plugins/ndf/tests/progress/test_units_convert.py`（新設）、`plugins/ndf/tests/progress/test_units_sync.py`（新設）、`plugins/ndf/tests/progress/test_units_guard.py`（新設）、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py` |
+| #3702 | 実装する | — | `plugins/ndf/contracts/workflow/review-units.schema.json`（新設）、`plugins/ndf/contracts/limits/review-units.target-lines.json`（新設）、`plugins/ndf/contracts/limits/review-units.max-lines.json`（新設）、`plugins/ndf/contracts/schemas/project-workflow.schema.json`、`plugins/ndf/contracts/schemas/ndf-settings/project.schema.json`、`plugins/ndf/contracts/schemas/io/`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/stages/design.json`、`plugins/ndf/contracts/workflow/stages/document-review.json`、`plugins/ndf/contracts/workflow/stages/plan.json`、`plugins/ndf/contracts/workflow/stages/plan-design.json`（新設）、`plugins/ndf/contracts/workflow/stages/implement.json`、`plugins/ndf/contracts/workflow/modes/standard.json`、`plugins/ndf/contracts/workflow/modes/legacy-refactor.json`、`plugins/ndf/contracts/templates/design-pr-review.json`（新設）、`plugins/ndf/contracts/templates/docs-ci.json`（新設）、`plugins/ndf/contracts/templates/design-merge-approved.json`（新設）、`plugins/ndf/contracts/templates/impl.json`、`plugins/ndf/contracts/templates/implementation-plan.json`、`plugins/ndf/contracts/templates/implementation-plan-convert.json`（新設）、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/domains/env.json`、`plugins/ndf/src/ndf/core/plan/units_decide.py`（新設）、`plugins/ndf/src/ndf/core/plan/units_files.py`（新設）、`plugins/ndf/src/ndf/core/plan/cli.py`、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/src/ndf/core/plan/queue_decide.py`、`plugins/ndf/src/ndf/core/plan/review_units_decide.py`、`plugins/ndf/src/ndf/progress/design_record.py`（新設）、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/units_queue.py`（新設）、`plugins/ndf/src/ndf/progress/units_convert.py`（新設）、`plugins/ndf/src/ndf/progress/units_sync.py`（新設）、`plugins/ndf/src/ndf/progress/units_guard.py`（新設）、`plugins/ndf/src/ndf/progress/units_cli.py`（新設）、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/run.py`、`plugins/ndf/src/ndf/progress/folding.py`、`plugins/ndf/src/ndf/progress/definition.py`、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/src/ndf/progress/store.py`、`plugins/ndf/src/ndf/progress/gate/entry.py`、`plugins/ndf/src/ndf/progress/gate/answering.py`、`plugins/ndf/src/ndf/ci_cli.py`、`plugins/ndf/src/ndf/adapters/github.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/records/mvv_gate.py`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/docs/contracts/env.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/stage-notes.md`、`plugins/ndf/skills/issue-plan-strategy/references/execution-plan.md`、`plugins/ndf/tests/core/plan/test_units_decide.py`（新設）、`plugins/ndf/tests/core/plan/test_units_files.py`（新設）、`plugins/ndf/tests/core/plan/fixtures/units/issue-3672.units.json`（新設）、`plugins/ndf/tests/core/plan/test_inputs.py`、`plugins/ndf/tests/progress/test_design_record.py`（新設）、`plugins/ndf/tests/progress/gate/test_gate_design_record.py`（新設）、`plugins/ndf/tests/progress/test_units_invoke.py`、`plugins/ndf/tests/progress/test_units_parallel.py`（新設）、`plugins/ndf/tests/progress/test_units_convert.py`（新設）、`plugins/ndf/tests/progress/test_units_sync.py`（新設）、`plugins/ndf/tests/progress/test_units_guard.py`（新設）、`plugins/ndf/tests/progress/test_definition.py`、`plugins/ndf/tests/progress/test_sprint_templates.py`、`plugins/ndf/tests/adapters/test_ci_cli.py`、`plugins/ndf/tests/adapters/test_github.py`、`plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`、`plugins/ndf/src/ndf/progress/stages.py`、`plugins/ndf/src/ndf/progress/stage_inputs.py` |
 
 ## 未確認のまま残ること
 
