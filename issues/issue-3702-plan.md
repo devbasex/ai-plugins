@@ -106,6 +106,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/domains/crossreview/settings.py`
   - `plugins/ndf/src/ndf/core/plan/cli.py`
   - `plugins/ndf/src/ndf/core/plan/units_files.py`
+  - `plugins/ndf/contracts/schemas/result.schema.json`
   - `plugins/ndf/tests/progress/test_design_record.py`
   - `plugins/ndf/tests/domains/crossreview/test_crossreview_run.py`
   - `plugins/ndf/tests/core/plan/test_units_files.py`
@@ -115,6 +116,8 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
 - **変更内容:**
   - `progress/design_record.py` の `required`・`build`・`stale`・`reset_drafts`・`approved_of`・`mismatches`・`without`・`converted`・`reapproved_of`。`build` はイベントの値 2 つから組む純粋な関数にする（決定 13）
   - `stages.carried`・`stages.carried_inputs`
+  - 結果の `outputs` のスキーマ（`result.schema.json` の `$defs/outputs`）に `reviewed`（object か null）と `design_units` の型を足す。2 つを持つ `outputs` が `recorded_outputs` で落ちないことをテストで縛る
+  - 環境変数の一覧の `NDF_MACHINE_ID` の説明を、工程の script のステップの子へ渡す値に書き直す
   - cross-review の `--reviewed-base-out` と比較元のファイル書き出しを消し、`--follow-base` と結果の `outputs.reviewed` に置き換える（Task 4 で足した分の置き換え）
   - `ndf plan units check` の `checked.json` の書き出しと守り、環境変数 `NDF_DESIGN_RECORD_DIR` を消し、`--design-gate` と `outputs.design_units` に置き換える（Task 7 で足した分の置き換え）。`--reviewed-out`・`--reviewed-pr-out` は残す
   - コマンドの一覧・環境変数の一覧・入出力のスキーマを生成し直す（先に要る: Task 4・6・7）
@@ -130,7 +133,7 @@ https://github.com/devbasex/ai-plugins/issues/4369 の実装が `main` に入っ
   - `plugins/ndf/src/ndf/progress/invoke.py`
   - `plugins/ndf/src/ndf/progress/stage_inputs.py`
   - `plugins/ndf/tests/progress/gate/test_gate_design_record.py`
-- **変更内容:** 詳細設計の「承認ゲートとのつなぎ」の表の各場所（ステップの入力の組み立てと、変換の再承認の記録を回答に添える分を含む）と、課題を外す回答の扱い。`required` が偽の定義では今の振る舞いのまま（先に要る: Task 8）
+- **変更内容:** 詳細設計の「承認ゲートとのつなぎ」の表の各場所（ステップの入力の組み立てと、変換の再承認の記録を回答に添える分を含む）と、課題を外す回答の扱い。工程の script のステップの子へ `NDF_MACHINE_ID` を渡す（`run._run_step` と `invoke._call_script`）。`required` が偽の定義では今の振る舞いのまま（先に要る: Task 8）
 - **満たす受け入れ条件:** 無し（条件 1 の部品。条件 1 は Task 18 の単位で確かめる）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -208,7 +211,7 @@ Task 15 が使うので、番号の順でなくここに置く。
   - `plugins/ndf/src/ndf/progress/units_cli.py`
   - `plugins/ndf/tests/progress/test_units_sync.py`
   - `plugins/ndf/docs/contracts/commands.md`
-- **変更内容:** `units_sync.push_url`・`destination_errors`・`outgoing_errors`・`sync` と `ndf progress units sync`。取得と push は照合した URL を相手にする。送り先が違うときと URL を拒否するときにコミットも push も起きないことを、偽の ssh で受ける手元のリモートの ref で縛る（先に要る: Task 8・11・20）
+- **変更内容:** `units_sync.push_url`・`destination_errors`・`outgoing_errors`・`sync` と `ndf progress units sync`。手元が承認した HEAD を含むときの送り先の確かめと作り直し、削除・改名元の取り込み、中断した取り込みの再開を含む。取得と push は照合した URL を相手にする。送り先が違うときと URL を拒否するときにコミットも push も起きないことを、偽の ssh で受ける手元のリモートの ref で縛る（先に要る: Task 8・11・20）
 - **満たす受け入れ条件:** 無し（条件 1 の部品。条件 1 は Task 18 の単位で確かめる）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
@@ -250,6 +253,7 @@ Task 15 が使うので、番号の順でなくここに置く。
   - `definition._stage_def` の `mvv_gate` の出力と、モードごとの必須の入力
   - `core/route.review_command` が `design-pr-review` を `--purpose design` にする
   - `design-pr-review` の結果に `reviewed` が無いか null なら、ステップを止める
+  - `design-pr-review` の打ち直しの開始点（`plan_start`・`plan_argv`）。`push` から流すのは、`reviewed` を持つ回が `push` で止まったときだけにする
   - `_env_inputs`
   - MVV 判定がレビューした PR を対象にし、判定の直前に head と base を照合する
   - テンプレート `design-pr-review`・`docs-ci`・`design-merge-approved`
@@ -315,7 +319,7 @@ Task 15 が使うので、番号の順でなくここに置く。
 | 実装のプランの確かめ | Task 14 | 3702:3 | 380 | 8 | 実装を流すコマンド（実装を流すコマンドと同じファイルに guard を足す）、キューの待ち（単位を流す処理に起動の記録を足す）、ゲートと記録のつなぎ（呼び出し層の同じファイルを変える） | 14 |  |
 | 承認した文書の取り込み | Task 15 | 無し | 390 | 9 | 実装のプランの確かめ（guard と同じコマンドのファイルに足す）、承認の記録をイベントから組む（承認した対象を記録から読む）、送り先の URL の読み取り（送り先の確かめが URL の読み手を使う） | 15 |  |
 | 前のスプリントの変換 | Task 16 | 3702:3・3702:4 | 400 | 10 | 実装のプランの確かめ（単位を流す処理と呼び出し層の同じファイルを変える）、承認した文書の取り込み（反映が送り先と送るコミットの確かめを使う） | 16 |  |
-| テンプレートと判定の入力 | Task 17 | 無し | 390 | 11 | 前のスプリントの変換（呼び出し層の同じファイルを変える）、単位のコマンド（環境変数の一覧の同じファイルを変える）、ゲートと記録のつなぎ（テンプレートが記録の保存先へ書く） | 17 |  |
+| テンプレートと判定の入力 | Task 17 | 無し | 390 | 11 | 前のスプリントの変換（呼び出し層の同じファイルを変える）、単位のコマンド（環境変数の一覧の同じファイルを変える）、ゲートと記録のつなぎ（テンプレートが、ゲートとのつなぎで組むステップの入力を使う） | 17 |  |
 | 工程の並びの切り替え | Task 18 | 3702:1・3702:4 | 320 | 12 | テンプレートと判定の入力（新しい工程が新しいテンプレートを呼ぶ）、承認した文書の取り込み（新しい工程のステップが sync を打つ） | 18 |  |
 | 手順書 | Task 19 | 3702:1・3702:2・3702:4 | 300 | 13 | 工程の並びの切り替え（書く流れは切り替えた後の工程である） | 19 |  |
 | 送り先の URL の読み取り | Task 20 | 無し | 130 | 1 | 無し | 4 |  |
@@ -344,7 +348,7 @@ Task 15 が使うので、番号の順でなくここに置く。
 | 8 | 実装のプランの確かめ | 実装のプランの確かめ: 送り先の URL の読み取り | 実装を流すコマンド → 実装のプランの確かめ: 実装を流すコマンドと同じファイルに guard を足す<br>キューの待ち → 実装のプランの確かめ: 単位を流す処理に起動の記録を足す<br>ゲートと記録のつなぎ → 実装のプランの確かめ: 呼び出し層の同じファイルを変える |
 | 9 | 承認した文書の取り込み | 承認した文書の取り込み: 無し | 実装のプランの確かめ → 承認した文書の取り込み: guard と同じコマンドのファイルに足す<br>承認の記録をイベントから組む → 承認した文書の取り込み: 承認した対象を記録から読む<br>送り先の URL の読み取り → 承認した文書の取り込み: 送り先の確かめが URL の読み手を使う |
 | 10 | 前のスプリントの変換 | 前のスプリントの変換: 無し | 実装のプランの確かめ → 前のスプリントの変換: 単位を流す処理と呼び出し層の同じファイルを変える<br>承認した文書の取り込み → 前のスプリントの変換: 反映が送り先と送るコミットの確かめを使う |
-| 11 | テンプレートと判定の入力 | テンプレートと判定の入力: 無し | 前のスプリントの変換 → テンプレートと判定の入力: 呼び出し層の同じファイルを変える<br>単位のコマンド → テンプレートと判定の入力: 環境変数の一覧の同じファイルを変える<br>ゲートと記録のつなぎ → テンプレートと判定の入力: テンプレートが記録の保存先へ書く |
+| 11 | テンプレートと判定の入力 | テンプレートと判定の入力: 無し | 前のスプリントの変換 → テンプレートと判定の入力: 呼び出し層の同じファイルを変える<br>単位のコマンド → テンプレートと判定の入力: 環境変数の一覧の同じファイルを変える<br>ゲートと記録のつなぎ → テンプレートと判定の入力: テンプレートが、ゲートとのつなぎで組むステップの入力を使う |
 | 12 | 工程の並びの切り替え | 工程の並びの切り替え: 無し | テンプレートと判定の入力 → 工程の並びの切り替え: 新しい工程が新しいテンプレートを呼ぶ<br>承認した文書の取り込み → 工程の並びの切り替え: 新しい工程のステップが sync を打つ |
 | 13 | 手順書 | 手順書: 無し | 工程の並びの切り替え → 手順書: 書く流れは切り替えた後の工程である |
 
