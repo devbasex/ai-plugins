@@ -69,7 +69,7 @@ class FakePort:
         self.changed_reads = 0
         # PR のマージ先のブランチ（None なら読み取りに失敗する）と、読んだ回数
         self.base_ref: str | None = "main"
-        # PR のベースリポジトリ（`--reviewed-base-out` の起動は、取得するリモートがこれと一致するかを確かめる。#3702）
+        # PR のベースリポジトリ（`--follow-base` の起動は、取得するリモートがこれと一致するかを確かめる。#3702）
         self.repo_name = "octo/repo"
         # 対象を作業場所のリモートから決めたときのその値（None なら取得元を読み直す）
         self.fetched_from: str | None = None

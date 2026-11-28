@@ -12,10 +12,10 @@ ndf plan pending
     チェックアウトの保存先から、待ちを抱えた（PENDING・ENQUEUED・DELAYED）実行を並べる（B5）
 ndf plan check <plan.json>...
     プランの形と、キューの組（触るファイルの重なり・前提）を確かめる
-ndf plan units check [--issue N]... [--omitted N]... [<単位のファイル>...] [--docs]
+ndf plan units check [--issue N]... [--omitted N]... [<単位のファイル>...] [--docs] [--design-gate]
     単位のファイルを 1 つのグラフにして確かめる。`--issue` が無ければ環境変数 `NDF_STAGE_INPUT` の `issues`・`plan_omitted`・
-    `worktree` を使う。`NDF_DESIGN_RECORD_DIR` があれば、レビューした HEAD のコミットを読み、`--docs` が無くても
-    実装計画と突き合わせて、通れば `checked.json` を書く
+    `worktree` を使う。`--design-gate` は `NDF_STAGE_INPUT` の `reviewed` が指すレビューした HEAD のコミットを読み、`--docs` が
+    無くても実装計画と突き合わせて、通れば結果の `outputs.design_units` に返す（ファイルは書かない）
 ndf plan units render --issue N [--issue N]... [--omitted N]...
     実装計画の「レビューの単位」と「並列と直列」の表を書き直し、続けて `check --docs` をする
 
@@ -28,10 +28,8 @@ import argparse
 import contextlib
 import json
 import os
-import re
 import subprocess
 import sys
-import tempfile
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -49,19 +47,11 @@ TOOL = runner.TOOL
 # 待ちの上限の既定と、見回りの間隔の方針（contracts/limits/）
 WAIT_DEFAULT = "supervise.wait-default"
 WAIT_POLL = "durable.wait-from-poll"
-# `units` が読む、工程の入力と承認の記録の保存先（`contracts/domains/env.json`）
+# `units` が読む、工程の入力（`contracts/domains/env.json`）
 STAGE_INPUT_ENV = "NDF_STAGE_INPUT"
-RECORD_DIR_ENV = identity.env_name("design-record-dir")
-# 保存先のファイル。前の 2 つ（と `units_files.REVIEWED_HEAD`）は設計の Pull Request のレビューが書き、後の 1 つは `units check` が書く
-REVIEWED_PR = "reviewed-pr"
-REVIEWED_BASE = "reviewed-base"
-CHECKED_FILE = "checked.json"
-# `checked.json` の記録の種別（`files.RECORD_KIND_KEY` の値）。種別の違うファイルは消さず、上書きもしない
-CHECKED_KIND = "design-units-check"
-_REVIEWED_PR_FORM = re.compile(r"[^/\s]+/[^#\s]+#([1-9][0-9]*)")
 _REVIEW_LAUNCH_HINT = (
-    "。workflow.launch.review でレビューの起動を差し替えているときは、起動の後ろの --reviewed-out・--reviewed-pr-out・"
-    "--reviewed-base-out・--findings を受けて 3 つのファイルを書き、--reviewed-base-out を受けたら PR の今のマージ先を比較元にする。"
+    "。workflow.launch.review でレビューの起動を差し替えているときは、起動の後ろの --follow-base・--findings を受け、"
+    "--follow-base を受けたら PR の今のマージ先を比較元にして、結果の outputs.reviewed に {repo, pr, head, base} を返す。"
     "または、この設定を削って既定の起動に戻す"
 )
 
@@ -259,6 +249,7 @@ class _StageInput(NamedTuple):
     plan_omitted: tuple[int, ...] = ()
     branch: Optional[str] = None
     design_pr: Optional[int] = None
+    reviewed: Optional[Mapping[str, Any]] = None
 
 
 class _Targets(NamedTuple):
@@ -271,12 +262,11 @@ class _Targets(NamedTuple):
     inputs: _StageInput = _StageInput()
 
 
-class _Record(NamedTuple):
-    """承認の記録の保存先と、そこから読んだレビューした HEAD と PR の番号。"""
+class _Reviewed(NamedTuple):
+    """レビューした HEAD と、承認の記録に入れるスプリントブランチ。"""
 
-    path: Path
     head: str
-    pr: int
+    branch: str
 
 
 def _hub(root: Path) -> github.GitHub:
@@ -303,6 +293,18 @@ def _positive_ints(held: Any) -> bool:
     return isinstance(held, list) and all(type(n) is int and n > 0 for n in held)
 
 
+def _reviewed_form(v: Any) -> bool:
+    """`outputs.reviewed` の形。null はレビューが対象を確かめられなかった値である。"""
+    if v is None:
+        return True
+    return (
+        isinstance(v, dict)
+        and all(isinstance(v.get(k), str) and bool(v[k]) for k in ("repo", "head", "base"))
+        and type(v.get("pr")) is int
+        and v["pr"] > 0
+    )
+
+
 def _stage_input(raw: str) -> _StageInput:
     """`NDF_STAGE_INPUT` の値。`units` が使うキーの型を確かめる。"""
     try:
@@ -315,6 +317,7 @@ def _stage_input(raw: str) -> _StageInput:
         plan_omitted=_positive_ints,
         branch=lambda v: isinstance(v, str) and bool(v),
         design_pr=lambda v: type(v) is int and v > 0,
+        reviewed=_reviewed_form,
     )
     if not isinstance(held, dict):
         raise _UnitsStopped("invalid", f"環境変数 {STAGE_INPUT_ENV} は JSON の object にする")
@@ -352,75 +355,31 @@ def _targets(a: argparse.Namespace, cwd: Path) -> _Targets:
     return _Targets(Path(held.worktree), tuple(sorted(set(held.issues))), held.plan_omitted, (), held)
 
 
-def _held(path: Path) -> str:
-    """保存先のファイルの中身。無いか読めなければ空。"""
-    try:
-        return path.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError):  # noqa: NDF401 ファイル: 無い・読めないものは、足りないファイルとして名前を挙げる
-        return ""
+def _reviewed(targets: _Targets) -> _Reviewed:
+    """工程の入力の `reviewed` を読み、レビューの後に対象が変わっていないことを確かめる。
 
-
-def _discard_checked(target: Path) -> None:
-    """前の確かめが書いた `checked.json` を消す。NDF の記録と読めないもの（リンクを含む）は消さずに止まる。"""
-    if not os.path.lexists(target):
-        return
-    held = None if target.is_symlink() else _held(target)
-    try:
-        found = json.loads(held) if held else None
-    except json.JSONDecodeError:
-        found = None
-    if not isinstance(found, dict) or found.get(files.RECORD_KIND_KEY) != CHECKED_KIND:
-        raise _UnitsStopped("refused", f"{target} は NDF が書いた記録と確かめられないので消さない（中身を調べて退けてから打ち直す）")
-    target.unlink()
-
-
-def _write_checked(target: Path, value: dict[str, Any]) -> None:
-    """一意の一時の名前へ書き終えてから、`target` の名前が空いているときだけ公開する（確かめの間に置かれたファイルは残す）。"""
-    fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            json.dump({files.RECORD_KIND_KEY: CHECKED_KIND, **value}, out, ensure_ascii=False)
-        os.link(tmp, target)
-    except FileExistsError:
-        raise _UnitsStopped("refused", f"{target} が確かめの間に置かれたので上書きしない（中身を調べて退けてから打ち直す）") from None
-    finally:
-        Path(tmp).unlink(missing_ok=True)
-
-
-def _record(path: Path, targets: _Targets) -> _Record:
-    """保存先を読み、レビューの後に対象が変わっていないことを確かめる。前の `checked.json` は始めに消す。
-
-    マージ先（`reviewed-base`）はここでは有無だけを見る。PR の今のマージ先と比べるのは、承認の判定
-    （`ndf records mvv gate`）が受け持つ。
+    マージ先は比べない。PR の今のマージ先と比べるのは、承認ゲートの側である。
     """
-    _discard_checked(path / CHECKED_FILE)
-    if targets.paths:
-        raise _UnitsStopped("invalid", f"{RECORD_DIR_ENV} があるときは、単位のファイルを直に指さず課題で確かめる")
-    held = {name: _held(path / name) for name in (units_files.REVIEWED_HEAD, REVIEWED_PR, REVIEWED_BASE)}
-    pr = _REVIEWED_PR_FORM.fullmatch(held[REVIEWED_PR])
-    lack = [name for name, value in held.items() if not value or (name == REVIEWED_PR and pr is None)]
-    if lack:
+    held = targets.inputs.reviewed
+    if held is None:
         launch = units_files.project_of(units_files.Tree(targets.root)).get("workflow")
         launch = launch.get("launch") if isinstance(launch, dict) else None
         hint = _REVIEW_LAUNCH_HINT if isinstance(launch, dict) and "review" in launch else ""
-        raise _UnitsStopped("precondition", f"{path} に読めるレビューの記録が無い: {', '.join(lack)}{hint}")
+        raise _UnitsStopped("precondition", f"入力にレビューした対象（{STAGE_INPUT_ENV} の reviewed）が無い{hint}")
     now = Git(targets.root).run("rev-parse", "HEAD").strip()
-    head = held[units_files.REVIEWED_HEAD]
-    if now != head:
-        raise _UnitsStopped(runner.APPROVAL_STALE, f"作業場所の HEAD（{now}）がレビューした HEAD（{head}）と違う")
-    assert pr is not None
-    number = int(pr.group(1))
+    if now != held["head"]:
+        raise _UnitsStopped(runner.APPROVAL_STALE, f"作業場所の HEAD（{now}）がレビューした HEAD（{held['head']}）と違う")
     given = targets.inputs.design_pr
-    if given is not None and given != number:
-        raise _UnitsStopped("refused", f"入力の設計の PR（#{given}）がレビューした PR（#{number}）と違う")
+    if given is not None and given != held["pr"]:
+        raise _UnitsStopped("refused", f"入力の設計の PR（#{given}）がレビューした PR（#{held['pr']}）と違う")
     if targets.inputs.branch is None:
         raise _UnitsStopped("precondition", f"入力にスプリントブランチ（{STAGE_INPUT_ENV} の branch）が無い")
-    return _Record(path, head, number)
+    return _Reviewed(held["head"], targets.inputs.branch)
 
 
-def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_Record], docs: bool) -> dict[str, Any]:
-    """確かめの結果。`record` があればレビューした HEAD のコミットを読み、通れば `checked.json` を書く。"""
-    tree = units_files.Tree(targets.root, None if record is None else record.head)
+def _checked_units(a: argparse.Namespace, targets: _Targets, reviewed: Optional[_Reviewed], docs: bool) -> dict[str, Any]:
+    """確かめの結果。`reviewed` があればレビューした HEAD のコミットを読み、通れば `outputs.design_units` を返す。"""
+    tree = units_files.Tree(targets.root, None if reviewed is None else reviewed.head)
     limits_held = units_files.limits_of(units_files.project_of(tree))
     if targets.paths:
         loaded = [units_files.load(tree, path) for path in targets.paths]
@@ -439,21 +398,9 @@ def _checked_units(a: argparse.Namespace, targets: _Targets, record: Optional[_R
     units = units_files.unit_items(report)
     summary = f"{len(units)} 個の単位の確かめを通った（警告 {len(warnings)} 件）"
     outputs = None
-    if record is not None:
-        _write_checked(
-            record.path / CHECKED_FILE,
-            dict(
-                head=record.head,
-                branch=targets.inputs.branch,
-                issues=list(targets.issues),
-                handling={str(n): dict(handling=handling, into=into) for n, (handling, into) in report.handlings.items()},
-                omitted=[f.issues[0] for f in report.files if f.whole],
-                limits=limits_held._asdict(),
-                criteria={str(n): count for n, count in counts.items()},
-                units=units,
-            ),
-        )
-        outputs = dict(design_pr=record.pr)
+    if reviewed is not None:
+        made = units_files.design_units_of(report, reviewed.head, reviewed.branch, targets.issues, limits_held)
+        outputs = dict(design_units=made)
     return result.result(TOOL, OK, summary, units + splits, metrics, warnings=warnings, outputs=outputs)
 
 
@@ -487,14 +434,16 @@ def _render(targets: _Targets) -> None:
 
 
 def _units(a: argparse.Namespace) -> dict[str, Any]:
+    gate = a.units_cmd == "check" and a.design_gate
+    if gate and (a.issues is not None or a.omitted is not None or a.files):
+        raise _UnitsStopped("invalid", f"--design-gate は工程の入力（{STAGE_INPUT_ENV}）だけで確かめる")
     targets = _targets(a, Path.cwd())
     if a.units_cmd == "render":
         _render(targets)
         return _checked_units(a, targets, None, docs=True)
-    held = os.environ.get(RECORD_DIR_ENV)
-    record = None if held is None else _record(Path(held), targets)
-    # 承認の記録を書くときは、`--docs` が無くても実装計画と突き合わせる
-    return _checked_units(a, targets, record, a.docs or record is not None)
+    reviewed = _reviewed(targets) if gate else None
+    # 承認へ進める確かめは、`--docs` が無くても実装計画と突き合わせる
+    return _checked_units(a, targets, reviewed, a.docs or gate)
 
 
 def _cmd_units(a: argparse.Namespace) -> int:
@@ -508,6 +457,17 @@ def _cmd_units(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "transient" if exc.passing else "precondition", f"GitHub を読めない: {exc}"))
     except (GitError, OSError, worker_paths.EntryError) as exc:
         return result.emit(result.stopped(TOOL, "precondition", str(exc)))
+
+
+_DESIGN_GATE_HELP = (
+    f"承認ゲートの前の確かめ。{STAGE_INPUT_ENV} の issues に、スプリントの全課題の番号を 1 件以上の整数の配列で渡す。"
+    "ほかに、絶対パスの worktree と、スプリントブランチ名の branch を渡す。"
+    "設計 PR のレビュー結果から outputs.reviewed を取り出し、reviewed に渡す。"
+    "既定の起動を使う場合は、ndf cross-review run に --follow-base を付けて実行する。"
+    "workflow.launch.review で起動を差し替えている場合は、その起動に --follow-base を渡して得た結果を使う。"
+    "実装計画を省いた課題があれば、その番号を整数の配列（例 [3702]）として plan_omitted に渡す。位置引数、--issue、--omitted は指定しない。"
+    "作業場所の HEAD が reviewed.head と一致し、そのコミットの検査を通ると outputs.design_units を返す"
+)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -561,7 +521,12 @@ def _parser() -> argparse.ArgumentParser:
     uc.add_argument(
         "--docs",
         action="store_true",
-        help="実装計画のタスクの集合と 2 つの表も突き合わせる（承認の記録を書くときは指定しなくても突き合わせる）",
+        help="実装計画のタスクの集合と 2 つの表も突き合わせる（--design-gate では指定しなくても突き合わせる）",
+    )
+    uc.add_argument(
+        "--design-gate",
+        action="store_true",
+        help=_DESIGN_GATE_HELP,
     )
     return p
 

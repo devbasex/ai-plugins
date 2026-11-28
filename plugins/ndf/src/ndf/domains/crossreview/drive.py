@@ -108,7 +108,8 @@ class Outcome(NamedTuple):
     （承認済みのプロジェクト MVV が無ければ None。#4076）。`mvv_record_failed` は承認ゲートの判定に要る記録の行を書けなかったとき
     の、書けなかった行（`key`・`outcome`）と固定の注意（`finish_decide.finish` の `record_failed`。#3959）。`reviewed_pr` は
     `reviewed_head` を head に持つと確かめた、実際に読んだ PR（`<所有者>/<リポジトリ>#<番号>`。確かめられなければ None。#4369）。
-    `reviewed_base` は `reviewed_head` を読んだラウンドの比較元のブランチ（`reviewed_head` が None なら None。#3702）。"""
+    `reviewed_base` は `reviewed_head` を読んだラウンドの比較元のブランチ（`reviewed_head` が None なら None。`--follow-base` の
+    起動の結果の `outputs.reviewed` に載せる。#3702）。"""
 
     review: fin.Review
     summary_path: Path

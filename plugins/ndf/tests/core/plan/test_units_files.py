@@ -15,6 +15,7 @@ from ndf.adapters.git import Git
 from ndf.core.plan import cli, review_units_decide
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import units_files as uf
+from ndf.progress import design_record
 
 from . import _plan_helpers as H
 
@@ -438,7 +439,6 @@ def hub(monkeypatch):
     made = _Hub()
     monkeypatch.setattr(cli, "_hub", lambda root: made)
     monkeypatch.delenv("NDF_STAGE_INPUT", raising=False)
-    monkeypatch.delenv("NDF_DESIGN_RECORD_DIR", raising=False)
     return made
 
 
@@ -609,7 +609,7 @@ def test_cli_check_stops_with_the_github_failure_and_no_violation(hub, work, cap
     assert (out["cause"]["kind"], out["items"]) == (kind, [])
 
 
-# --- 承認の前の確かめ（NDF_DESIGN_RECORD_DIR） --------------------------------------------------
+# --- 承認の前の確かめ（--design-gate） ----------------------------------------------------------
 
 
 def _commit(root: Path) -> str:
@@ -619,21 +619,16 @@ def _commit(root: Path) -> str:
 
 
 @pytest.fixture
-def reviewed(hub, work, tmp_path, monkeypatch) -> Path:
-    """レビューした HEAD・PR・マージ先を持つ保存先と、単位をコミットした作業場所。"""
+def reviewed(hub, work, monkeypatch) -> dict:
+    """単位をコミットした作業場所と、そのコミットをレビューしたという `outputs.reviewed`。"""
     _two_units(work)
     _design(work, "7", "| #7 | 実装する | — |")
     _put(work, "issue-7-plan.md", _plan(1, 2))
     for path, text in uf.rendered(uf.Tree(work), [7], [], LIMITS).items():
         (work / path).write_text(text.after, encoding="utf-8")
-    record = tmp_path / "record"
-    record.mkdir()
-    (record / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")
-    (record / "reviewed-pr").write_text("o/r#12\n", encoding="utf-8")
-    (record / "reviewed-base").write_text("main\n", encoding="utf-8")
-    monkeypatch.setenv("NDF_DESIGN_RECORD_DIR", str(record))
-    _stage(monkeypatch, work)
-    return record
+    held = {"repo": "o/r", "pr": 12, "head": _commit(work), "base": "main"}
+    _stage(monkeypatch, work, reviewed=held)
+    return held
 
 
 def _stage(monkeypatch, work: Path, **extra) -> None:
@@ -641,103 +636,86 @@ def _stage(monkeypatch, work: Path, **extra) -> None:
     monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({k: v for k, v in held.items() if v is not None}))
 
 
-def test_cli_record_check_writes_checked_json_from_the_reviewed_commit(reviewed, work, capsys):
+def _snapshot(root: Path) -> dict:
+    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file() and ".git" not in p.parts}
+
+
+def test_cli_design_gate_returns_the_units_of_the_reviewed_commit(reviewed, work, capsys):
     (work / "issues" / "issue-7-plan.units.json").write_text("壊れた", encoding="utf-8")
+    before = _snapshot(work)
 
-    _, out = _run(capsys, "check")
+    _, out = _run(capsys, "check", "--design-gate")
 
-    assert (out["status"], out["outputs"]) == ("ok", {"design_pr": 12})
-    checked = json.loads((reviewed / "checked.json").read_text(encoding="utf-8"))
-    assert checked == {
-        "ndf_record": "design-units-check",
-        "head": Git(work).run("rev-parse", "HEAD").strip(),
-        "branch": "sprint/7",
-        "issues": [7],
-        "handling": {"7": {"handling": "実装する", "into": None}},
-        "omitted": [],
-        "limits": {"target": 400, "max": 1000},
-        "criteria": {"7": 2},
-        "units": _kinds(out, "unit"),
+    assert out["status"] == "ok"
+    assert out["outputs"] == {
+        "design_units": {
+            "head": reviewed["head"],
+            "branch": "sprint/7",
+            "issues": [7],
+            "handling": {"7": {"handling": "実装する", "into": None}},
+            "omitted": [],
+            "limits": {"target": 400, "max": 1000},
+            "criteria": {"7": 2},
+            "units": _kinds(out, "unit"),
+        }
     }
+    # 承認の記録は 2 つの出力からそのまま組める
+    assert design_record.build(reviewed, out["outputs"]["design_units"])["review"] == reviewed
+    assert _snapshot(work) == before
 
 
 @pytest.mark.parametrize(
     ("change", "kind"),
-    [("head", "approval_stale"), ("no_branch", "precondition"), ("other_pr", "refused"), ("no_file", "precondition")],
+    [
+        ("head", "approval_stale"),
+        ("no_branch", "precondition"),
+        ("other_pr", "refused"),
+        ("null", "precondition"),
+        ("none", "precondition"),
+    ],
 )
-def test_cli_record_check_writes_nothing_when_it_stops(reviewed, work, capsys, monkeypatch, change, kind):
-    (reviewed / "checked.json").write_text(json.dumps({"ndf_record": "design-units-check"}), encoding="utf-8")
+def test_cli_design_gate_returns_no_design_units_when_it_stops(reviewed, work, capsys, monkeypatch, change, kind):
     if change == "head":
         git_sandbox.sh(work, "commit", "-q", "--allow-empty", "-m", "next", identity=True)
     elif change == "no_branch":
-        _stage(monkeypatch, work, branch=None)
+        _stage(monkeypatch, work, reviewed=reviewed, branch=None)
     elif change == "other_pr":
-        _stage(monkeypatch, work, design_pr=13)
+        _stage(monkeypatch, work, reviewed=reviewed, design_pr=13)
+    elif change == "null":
+        monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps({"issues": [7], "worktree": str(work), "reviewed": None}))
     else:
-        (reviewed / "reviewed-pr").unlink()
+        _stage(monkeypatch, work)
 
-    _, out = _run(capsys, "check")
+    _, out = _run(capsys, "check", "--design-gate")
 
     assert out["cause"]["kind"] == kind
-    assert not (reviewed / "checked.json").exists()
+    assert "outputs" not in out
 
 
-def test_cli_record_check_refuses_a_reviewed_table_mismatch_without_docs(reviewed, work, capsys):
-    plan = work / "issues" / "issue-7-plan.md"
-    plan.write_text(_plan(1, 2), encoding="utf-8")
-    (reviewed / "reviewed-head").write_text(_commit(work) + "\n", encoding="utf-8")
+def test_cli_design_gate_compares_the_plan_without_docs(reviewed, work, capsys, monkeypatch):
+    (work / "issues" / "issue-7-plan.md").write_text(_plan(1, 2), encoding="utf-8")
+    _stage(monkeypatch, work, reviewed={**reviewed, "head": _commit(work)})
 
-    _, out = _run(capsys, "check")
+    _, out = _run(capsys, "check", "--design-gate")
 
     assert out["cause"]["kind"] == "invalid"
-    assert not (reviewed / "checked.json").exists()
+    assert "outputs" not in out
 
 
-def test_cli_record_check_keeps_a_file_put_there_during_the_check(reviewed, work, capsys, monkeypatch):
-    check = uf.check
-
-    def put_then_check(*args):
-        (reviewed / "checked.json").write_text("memo", encoding="utf-8")
-        return check(*args)
-
-    monkeypatch.setattr(uf, "check", put_then_check)
-
-    _, out = _run(capsys, "check")
-
-    assert out["cause"]["kind"] == "refused"
-    assert (reviewed / "checked.json").read_text(encoding="utf-8") == "memo"
-    assert [p.name for p in reviewed.glob(".checked.json.*")] == []
-
-
-@pytest.mark.parametrize("held", [b"{}", b"memo", b"\xff"])
-def test_cli_record_check_keeps_a_checked_json_that_ndf_did_not_write(reviewed, work, capsys, held):
-    (reviewed / "checked.json").write_bytes(held)
-
-    _, out = _run(capsys, "check")
-
-    assert out["cause"]["kind"] == "refused"
-    assert (reviewed / "checked.json").read_bytes() == held
-
-
-def test_cli_record_check_does_not_write_through_an_existing_temporary_name(reviewed, work, capsys, tmp_path):
-    other = tmp_path / "other"
-    other.write_text("keep", encoding="utf-8")
-    (reviewed / "checked.tmp").symlink_to(other)
-
-    _, out = _run(capsys, "check")
-
-    assert out["status"] == "ok"
-    assert other.read_text(encoding="utf-8") == "keep"
-    assert (reviewed / "checked.tmp").is_symlink()
-
-
-def test_cli_record_check_names_the_review_launch_setting(reviewed, work, capsys):
+def test_cli_design_gate_names_the_review_launch_setting(reviewed, work, capsys, monkeypatch):
     _declare(work, {"launch": {"review": ["my-review"]}})
-    (reviewed / "reviewed-head").write_text("", encoding="utf-8")
+    _stage(monkeypatch, work)
 
-    _, out = _run(capsys, "check")
+    _, out = _run(capsys, "check", "--design-gate")
 
-    assert "workflow.launch.review" in out["cause"]["detail"] and "--reviewed-base-out" in out["cause"]["detail"]
+    assert "workflow.launch.review" in out["cause"]["detail"] and "--follow-base" in out["cause"]["detail"]
+
+
+@pytest.mark.parametrize("extra", [("--issue", "7"), ("issues/issue-7-plan.units.json",)])
+def test_cli_design_gate_takes_only_the_stage_input(reviewed, capsys, extra):
+    _, out = _run(capsys, "check", "--design-gate", *extra)
+
+    assert out["cause"]["kind"] == "invalid"
 
 
 def _make_read_only(path: Path) -> None:

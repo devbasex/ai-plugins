@@ -401,6 +401,27 @@ def _split_outputs(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> tu
     return explicit, filled
 
 
+# 同じ工程の後のステップへ渡す出力のキー → それを出すステップ（承認の記録の材料。#3702 の決定 13）
+CARRIED_STEPS = {"reviewed": "design-pr-review", "design_units": "units-check"}
+
+
+def carried_values(stage: StageDef, done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """工程 `stage` の済んだステップ（`done`: ステップの id → 結果）から、後のステップへ渡す値を取る。出すステップの outputs
+    にあるキーだけを返す（null も値である）。"""
+    ids = {st.id for st in stage.steps}
+    out: dict[str, Any] = {}
+    for key, step in CARRIED_STEPS.items():
+        outputs = done[step].get("outputs") if step in ids and step in done else None
+        if isinstance(outputs, dict) and key in outputs:
+            out[key] = outputs[key]
+    return out
+
+
+def carried_inputs(stage: StageDef, context: Mapping[str, Any], done: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """文脈から `CARRIED_STEPS` のキーを除き、`carried_values` を重ねる。前の回や前の工程の値を混ぜないためである。"""
+    return {**{k: v for k, v in context.items() if k not in CARRIED_STEPS}, **carried_values(stage, done)}
+
+
 def outputs_draft(stage: StageDef, rev: int, outputs: Mapping[str, Any], actor: str) -> tuple[Optional[model.EventDraft], list[str]]:
     """工程の出力を文脈へ書く事象の下書き。キーは工程の定義の `outputs` に列挙したものだけ。
 

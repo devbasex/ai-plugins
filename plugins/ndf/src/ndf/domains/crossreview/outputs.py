@@ -1,4 +1,4 @@
-"""`ndf cross-review run` の出力（`--reviewed-out`・`--reviewed-pr-out`・`--reviewed-base-out`。中身は 1 行）の片付けと書き込み。
+"""`ndf cross-review run` の出力（`--reviewed-out`・`--reviewed-pr-out`。中身は 1 行）の片付けと書き込み。
 
 出力を書くとき、書く中身と出力のファイルの同一性（デバイス番号と inode）を、出力の隣の記録（`.<名前>.ndf-output.json`）に
 残す。次の起動の始めには、出力が記録と同じファイルで、中身のバイト列全体が記録の中身と一致するときだけ空に戻す（前の起動の
