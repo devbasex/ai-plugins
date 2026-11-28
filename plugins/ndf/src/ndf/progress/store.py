@@ -659,3 +659,17 @@ def _pg_run_lock(store: Store, machine_id: str) -> Iterator[None]:
             yield
         finally:
             conn.execute(sa.text("SELECT pg_advisory_unlock(:space, :key)"), params)
+
+
+@contextmanager
+def approval_lock(store: Store, machine_id: str) -> Iterator[None]:
+    """承認を書く操作（`ndf answer` の回答と、工程の開き直し）を 1 つに限る。取れなければ待たずに `Refused`。
+
+    回答は PR へ証跡を書いてから DB へ追記するので、間に開き直しが確定すると、記録の無い承認が PR に残る。
+    工程を流す作業の排他（`run_lock`）とは別のキーなので、作業が流れていても回答できる。"""
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(run_lock(store, f"{machine_id}#approval"))
+        except model.Refused:
+            raise model.Refused(f"ステートマシン {machine_id} の回答か開き直しを書いている。終わってから同じコマンドを打ち直す") from None
+        yield

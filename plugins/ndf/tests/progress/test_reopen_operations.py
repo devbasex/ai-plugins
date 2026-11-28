@@ -571,3 +571,82 @@ def test_a_reopen_by_hand_does_not_count_as_a_user_choice(repo):
     hub.rest("POST", "/repos/o/r/issues/7/comments", {"body": merge_approval.render_merge_row(row)})
     assert merge_approval.merge_rows(hub, 7, hub.viewer()) == []
     assert "reopen" not in merge_approval.BY_CHOICES
+
+
+def test_an_answer_and_a_reopen_exclude_each_other(repo, st, env, capsys):
+    """回答は PR へ証跡を書いてから DB へ追記するので、開き直しと同じ排他を取る。"""
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, env.env)
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    with store.approval_lock(st, tid), pytest.raises(model.Refused, match="回答か開き直し"):
+        _approve_production(st, tid, env, target)
+    assert env.hub.comments_of == {}
+
+    _approve_production(st, tid, env, target)
+    lanes.turn(st, tid, repo, env.env)
+    before, calls = _events(st, tid), list(env.hub.calls)
+    with store.approval_lock(st, tid):
+        out = _retry(capsys, tid, DESIGN, "--later", "keep")
+    assert out["cause"]["kind"] == "refused" and "回答か開き直し" in out["cause"]["detail"], out
+    assert _events(st, tid) == before and env.hub.calls == calls
+
+
+def test_resending_an_answer_from_before_a_reopen_writes_no_approval(repo, st, env, capsys):
+    """取り消した承認の回答を別のアカウントで送り直しても、そのアカウントの承認は作らない。"""
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, env.env)
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    post = gate.github_post(Path.cwd(), hub=lambda: env.hub)  # type: ignore[arg-type,return-value]
+    v = run.read(st, tid)
+    seen = gate.Target(target.head, None, target.repo, target.number, target.base, True)
+    q = replace(gate.question(v, run.decide(v)), target=seen)
+    asking.write_material(st.root, v, q)
+    shown = asking.read_presented(st.root, q).presentation
+    given = gate.Answer(q.id, "approved", "承認する", "human", "resent", seen=gate.Target(head=target.head, presentation=shown))
+    gate.answer(st, tid, given, lambda q, *, material=True: seen, post)
+    lanes.turn(st, tid, repo, env.env)
+    _retry(capsys, tid, DESIGN, "--later", "keep")
+    comments = list(env.hub.comments_of[target.number])
+    env.hub.login, env.hub.account_id = "someone", 2
+
+    again = gate.answer(st, tid, given, lambda q, *, material=True: seen, post)
+
+    assert again["metrics"]["replayed"] is True, again
+    assert env.hub.comments_of[target.number] == comments and _judgment(env, target) is None
+
+
+def test_the_same_reopen_sent_again_returns_the_first_result(repo, st, env, capsys):
+    tid = _new(capsys)
+    _at_release_gate(st, tid, repo, env)
+    first = _retry(capsys, tid, DESIGN, "--later", "reopen")
+    before, calls = _events(st, tid), list(env.hub.calls)
+
+    again = _retry(capsys, tid, DESIGN, "--later", "reopen")
+
+    assert again["status"] == "ok", again
+    assert again["items"] == first["items"] and again["metrics"]["seqs"] == first["metrics"]["seqs"]
+    assert _events(st, tid) == before and env.hub.calls == calls
+    # 理由が違うか、一緒に開き直されただけの工程への打ち直しは、送り直しと扱わない
+    assert _retry(capsys, tid, DESIGN, "--later", "reopen", reason="別の理由")["status"] != "ok"
+    assert _retry(capsys, tid, "デプロイ", "--later", "reopen")["status"] != "ok"
+    lanes.turn(st, tid, repo, env.env)
+    assert _retry(capsys, tid, DESIGN, "--later", "reopen")["status"] != "ok"
+
+
+def test_an_append_conflict_does_not_read_the_pr_again(repo, st, env, capsys, monkeypatch):
+    tid, target = _approved_design(capsys, repo, st, env)
+    env.hub.calls.clear()
+    append, conflicts = store.append_events, [True]
+
+    def flaky(*args, **kwargs):
+        if conflicts:
+            conflicts.pop()
+            raise store.Conflict("ぶつかった")
+        return append(*args, **kwargs)
+
+    monkeypatch.setattr(store, "append_events", flaky)
+
+    out = _retry(capsys, tid, DESIGN, "--later", "keep")
+
+    assert out["status"] == "ok", out
+    assert env.hub.calls.count("comments") == 1 and env.hub.dequeued == [target.number]

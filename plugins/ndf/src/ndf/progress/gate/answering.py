@@ -291,6 +291,8 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
     """回答を事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
     同じ冪等のキーは書かずに同じ結果を返す。
 
+    回答の確かめから DB の確定までは、開き直しと共有する排他（`store.approval_lock`）の中で行う。
+
     承認の対象を持つ質問への回答は、記録の前にマージの承認の証跡を PR へ書く（`_trail_by`・`_post_trail`。#4409 の
     決定 7）。承認は本番へ反映され得るときだけ、却下はいつも書く。証跡を書けなければ回答を記録せず、同じ回答を
     送り直すと続きから回復する。同じ冪等のキーの回答が既に
@@ -298,32 +300,34 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
     if not ACTORS.match(a.by):
         raise model.Refused(actors.invalid_message(a.by))
     text = run.notes_text(a.value, a.notes)
-    with store.transaction(st) as conn:
-        v = run.view(conn, machine_id)
-        held = _answered_with_key(v, a.key)
-        if held is not None:
-            return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
-        q, seen = _refusal(v, a, observe, st.root)
-        # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
-        q = replace(q, target=seen)
-        by = _trail_by(conn, q, a, seen)
-        if by is not None:
-            _post_trail(q, a, seen, by, post)
-        carried = _carry(conn, machine_id, a.drop, a.reason)
-        rejected = _reject_release(conn, q, a)
-        extra = {
-            "gate_id": q.id,
-            "gate": q.gate,
-            "by": a.by,
-            "key": a.key,
-            "seen": seen.as_dict(),
-            "dropped": list(a.drop),
-            "carried_row": carried,
-            "release_request": rejected,
-        }
-        draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
-        drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
-        seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0)
+    # 回答の確かめから証跡の投稿と DB の確定まで、開き直しと同じ排他で守る
+    with store.approval_lock(st, machine_id):
+        with store.transaction(st) as conn:
+            v = run.view(conn, machine_id)
+            held = _answered_with_key(v, a.key)
+            if held is not None:
+                return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
+            q, seen = _refusal(v, a, observe, st.root)
+            # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
+            q = replace(q, target=seen)
+            by = _trail_by(conn, q, a, seen)
+            if by is not None:
+                _post_trail(q, a, seen, by, post)
+            carried = _carry(conn, machine_id, a.drop, a.reason)
+            rejected = _reject_release(conn, q, a)
+            extra = {
+                "gate_id": q.id,
+                "gate": q.gate,
+                "by": a.by,
+                "key": a.key,
+                "seen": seen.as_dict(),
+                "dropped": list(a.drop),
+                "carried_row": carried,
+                "release_request": rejected,
+            }
+            draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
+            drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
+            seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0)
     summary = f"工程 {q.stage} へ回答 {a.value} を書いた（{a.by}）。続きは ndf progress next で流す"
     metrics = {"machine_id": machine_id, "seqs": seqs, "gate_id": q.id, "carried_row": carried}
     out = result.result(TOOL, result.OK, summary, metrics=metrics, next=result.command("progress", "next", machine_id))
@@ -358,7 +362,10 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
 def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:
     """記録済みの回答の証跡が無ければ書く（証跡の後・記録の前でなく、記録の後に止まった送り直し）。
 
-    担い手は記録した回答した者（事象の `by`）から決める。送り直しの `a.by` は `_same` が記録と同じことを確かめている。"""
+    担い手は記録した回答した者（事象の `by`）から決める。送り直しの `a.by` は `_same` が記録と同じことを確かめている。
+    工程の直近の開き直しより前の回答には書かない（取り消した承認を、送り直しで PR へ戻さない）。"""
+    if held.seq < v.last_reopened(str(held.draft.row_key)):
+        return
     p = run.event_payload(held)
     seen = Target.from_dict(p.get("seen"))
     gate = p.get("gate")

@@ -145,6 +145,23 @@ def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mappin
     return Reopen(drafts, names, warnings, _revocations(since, v.machine_id, names))
 
 
+def committed_reopen(v: View, *, trigger: Mapping[str, Any], later: str, reason: str) -> list[model.Event]:
+    """同じきっかけ・後ろの扱い・理由の、直近の開き直しの事象。開き直した工程にその後の記録があるか、無ければ空。"""
+    batch: list[model.Event] = []
+    for ev in v.events:
+        p = event_payload(ev)
+        same = ev.draft.kind == REOPENED and ev.draft.reason == reason and ev.draft.rev == v.rev
+        if not (same and p.get("trigger") == dict(trigger) and p.get("later") == later):
+            continue
+        # 1 回の開き直しの事象は番号が続く。離れていれば後の回だけを採る
+        batch = [*batch, ev] if batch and batch[-1].seq + 1 == ev.seq else [ev]
+    if not batch:
+        return []
+    names = {ev.draft.row_key for ev in batch}
+    moved = any(ev.seq > batch[-1].seq and ev.draft.row_key in names for ev in v.events)
+    return [] if moved else batch
+
+
 def revoke_approvals(r: Reopen, post: Revoke) -> None:
     """承認を取り消し、PR をマージキューから外す。DB の追記より前に呼ぶ（できなければ `post` が `model.Refused`）。"""
     if r.revoke:

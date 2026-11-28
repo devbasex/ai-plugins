@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
@@ -52,25 +53,43 @@ def _retry_refusal(machine_id: str, stage: str, state: str, later: Optional[str]
 
 
 def _reopen_stage(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    """終了した工程を開き直し、進捗記録を書き直す。PR の承認の取り消しは、DB の追記より先に行う。"""
-    revoke = _revoker(cwd)
+    """終了した工程を開き直し、進捗記録を書き直す。PR の承認の取り消しは、DB の追記より先に行う。
+
+    読み取りから追記までは、回答と共有する排他（`store.approval_lock`）の中で行う。"""
+    with store.approval_lock(st, a.machine_id):
+        planned, seqs = _append_reopen(a, st, _revoker(cwd))
+    _, errors = sync_records(run.read(st, a.machine_id), cwd, github_records)
+    unsynced = [f"{e}（ndf progress resync {a.machine_id} で揃える）" for e in errors]
+    return command.with_warnings(_reopened_result(a, planned, seqs), after=[*planned.warnings, *unsynced])
+
+
+def _append_reopen(a: argparse.Namespace, st: store.Store, revoke: reopening.Revoke) -> tuple[reopening.Reopen, list[int]]:
+    """承認を取り消してから開き直しを追記する。追記がぶつかって打ち直すときは、取り消す対象が変わった場合だけ PR を読み直す。"""
     attempts = command.append_attempts()
+    revoked: list[merge_approval.Revocation] = []
     for attempt in range(1, attempts + 1):
         v = run.read(st, a.machine_id)
-        planned = reopening.plan_reopen(v, a.stage, later=a.later, reason=a.reason, trigger={"by": "retry"})
-        reopening.revoke_approvals(planned, revoke)
+        planned = reopening.plan_reopen(v, a.stage, later=a.later, reason=a.reason, trigger=_trigger(a))
+        if planned.revoke != revoked:
+            reopening.revoke_approvals(planned, revoke)
+            revoked = planned.revoke
         try:
             with store.transaction(st) as conn:
-                # 読んだ後に承認が増えていれば（回答は排他を取らない）、取り消す対象を組み直す
-                seqs = store.append_events(conn, a.machine_id, planned.drafts, v.events[-1].seq)
-            break
+                return planned, store.append_events(conn, a.machine_id, planned.drafts, v.events[-1].seq)
         except store.Conflict:
             if attempt == attempts:
                 raise
-    _, errors = sync_records(run.read(st, a.machine_id), cwd, github_records)
-    unsynced = [f"{e}（ndf progress resync {a.machine_id} で揃える）" for e in errors]
-    summary = f"ステートマシン {a.machine_id} の工程を開き直した: {'・'.join(planned.stages)}。続きは ndf progress next で流す"
-    out = result.result(
+    raise AssertionError("到達しない")
+
+
+def _trigger(a: argparse.Namespace) -> dict[str, str]:
+    """開き直しの事象に残すきっかけ。指定した工程は、送り直しの判定に使う。"""
+    return {"by": "retry", "stage": a.stage}
+
+
+def _reopened_result(a: argparse.Namespace, planned: reopening.Reopen, seqs: list[int], note: str = "") -> dict[str, Any]:
+    summary = f"ステートマシン {a.machine_id} の工程を開き直した: {'・'.join(planned.stages)}。続きは ndf progress next で流す{note}"
+    return result.result(
         command.TOOL,
         result.OK,
         summary,
@@ -78,7 +97,20 @@ def _reopen_stage(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str
         metrics={"machine_id": a.machine_id, "seqs": seqs},
         next=result.command(command.TOOL, "next", a.machine_id),
     )
-    return command.with_warnings(out, after=[*planned.warnings, *unsynced])
+
+
+def _replayed_reopen(a: argparse.Namespace, v: run.View) -> Optional[dict[str, Any]]:
+    """確定した開き直しの送り直しなら、書かず GitHub へ要求も送らずに初回と同じ結果を返す。違えば None。
+
+    送り直しと扱うのは、同じ工程・理由・後ろの扱いの開き直しがあり、開き直した工程にその後の記録が無いときである。"""
+    batch = reopening.committed_reopen(v, trigger=_trigger(a), later=a.later, reason=a.reason)
+    if not batch:
+        return None
+    before = replace(v, events=[ev for ev in v.events if ev.seq < batch[0].seq])
+    planned = reopening.plan_reopen(before, a.stage, later=a.later, reason=a.reason, trigger=_trigger(a))
+    note = f"（開き直しは記録済み。進捗記録が古ければ ndf progress resync {a.machine_id} で揃える）"
+    out = _reopened_result(a, planned, [ev.seq for ev in batch], note)
+    return command.with_warnings(out, after=planned.warnings)
 
 
 def _cmd_retry(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
@@ -89,6 +121,9 @@ def _cmd_retry(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, A
         v = run.read(st, a.machine_id)
         v.snap.stage(a.stage)  # 工程の無い名前はここで断る
         state = v.rows[a.stage].state
+        replayed = _replayed_reopen(a, v) if state == "pending" and a.later else None
+        if replayed is not None:
+            return replayed
         refused = _retry_refusal(a.machine_id, a.stage, state, a.later)
         if refused is not None:
             whole = f"ステートマシンは{model.label(v.whole)}。" if model.is_terminal(v.whole) else ""
