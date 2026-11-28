@@ -409,6 +409,12 @@ class Git:
             return Completed(128, "", str(e))
         return self.attempt("checkout", "-q", "--detach", sha)
 
+    def checkout_paths(self, commit: str, paths: Sequence[str]) -> None:
+        """`paths` の中身を `commit` のものにする（索引と作業場所）。`commit` は `-` で始まらない完全な SHA に限る。"""
+        if not FULL_SHA.match(commit):
+            raise GitError(f"完全な SHA でない: {commit!r}")
+        self.run("checkout", "-q", commit, "--", *paths)
+
     def merge_ff(self, ref: str) -> Completed:
         """`ref` を fast-forward だけでマージする。結果はそのまま返す。`ref` を option として読ませない（3364-7）。"""
         return self.attempt("merge", "--ff-only", "-q", END_OF_OPTIONS, ref)
