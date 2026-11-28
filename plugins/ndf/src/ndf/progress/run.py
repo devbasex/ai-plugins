@@ -94,12 +94,21 @@ def append(
 ) -> list[int]:
     """`build` が今のステートマシンから作った下書きを追記する（ぶつかれば作り直す。空なら書かない）。`after` は同じトランザクションで打つ。"""
 
+    def with_conn(conn: Any, v: View) -> list[model.EventDraft]:
+        drafts = build(v)
+        after(conn)
+        return drafts
+
+    return append_in(st, machine_id, with_conn)
+
+
+def append_in(st: store.Store, machine_id: str, build: Callable[[Any, View], list[model.EventDraft]]) -> list[int]:
+    """`append` と同じで、`build` にトランザクションの接続も渡す（下書きを作るのに、ほかのステートマシンを読み書きする）。"""
+
     def write(conn: Any) -> list[int]:
         v = view(conn, machine_id)
-        drafts = build(v)
-        seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
-        after(conn)
-        return seqs
+        drafts = build(conn, v)
+        return store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
 
     return command.retrying_transaction(st, write)
 
@@ -852,19 +861,23 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
 
 def write_step(d: Drive, v: View, s: stages.StageDef, drafts: list[model.EventDraft]) -> None:
     """ステップの結果の事象を書く。消費した設計の承認を無効にする（承認ゲートのステップを未了に戻す）なら、同じ
-    トランザクションで、回答が外した課題を戻し、課題を繰り越したレーンの行を取り消す。"""
+    トランザクションで、回答が外した課題を戻し、課題を繰り越したレーンの行を取り消す。
+
+    繰り越し行を取り消せなければ、承認は無効にせず失敗の事象（最後の下書き）だけを書き、理由へ直し方を足す。
+    承認ゲートのステップは済んだままなので、`retry` の後に同じステップがもう一度止まり、ここで無効にし直す。
+    """
     answered = withdraw.consumed_answer(v, s, design_record.GATE, drafts)
     if answered is None:
         d.write(*drafts)
         return
     why = f"工程 {s.name} が {APPROVAL_STALE} で止まり、外した承認が無効になった"
-    # 失敗の事象（最後）は行を実行中でなくするので、課題を戻す事象はその前に置く
-    append(
-        d.st,
-        d.machine_id,
-        lambda now: [*drafts[:-1], *withdraw.undropped(now, s.name, answered), drafts[-1]],
-        lambda conn: withdraw.uncarry(conn, d.machine_id, answered, why),
-    )
+    failed = drafts[-1]
+    try:
+        # 失敗の事象は行を実行中でなくするので、課題を戻す事象はその前に置く
+        append_in(d.st, d.machine_id, lambda conn, now: [*drafts[:-1], *withdraw.take_back(conn, now, s.name, answered, why), failed])
+    except withdraw.Blocked as exc:
+        cause = failed.payload["cause"]
+        d.write(_failed_with(s, failed.payload["step"], v.rev, {**cause, "detail": f"{cause['detail']}。{exc}"}))
 
 
 def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any], dict[str, Any]]:

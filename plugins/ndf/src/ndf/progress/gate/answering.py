@@ -550,20 +550,13 @@ def _take_back(
 
     比べた後に回答が読まれていれば（同じ回答の事象が今も読む回答でなければ）何も書かない。"""
     stage = str(answered.draft.row_key)
-    undo: list[bool] = []
 
-    def build(now: run.View) -> list[model.EventDraft]:
-        undo.clear()
+    def build(conn: Any, now: run.View) -> list[model.EventDraft]:
         if not _still(now, answered):
             return []
-        undo.append(True)
-        return [*back(now), *withdraw.undropped(now, stage, answered)]
+        return [*back(now), *withdraw.take_back(conn, now, stage, answered, why)]
 
-    def after(conn: Any) -> None:
-        if undo:
-            withdraw.uncarry(conn, machine_id, answered, why)
-
-    run.append(st, machine_id, build, after)
+    run.append_in(st, machine_id, build)
 
 
 # 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）
@@ -628,7 +621,7 @@ def _reopen_unbound(st: store.Store, machine_id: str) -> Optional[str]:
     消費済みなら承認ゲートのステップを先に未了に戻す。書く時点で同じ承認でなくなっていれば何も書かない。"""
     held: list[_Unbound] = []
 
-    def build(now: run.View) -> list[model.EventDraft]:
+    def build(conn: Any, now: run.View) -> list[model.EventDraft]:
         held.clear()
         got = _unbound_approval(now)
         if got is None:
@@ -637,13 +630,10 @@ def _reopen_unbound(st: store.Store, machine_id: str) -> Optional[str]:
         name, step = got.stage.name, got.step
         reset = [_no_report_draft(now, name, step.id, stages.RESET, got.generation, UNBOUND_REASON)] if got.consumed else []
         wait = _no_report_draft(now, name, step.id, "waiting", got.generation, UNBOUND_REASON)
-        return [*reset, wait, *_reading_reset(now, name, step.gate), *withdraw.undropped(now, name, got.answered)]
+        undone = withdraw.take_back(conn, now, name, got.answered, UNBOUND_REASON)
+        return [*reset, wait, *_reading_reset(now, name, step.gate), *undone]
 
-    def after(conn: Any) -> None:
-        if held:
-            withdraw.uncarry(conn, machine_id, held[0].answered, UNBOUND_REASON)
-
-    run.append(st, machine_id, build, after)
+    run.append_in(st, machine_id, build)
     return UNBOUND_REASON if held else None
 
 

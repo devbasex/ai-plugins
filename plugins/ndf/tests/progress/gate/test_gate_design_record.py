@@ -15,7 +15,7 @@ import pytest
 
 from ndf.adapters.git import Git
 from ndf.contracts import result
-from ndf.progress import definition, gate, invoke, model, run, run_view, stage_inputs, stages
+from ndf.progress import definition, gate, invoke, lane, model, plan, run, run_view, stage_inputs, stages, store
 from ndf.progress import design_record as dr
 
 REVIEW, IMPLEMENT = "ドキュメントレビュー", "実装"
@@ -364,6 +364,48 @@ def test_a_stale_merge_returns_to_the_review(st, machine):
     # 無効になった承認で外した課題は、今のスプリントへ戻る
     assert run.read(st, machine.tid).context()["issues"] == [7, 8]
     _fail_and_retry(st, machine, "design-merge-approved")
+
+
+def _approved_with_a_drop(st, machine) -> tuple[str, str]:
+    """課題 8 を外して承認し、（計画の ID, 繰り越し行のキー）を返す。"""
+    machine.turn()
+    _answer(st, machine.tid, _observe(machine), drop=(8,))
+    machine.fake.script["design-merge-approved"] = _stale("design-merge-approved")
+    with store.transaction(st) as conn:
+        pid = lane.sprint_row(conn, machine.tid)[0]
+    return pid, _answers(st, machine.tid)[-1]["carried_row"]
+
+
+def test_a_cancelled_carried_row_does_not_block_the_stale_merge(st, machine):
+    pid, carried = _approved_with_a_drop(st, machine)
+    with store.transaction(st) as conn:
+        lane.cancel_row(conn, pid, "a", carried, lane.RowChange("conductor", "整理"))
+
+    machine.turn()
+
+    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
+    _fail_and_retry(st, machine, "design-merge-approved")
+
+
+def test_a_carried_row_another_lane_waits_for_keeps_the_approval_until_released(st, machine):
+    pid, carried = _approved_with_a_drop(st, machine)
+    decl = {
+        "name": "b",
+        "kind": "sprint",
+        "touches": ["b/"],
+        "after": [f"a/{carried}"],
+        "rows": [{"kind": "sprint", "issues": [99], "args": []}],
+    }
+    with store.transaction(st) as conn:
+        plan.add_lane(conn, pid, decl)
+
+    machine.turn()
+
+    v = run.read(st, machine.tid)
+    assert run.decide(v).action == run.Action.FAILED
+    assert v.context()["issues"] == [7]
+    assert "design-gate" in _done(st, machine.tid)
+    assert "ndf lanes set" in run.report(v, run.decide(v))["summary"]
 
 
 # --- 入力の組み立て ------------------------------------------------------------------------------
