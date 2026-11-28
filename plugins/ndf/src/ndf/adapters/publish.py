@@ -23,6 +23,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+from ndf import identity
 from ndf.adapters import run_log
 from ndf.adapters.github import PUBLIC, UNKNOWN, GitHub, same_repo
 
@@ -38,6 +39,8 @@ PUBLIC_EMAILS = frozenset({"git@github.com", "noreply@github.com", "noreply@anth
 PUBLIC_EMAIL_DOMAIN = "users.noreply.github.com"
 # 公開の書き先と同じ検査をかける書き先の公開範囲（読めない書き先は公開と同じに扱う）
 SCRUBBED_VISIBILITIES = frozenset({PUBLIC, UNKNOWN})
+# NDF が本文へ置く目印（`<!-- ndf:...`）の名前の部分。同じ名前の手元のアカウントがあっても伏せない（伏せると読み戻せない）
+_OWN_MARK = rf"(?<=<!-- ){re.escape(identity.FIXED_WORDS['entrypoint'])}:"
 # 手元のアカウント名として扱わない短い名前（3 字未満は語の一部と区別できない）
 MIN_ACCOUNT_CHARS = 3
 # リポジトリへの参照。URL の形は `https://github.com/<所有者>/<リポジトリ>...`・scheme の無い `github.com/...`・
@@ -202,7 +205,7 @@ def _drop_accounts(text: str, accounts: Iterable[str]) -> tuple[str, int]:
     names = sorted({a for a in accounts if len(a) >= MIN_ACCOUNT_CHARS}, key=len, reverse=True)
     if not names:
         return text, 0
-    pattern = re.compile(r"(?<![\w.-])(?:" + "|".join(re.escape(n) for n in names) + r")(?![\w-])")
+    pattern = re.compile(rf"(?<![\w.-])(?!{_OWN_MARK})(?:" + "|".join(re.escape(n) for n in names) + r")(?![\w-])")
     return pattern.subn(ACCOUNT_TEXT, text)
 
 

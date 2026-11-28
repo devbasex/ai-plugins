@@ -133,7 +133,7 @@ class Filed(StrEnum):
 
 
 class Listed(NamedTuple):
-    """検索か一覧で読んだ Issue（`is_pull` は Pull Request）。"""
+    """検索か一覧で読んだ Issue（`is_pull` は Pull Request。`author_id` は作者のアカウント ID で、無ければ 0）。"""
 
     url: str
     body: str
@@ -141,6 +141,7 @@ class Listed(NamedTuple):
     association: str
     created_at: str
     is_pull: bool
+    author_id: int = 0
 
 
 def files_issue(row: Mapping[str, Any]) -> bool:
@@ -184,10 +185,11 @@ def issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str], iden
     return title, "\n\n".join(parts) + "\n"
 
 
-def trusted(author: str, me: str, logins: Collection[str]) -> bool:
-    """起票の記録と Issue の作者が、実行している login か、前に起票に使った login か。ほかの作者は、呼び手が対象リポジトリの
+def trusted(author_id: int, me: int, account_ids: Collection[int]) -> bool:
+    """起票の記録と Issue の作者が、実行しているアカウントか、前に起票に使ったアカウントか。login は手放すと別の
+    アカウントが取得できるので、アカウント ID で照らす（ID が無い 0 は当たらない）。ほかの作者は、呼び手が対象リポジトリの
     権限で確かめる（`GitHub.trusts`）。"""
-    return bool(author) and (author == me or author in logins)
+    return author_id > 0 and (author_id == me or author_id in account_ids)
 
 
 def _prose(text: str) -> str:

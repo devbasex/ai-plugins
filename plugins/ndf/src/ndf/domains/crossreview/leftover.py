@@ -10,38 +10,39 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
-from ndf.adapters.github import BOT_SUFFIX
-from ndf.adapters.github_pulls import PER_PAGE, Authored
+from ndf.adapters.github import BOT_SUFFIX, Viewer
+from ndf.adapters.github_pulls import PER_PAGE, Authored, account_id_of
 from ndf.contracts import limits
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import leftover_decide, settings, store, threads
 from ndf.domains.crossreview.leftover_decide import PARKED, Filed, Listed
 
-# 状態ファイルのキー: 起票に使った login・起票の記録のコメントの番号・一覧が上限を超えたときの上限の値
-LOGINS = "issue_logins"
+# 状態ファイルのキー: 起票に使ったアカウント ID・起票の記録のコメントの番号・一覧が上限を超えたときの上限の値
+ACCOUNT_IDS = "issue_account_ids"
 RECORD_ID = "issue_record_id"
 LIST_FULL = "issue_list_full"
 # 起票先を GitHub にする `.ndf/project.json` の `issues.primary` の値
 GITHUB = "github"
 # 起票の記録の URL が指す Issue を、GraphQL でまとめて読むときの欄
-ISSUE_FIELDS = "url body createdAt authorAssociation author { __typename login }"
+ISSUE_FIELDS = "url body createdAt authorAssociation author { __typename login ... on User { databaseId } ... on Bot { databaseId } }"
 
 Entries = dict[str, dict[str, Any]]
 
 
 class Comment(NamedTuple):
-    """PR のコメント（`updated_at` は GitHub が記録した更新時刻）。"""
+    """PR のコメント（`updated_at` は GitHub が記録した更新時刻。`author_id` は作者のアカウント ID で、無ければ 0）。"""
 
     id: int
     body: str
     author: str
     association: str
     updated_at: str
+    author_id: int = 0
 
 
 class TooMany(Exception):
@@ -55,7 +56,7 @@ class TooMany(Exception):
 class Port(Protocol):
     """起票の読み書きの口（テストは GitHub の偽物）。失敗は例外で、GitHub が断ったものは HTTP の状態 `status` を持つ。"""
 
-    def viewer(self) -> str: ...
+    def viewer(self) -> Viewer: ...
 
     def trusts(self, author: str, association: str) -> bool: ...
 
@@ -63,7 +64,7 @@ class Port(Protocol):
 
     def redact(self, *texts: str) -> list[str]: ...
 
-    def comments(self, pr: int) -> list[Comment]: ...
+    def comments(self, pr: int) -> Iterable[Comment]: ...
 
     def comment(self, comment_id: int) -> Comment: ...
 
@@ -148,10 +149,10 @@ class _Filing:
     # 識別値ごとの伏せた後の (本文, 起きること, 場所) と、元の PR と今の PR の URL
     texts: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     urls: list[str] = field(default_factory=list)
-    me: str = ""
+    me: int = 0  # 実行しているアカウントの ID
 
-    def logins(self) -> list[str]:
-        return [x for x in store.list_of(self.data, LOGINS) if isinstance(x, str)]
+    def account_ids(self) -> list[int]:
+        return [x for x in store.list_of(self.data, ACCOUNT_IDS) if type(x) is int]
 
     def fail(self, ident: str, reason: str) -> None:
         self.errors[ident] = reason
@@ -163,7 +164,10 @@ class _Filing:
 
     def read(self) -> None:
         """起票の記録を読む。`at` の無い項目（記録を書いた後に中断した）には、コメントの更新時刻を当てる。"""
-        self.me = self.port.viewer()
+        self.me = self.port.viewer().account_id
+        if not self.me:
+            # ID が分からないまま進むと、自分の書いた記録と Issue を見分けられず 2 件作る
+            raise ValueError("実行しているアカウントの ID を読めない")
         found = self._record()
         if found is None:
             return
@@ -172,11 +176,11 @@ class _Filing:
         for entry in self.entries.values():
             entry.setdefault("at", found.updated_at)
 
-    def _trusts(self, author: str, association: str) -> bool:
-        return leftover_decide.trusted(author, self.me, self.logins()) or self.port.trusts(author, association)
+    def _trusts(self, author: str, author_id: int, association: str) -> bool:
+        return leftover_decide.trusted(author_id, self.me, self.account_ids()) or self.port.trusts(author, association)
 
     def _usable(self, comment: Comment) -> bool:
-        return comment.body.startswith(leftover_decide.RECORD_MARK) and self._trusts(comment.author, comment.association)
+        return comment.body.startswith(leftover_decide.RECORD_MARK) and self._trusts(comment.author, comment.author_id, comment.association)
 
     def _record(self) -> Optional[Comment]:
         """起票の記録のコメント。番号を持てばその番号で読み、無い（消された）ときだけ元の PR のコメントの一覧から探す。"""
@@ -208,7 +212,9 @@ class _Filing:
     def _match(self, ident: str, listed: Sequence[Listed]) -> Optional[str]:
         """この指摘を扱う、信用する作者の Issue の URL。"""
         for issue in listed:
-            if leftover_decide.matches_finding(issue, ident, self.ref.origin_pr) and self._trusts(issue.author, issue.association):
+            if leftover_decide.matches_finding(issue, ident, self.ref.origin_pr) and self._trusts(
+                issue.author, issue.author_id, issue.association
+            ):
                 return issue.url
         return None
 
@@ -270,7 +276,9 @@ class _Filing:
             usable = {
                 ident
                 for ident, url in urls.items()
-                if (issue := read[url]) and leftover_decide.names_finding(issue, ident) and self._trusts(issue.author, issue.association)
+                if (issue := read[url])
+                and leftover_decide.names_finding(issue, ident)
+                and self._trusts(issue.author, issue.author_id, issue.association)
             }
         except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
             for ident in urls:
@@ -310,9 +318,9 @@ class _Filing:
         return at
 
     def announce(self, idents: Sequence[str]) -> Optional[str]:
-        """作る前に、使う login を状態へ残し、起票の記録へ識別値を書く。試みた時刻（この書き込みの応答の更新時刻）を返し、
+        """作る前に、使うアカウント ID を状態へ残し、起票の記録へ識別値を書く。試みた時刻（この書き込みの応答の更新時刻）を返し、
         書けなければ None（作らない）。"""
-        self.data[LOGINS] = list(dict.fromkeys([*self.logins(), self.me]))
+        self.data[ACCOUNT_IDS] = list(dict.fromkeys([*self.account_ids(), self.me]))
         self.save()
         for ident in idents:
             self.entries[ident] = {}
@@ -386,7 +394,7 @@ def file_issues(
     *,
     manual: bool = False,
 ) -> list[str]:
-    """起票の候補を起票し、行の `issue`・`issue_error` と状態の `issue_logins`・`issue_record_id`・`issue_list_full` を書いて
+    """起票の候補を起票し、行の `issue`・`issue_error` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて
     注意を返す。`primary` が `github` でないか候補が無ければ、GitHub を呼ばない。`manual` は利用者が打った公開である。
 
     呼び手は、今の PR の番号と元の PR の番号の公開のロック（同じ番号なら 1 回）を持つ。"""
@@ -408,7 +416,14 @@ def _author(row: Mapping[str, Any]) -> str:
 
 
 def _comment(row: Mapping[str, Any]) -> Comment:
-    return Comment(int(row["id"]), _text(row.get("body")), _author(row), _text(row.get("author_association")), _text(row.get("updated_at")))
+    return Comment(
+        int(row["id"]),
+        _text(row.get("body")),
+        _author(row),
+        _text(row.get("author_association")),
+        _text(row.get("updated_at")),
+        account_id_of(row.get("user")),
+    )
 
 
 def _listed_of(row: Mapping[str, Any]) -> Listed:
@@ -419,6 +434,7 @@ def _listed_of(row: Mapping[str, Any]) -> Listed:
         _text(row.get("author_association")),
         _text(row.get("created_at")),
         "/pull/" in _text(row.get("html_url")),
+        account_id_of(row.get("user")),
     )
 
 
@@ -436,6 +452,7 @@ def _listed_node(node: Mapping[str, Any]) -> Listed:
         _text(node.get("authorAssociation")),
         _text(node.get("createdAt")),
         False,
+        account_id_of(author),
     )
 
 
@@ -448,20 +465,20 @@ class GitHubIssues:
         hub: Any,
         publisher: Any,
         errors: type[Exception],
-        viewer: Callable[[], str],
+        viewer: Callable[[], Viewer],
         sleep: Callable[[float], None] = time.sleep,
         block: Optional[Callable[[float], None]] = None,
     ):
-        """`errors` は GitHub が断ったときの例外の型、`viewer` は実行している login を読む関数（1 回だけ呼ぶ）。"""
+        """`errors` は GitHub が断ったときの例外の型、`viewer` は実行している利用者を読む関数（`GitHub.viewer`。1 回だけ呼ぶ）。"""
         self.hub, self.publisher, self.errors = hub, publisher, errors
         self.sleep, self.block = sleep, block
         self._read_viewer = viewer
-        self._me: Optional[str] = None
+        self._me: Optional[Viewer] = None
 
     def _write(self, call: Callable[[], threads.T]) -> threads.T:
         return threads.patient(call, self.errors, self.sleep, self.block)
 
-    def viewer(self) -> str:
+    def viewer(self) -> Viewer:
         if self._me is None:
             self._me = self._read_viewer()
         return self._me
@@ -486,9 +503,10 @@ class GitHubIssues:
                 return
         raise TooMany(cap)
 
-    def comments(self, pr: int) -> list[Comment]:
-        pages = self._pages(f"/repos/{self.hub.repo}/issues/{int(pr)}/comments", {})
-        return [_comment(r) for rows in pages for r in rows]
+    def comments(self, pr: int) -> Iterator[Comment]:
+        """PR のコメントをページごとに読んで返す。呼び手が読むのをやめれば、後のページは取らない。"""
+        for rows in self._pages(f"/repos/{self.hub.repo}/issues/{int(pr)}/comments", {}):
+            yield from map(_comment, rows)
 
     def comment(self, comment_id: int) -> Comment:
         return _comment(self.hub.rest("GET", f"/repos/{self.hub.repo}/issues/comments/{int(comment_id)}"))

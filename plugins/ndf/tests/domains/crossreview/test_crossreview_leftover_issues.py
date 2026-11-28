@@ -9,13 +9,15 @@ from typing import Any
 import pytest
 
 from ndf.adapters import publish
-from ndf.adapters.github import PUBLIC, GitHub, GitHubError
+from ndf.adapters.github import PUBLIC, GitHub, GitHubError, Viewer
 from ndf.adapters.github_pulls import PER_PAGE
 from ndf.domains.crossreview import leftover, leftover_decide, store
 from ndf.domains.crossreview.leftover_decide import Filed, Listed
 
 REPO = "o/r"
 PR_URL = f"https://github.com/{REPO}/pull/7"
+# 偽の GitHub の login ごとのアカウント ID
+IDS = {"me": 1, "app[bot]": 2, "human": 3, "x": 4}
 
 
 class FakeGitHub:
@@ -40,9 +42,9 @@ class FakeGitHub:
         self._tick += 1
         return f"2026-11-27T00:00:{self._tick:02d}Z"
 
-    def viewer(self) -> str:
+    def viewer(self) -> Viewer:
         self.viewed += 1
-        return self.login
+        return Viewer(self.login, IDS[self.login])
 
     def permission(self, login: str) -> str:
         return self.permissions.get(login, "none")
@@ -51,7 +53,7 @@ class FakeGitHub:
         return {r: PUBLIC for r in repos}
 
     def _by(self, body: str) -> dict[str, Any]:
-        return {"body": body, "user": {"login": self.login}, "author_association": "NONE"}
+        return {"body": body, "user": {"login": self.login, "id": IDS[self.login]}, "author_association": "NONE"}
 
     def issue(self, body: str, **other: Any) -> dict[str, Any]:
         number = 100 + len(self.issues)
@@ -87,6 +89,7 @@ class FakeGitHub:
     def _node(self, issue: dict[str, Any]) -> dict[str, Any]:
         login = issue["user"]["login"]
         author = {"__typename": "Bot" if login.endswith("[bot]") else "User", "login": login.removesuffix("[bot]")}
+        author["databaseId"] = issue["user"]["id"]
         read = {"url": issue["html_url"], "body": issue["body"], "createdAt": issue["created_at"]}
         return read | {"authorAssociation": issue["author_association"], "author": author}
 
@@ -181,24 +184,27 @@ def test_issue_3780_matches_finding_needs_the_mark_and_the_url_outside_quotes() 
 
 
 @pytest.mark.parametrize(
-    ("author", "association", "permission", "wanted"),
+    ("author", "author_id", "association", "permission", "wanted"),
     [
-        ("x", "OWNER", "none", True),
-        ("x", "MEMBER", "write", True),
-        ("x", "MEMBER", "read", False),
-        ("x", "COLLABORATOR", "none", False),
-        ("x", "CONTRIBUTOR", "write", False),
-        ("me", "NONE", "none", True),
-        ("app[bot]", "NONE", "none", True),
+        ("x", 4, "OWNER", "none", True),
+        ("x", 4, "MEMBER", "write", True),
+        ("x", 4, "MEMBER", "read", False),
+        ("x", 4, "COLLABORATOR", "none", False),
+        ("x", 4, "CONTRIBUTOR", "write", False),
+        ("me", 1, "NONE", "none", True),
+        ("app[bot]", 2, "NONE", "none", True),
+        # 前に起票した login を、別のアカウントが取得した
+        ("app[bot]", 9, "NONE", "none", False),
+        ("", 0, "NONE", "none", False),
     ],
 )
-def test_trusted_authors(author: str, association: str, permission: str, wanted: bool) -> None:
+def test_trusted_authors(author: str, author_id: int, association: str, permission: str, wanted: bool) -> None:
     github = FakeGitHub()
     github.permissions[author] = permission
     run = Run(github)
-    run.data["issue_logins"] = ["app[bot]"]
-    filing = leftover._Filing(run.data, run.ref, run.port, lambda: None, {}, me="me")
-    assert filing._trusts(author, association) is wanted
+    run.data["issue_account_ids"] = [IDS["app[bot]"]]
+    filing = leftover._Filing(run.data, run.ref, run.port, lambda: None, {}, me=IDS["me"])
+    assert filing._trusts(author, author_id, association) is wanted
 
 
 def test_the_record_reads_back_what_it_writes_and_a_broken_body_is_empty() -> None:
@@ -217,7 +223,7 @@ def test_issue_3780_2_files_once_and_writes_the_url_to_the_row() -> None:
     assert run.go() == []
     url = github.issues[0]["html_url"]
     assert run.row[Filed.URL] == url and Filed.ERROR not in run.row
-    assert run.data["issue_logins"] == ["me"] and run.data["issue_record_id"] == github.records[0]["id"]
+    assert run.data["issue_account_ids"] == [IDS["me"]] and run.data["issue_record_id"] == github.records[0]["id"]
     # 作成を試みていない候補だけなら、検索も一覧も呼ばない
     assert github.count("GET", "search/issues") == 0 and github.count("GET", f"repos/{REPO}/issues") == 0
     assert run.go() == [] and github.created() == 1
@@ -241,10 +247,27 @@ def test_the_login_is_read_once_and_the_record_of_a_bot_is_trusted() -> None:
     first.go()
     github.login = "human"
     again = Run(github)
-    again.data["issue_logins"] = list(first.data["issue_logins"])
+    again.data["issue_account_ids"] = list(first.data["issue_account_ids"])
     again.go()
     again.go()
     assert again.row[Filed.URL] == first.row[Filed.URL] and github.created() == 1 and github.viewed == 2
+
+
+def test_the_comments_are_read_only_up_to_the_record() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    github.records += [{**github.records[0], "id": 600 + n, "body": "別のコメント"} for n in range(PER_PAGE)]
+    before = github.count("GET", "issues/7/comments")
+    assert Run(github).go() == [] and github.count("GET", "issues/7/comments") == before + 1
+
+
+def test_the_marks_survive_an_account_named_like_them() -> None:
+    github = FakeGitHub()
+    for _ in range(2):
+        run = Run(github)
+        run.port.publisher = publish.Publisher(github, frozenset({"ndf"}))
+        assert run.go() == [] and run.row[Filed.URL]
+    assert github.created() == 1
 
 
 def test_recorded_issues_are_read_together() -> None:
@@ -377,7 +400,9 @@ def test_a_record_url_that_is_not_the_issue_of_the_finding_is_not_used(url: str)
     run = Run(github)
     ident = leftover_decide.identity(7, run.row["text"])
     forged = leftover_decide.record_body({ident: {"url": url}})
-    github.records.append({"id": 500, "pr": 7, "body": forged, "user": {"login": "x"}, "author_association": "MEMBER", "updated_at": "t"})
+    github.records.append(
+        {"id": 500, "pr": 7, "body": forged, "user": {"login": "x", "id": IDS["x"]}, "author_association": "MEMBER", "updated_at": "t"}
+    )
     assert run.go() == [] and github.created() == 1
     assert run.row[Filed.URL] == github.issues[-1]["html_url"] != url
 
