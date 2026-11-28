@@ -16,6 +16,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional, TypeVar
 
 from markdown_it import MarkdownIt
+from markdown_it.common.html_re import open_tag
 from markdown_it.rules_block import StateBlock, html_block, paragraph
 from markdown_it.rules_inline import StateInline, backtick, html_inline
 from markdown_it.token import Token
@@ -25,6 +26,7 @@ CHECKS_HEADING = "## 受け入れ条件の確認"
 CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
+_OPEN_TAG = re.compile(open_tag)
 
 
 def _recording(rule: Callable[[StateInline, bool], bool]) -> Callable[[StateInline, bool], bool]:
@@ -113,7 +115,8 @@ def _scan_line(
     """1 行の (HTML コメントを除いた文, 行の最初の文字がコメントの中か, 行の終わりがコメントの中か)。
 
     `<!--` がコメントを開くのは、行の最初の文字にあるか、HTML のブロックの中にあるか、インライン解析がコメントと読む
-    ときだけで、ほかはただの文字とする。コード表記の中はコメントを開かない。`marks` は `_inline_marks` の結果。
+    ときだけで、ほかはただの文字とする。コード表記の中と、HTML のブロックのタグの属性値の中はコメントを開かない。
+    `marks` は `_inline_marks` の結果。
     `tails` は、開いたままのコメントのために `_holding_comment` が読み足した行だけに渡す（`_literal_after` の控え）。
     その行は元の HTML のブロックの外なので、コメントを閉じた後ろは Markdown として読む。
     """
@@ -129,6 +132,12 @@ def _scan_line(
         if found < 0:
             kept += line[pos:]
             break
+        if in_html:
+            tag = next((t for t in _OPEN_TAG.finditer(line, pos) if t.end() > found), None)
+            if tag and tag.start() < found:
+                kept += line[pos : tag.end()]
+                pos = tag.end()
+                continue
         at_head = not (kept + line[pos:found]).strip()
         place = (i, len(line) - found)
         # 読み足した行はインライン解析されないので、閉じた後ろのコード表記とエスケープはここで見る
@@ -261,30 +270,29 @@ def _span(tokens: Iterable[Token], *kinds: str) -> set[int]:
 
 
 def _split_comments(lines: Sequence[str], tokens: Sequence[Token]) -> list[tuple[str, bool, bool]]:
-    """行ごとの (HTML コメントを除いた文, 行の最初の文字がコメントの中か, コメントが段落の中で始まったか)。
+    """行ごとの (HTML コメントを除いた文, 行の最初の文字がコメントの中か, 読み始めの行の添字)。
 
-    3 つめは、行をまたぐコメントでは開いた行の値を閉じる行まで引き継ぐ。
+    3 つめはその行の添字で、行をまたぐコメントの中の行は、コメントを開いた行の添字を閉じる行まで引き継ぐ。
     コードブロックの行はコメントを探さない。ほかの行は `_scan_line` で読む。
     """
     code = _span(tokens, "fence", "code_block")
     html = _span(tokens, "html_block")
-    paragraph_lines = _span(tokens, "inline")
     held = {i: t.meta["tails"] for t in tokens if "tails" in t.meta for i in range(*t.map)}
     marks = _inline_marks(lines, tokens)
-    out: list[tuple[str, bool, bool]] = []
-    inside = in_paragraph = False
+    out: list[tuple[str, bool, int]] = []
+    inside, start = False, 0
     for i, line in enumerate(lines):
         if not inside:
-            in_paragraph = i in paragraph_lines
+            start = i
             if i in code:
-                out.append((line, False, in_paragraph))
+                out.append((line, False, start))
                 continue
         kept, head, inside = _scan_line(i, line, inside, i in html, marks, held.get(i))
-        out.append((kept, head, in_paragraph))
+        out.append((kept, head, start))
     return out
 
 
-def _analyze(lines: Sequence[str]) -> tuple[list[Token], list[tuple[str, bool, bool]]]:
+def _analyze(lines: Sequence[str]) -> tuple[list[Token], list[tuple[str, bool, int]]]:
     """`lines` のブロックのトークンと、`_split_comments` の結果（解析は 1 回）。"""
     # 行の中に残った CR は改行と数えられるので、添字がずれないように空白にする
     work = [line.replace("\r", " ") for line in lines]
@@ -307,8 +315,9 @@ def uncommented(lines: Sequence[str]) -> list[tuple[str, bool]]:
     コードをつなげない）。
     """
     tokens, split = _analyze(lines)
+    paragraph_lines = _span(tokens, "inline")
     kept = [not head or bool(text.strip()) for text, head, _ in split]
-    rows = [(i, text if kept[i] else "") for i, (text, _, in_paragraph) in enumerate(split) if kept[i] or not in_paragraph]
+    rows = [(i, text if kept[i] else "") for i, (text, _, start) in enumerate(split) if kept[i] or start not in paragraph_lines]
     texts = [text for _, text in rows]
     if texts != list(lines):
         tokens = _block_tokens(texts)
