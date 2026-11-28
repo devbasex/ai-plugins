@@ -471,11 +471,9 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
             raise exc
         return _unit_stop_of(report, "単位を流せない")
 
-    # マージのコミットを手元の HEAD が含まない単位だけを、作業場所へ反映できたことを確かめてから後の単位を始める
-    sprint = Git(ctx.sprint)
-    landing = {k: p for k, p in done.items() if p.merge_sha and not _within(sprint, p.merge_sha, "HEAD")}
-    order = units_flow.Order(found.units, frozenset(done) - landing.keys(), chained=not found.source)
     watching = _watching(ctx, ports, hub)
+    landing = _to_take_in(ctx, done, watching)
+    order = units_flow.Order(found.units, frozenset(done) - landing.keys(), chained=not found.source)
     ops = units_flow.Ops(
         lambda u: _start_unit(ctx, u, branches[units_flow.key_of(u)], ports, watching.read), failed, _usage_limited, watching
     )
@@ -495,6 +493,21 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
     landed = [(branches[k], pull) for k, pull in done.items()]
     landed += [(branches[k], pull) for k, pull in zip(flowed.items, flowed.pulls)]
     return _after_units(ctx, ordered, ports, lambda tip: units_flow.merged_pulls_of(hub, ctx.branch, landed, tip))
+
+
+def _to_take_in(
+    ctx: Context, done: Mapping[str, github_pulls.MergedPull], watching: units_queue.Watching
+) -> dict[str, github_pulls.MergedPull]:
+    """マージ済みの単位のうち、マージのコミットを手元の HEAD が含まず、作業場所へ反映してから後の単位を始めるもの。
+
+    含む単位は反映を通らないので、反映待ちの記録（前の起動の後に手元へ入ったもの）をここで消す。
+    """
+    held = Git(ctx.sprint).contained((p.merge_sha for p in done.values()), "HEAD")
+    board = units_queue.Board(watching)
+    for key, pull in done.items():
+        if pull.merge_sha in held:
+            board.taken(key)
+    return {k: p for k, p in done.items() if p.merge_sha and p.merge_sha not in held}
 
 
 def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
@@ -573,16 +586,12 @@ def advance(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> froze
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
     head = _catch_up_to(g, ctx, known, tip)
-    taken = frozenset(k for k, p in pulls.items() if not p.merge_sha or _within(g, p.merge_sha, head))
-    if any(_within(g, p.merge_sha, tip) for k, p in pulls.items() if k not in taken):
+    reached = g.contained((p.merge_sha for p in known), head)
+    taken = frozenset(k for k, p in pulls.items() if not p.merge_sha or p.merge_sha in reached)
+    if g.contained((p.merge_sha for k, p in pulls.items() if k not in taken), tip):
         _check_sprint_branch(g, ctx)
         raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
     return taken
-
-
-def _within(g: Git, sha: str, of: str) -> bool:
-    """コミット `sha` が手元にあり、`of` の履歴に含まれるか。"""
-    return g.commit_or_none(sha) is not None and g.is_ancestor(sha, of)
 
 
 def _start_unit(
@@ -955,9 +964,10 @@ def _catch_up_to(g: Git, ctx: Context, landed: Sequence[github_pulls.MergedPull]
     if newest is not None and (tip == head or g.is_ancestor(head, tip)):
         target, number = tip, newest.number
     else:
+        in_tip = g.contained((p.merge_sha for p in landed), tip)
         for pull in landed:
             sha = pull.merge_sha
-            if sha and sha != target and g.commit_or_none(sha) is not None and g.is_ancestor(target, sha) and g.is_ancestor(sha, tip):
+            if sha in in_tip and sha != target and g.is_ancestor(target, sha):
                 target, number = sha, pull.number
     if target == head:
         return head

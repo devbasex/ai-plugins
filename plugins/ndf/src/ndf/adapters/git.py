@@ -372,6 +372,19 @@ class Git:
         """`ancestor` が `descendant` の祖先か。git の失敗（終了コード 1 以外）は `GitError`。"""
         return self._probe("祖先", "merge-base", "--is-ancestor", "--", ancestor, descendant)
 
+    def contained(self, shas: Iterable[str], of: str) -> frozenset[str]:
+        """完全な SHA `shas` のうち、手元にあり `of` の履歴に含まれるコミット。件数によらず git の起動は 2 回までである。"""
+        wanted = sorted({s for s in shas if FULL_SHA.match(s)})
+        if not wanted:
+            return frozenset()
+        stdin = "".join(f"{s}\n" for s in wanted).encode("ascii")
+        kinds = self.run_bytes("cat-file", "--batch-check=%(objecttype)", stdin=stdin).split(b"\n")
+        held = [s for s, kind in zip(wanted, kinds) if kind == b"commit"]
+        if not held:
+            return frozenset()
+        # `of` から届かないコミットの一覧に無いものが、`of` の履歴にある
+        return frozenset(held) - frozenset(self.run("rev-list", END_OF_OPTIONS, *held, f"^{of}").split())
+
     def has_ref(self, ref: str) -> bool:
         """完全な参照の名前（`refs/heads/<名前>` など）があるか。git の失敗（終了コード 1 以外）は `GitError`。"""
         return self._probe("参照", "show-ref", "--verify", "--quiet", "--", ref)

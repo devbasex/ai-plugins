@@ -342,26 +342,24 @@ class _Flow:
         return True
 
     def poll(self) -> None:
-        """次の問い合わせの時刻に達していれば、待ちの PR の状態をまとめて読み、反映待ちを反映し直す。上限を超えた待ちは外す。
+        """上限を超えた待ちを外してから、次の問い合わせの時刻に達していれば、残る PR の状態をまとめて読み、反映待ちを反映し直す。
 
         上限が来ただけのときは、問い合わせずに超えた待ちだけを外し、次の問い合わせの時刻を変えない。
         """
         if self.broken is not None or not self.board.due():
             return
-        reading = self.board.read_due()
-        states = self.board.read() if reading else {}
-        if reading:
-            for key in sorted(states, key=self.order.position.__getitem__):
-                self._apply(key, states[key])
-            self.take_in(retry=True)
         for key in [k for k in self.board.queued if self.board.expired(k)]:
             self._expired_in_queue(key, self.board.queued.pop(key).number)
         for key in [k for k in self.board.ingest if self.board.expired(k)]:
             self._expired_in_ingest(key, self.board.ingest.pop(key))
-        if reading:
-            self.board.schedule(states)
-        else:
+        if not self.board.read_due():
             self.board.rest()
+            return
+        states = self.board.read()
+        for key in sorted(states, key=self.order.position.__getitem__):
+            self._apply(key, states[key])
+        self.take_in(retry=True)
+        self.board.schedule(states)
 
     def _apply(self, key: str, state: units_queue.State) -> None:
         """読んだ状態の次の手を当てる。"""
@@ -378,6 +376,9 @@ class _Flow:
             self.failures[key] = UnitsStopped("precondition", dropped(ticket.number, state))
             if state.kind == units_queue.OPEN and key in self.resent:
                 self.stuck.add(key)
+        elif self.board.expired(key):
+            # 先の単位の打ち直しの間に上限を超えた PR は、打ち直さない
+            self._expired_in_queue(key, ticket.number)
         else:
             units_queue.mark_resent(ticket.record, ticket.number, self.ops.watching.clock())
             self.resent.add(key)

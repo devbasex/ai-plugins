@@ -20,6 +20,7 @@ from ndf.contracts import result
 from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
+from ndf.core.plan.review_units_decide import unit_key
 from ndf.progress import definition, invoke, issue_values, plan_runs, units_flow, units_invoke, units_queue
 from ndf.progress.plan_runs import StageResult, StageRun
 
@@ -629,10 +630,16 @@ def test_a_merge_commit_outside_the_sprint_branch_does_not_move_the_sprint_workt
 def test_a_merged_unit_the_sprint_head_already_contains_is_not_taken_in_again(world, monkeypatch):
     assert world.run().status == "ok"
     monkeypatch.setattr(units_invoke, "advance", lambda ctx, pulls: pytest.fail("反映済みの単位は渡さない"))
+    # 反映待ちで止まった後に、利用者がスプリントブランチを進めた形
+    ingest = world.work / "units" / units_invoke.INGEST_FILE
+    branch = world.unit_names()["読み手"]
+    held = {unit_key(3, "読み手"): {"sha": world.merged[branch].merge_sha, "merged_at": 0}}
+    ingest.write_text(json.dumps(held), encoding="utf-8")
 
     again = world.run()
 
     assert again.status == "ok", again.report
+    assert json.loads(ingest.read_text()) == {}
 
 
 # --- 単位の作業場所 ---------------------------------------------------------------------------------

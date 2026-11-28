@@ -509,6 +509,16 @@ def test_a_pull_over_the_wait_limit_fails_while_other_units_run_and_holds_the_su
     assert not [e for e in fake.log if e[0] == "resend"]
 
 
+def test_a_wait_over_the_limit_is_neither_read_nor_sent_when_the_read_time_has_also_passed(tmp_path):
+    fake = Waiting(tmp_path, [_unit("A")], queue=["A"], states={"A": [OPEN]}, budget=25)
+    fake.sleep = lambda seconds: setattr(fake, "now", fake.now + seconds + 100)
+
+    got = fake.flow()
+
+    assert fake.reads == [] and fake.names("resend") == []
+    assert [(u.name, e.kind) for u, e in got.failures] == [("A", "ci_pending")]
+
+
 def test_a_pull_dropped_from_the_queue_is_sent_once_and_a_second_drop_holds_the_supplemented_units(tmp_path):
     units = [_unit("A"), _unit("w4", issue=4, whole=True)]
     fake = Waiting(tmp_path, units, queue=["A"], states={"A": [OPEN]}, resends=["queued"])
