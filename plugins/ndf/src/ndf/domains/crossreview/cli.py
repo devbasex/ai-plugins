@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import importlib
 import os
 from collections.abc import Mapping, Sequence
@@ -489,6 +490,8 @@ class Filer(NamedTuple):
     locate: Callable[[], Optional[Path]] = lambda: None
     repo_arg: Optional[str] = None
     manual: bool = False
+    # 起票先がメインディレクトリのリポジトリかの確認（`run` は結果を使い回し、公開の判定と起票で git を打ち直さない）
+    confirm: Callable[[Path, Optional[str]], Optional[str]] = lambda main, target: leftover.unconfirmed_target(main, target)
 
 
 def _mvv_notices(warnings: Sequence[str]) -> list[str]:
@@ -539,12 +542,12 @@ def _post_report(
         raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
 
 
-def _filing_target(data: Mapping[str, Any], main: Optional[Path]) -> tuple[Optional[str], Optional[str]]:
+def _filing_target(data: Mapping[str, Any], main: Optional[Path], filer: Filer) -> tuple[Optional[str], Optional[str]]:
     """起票先の設定の値と、起票を見送る理由（見送らないか、GitHub にしないと設定していれば None）。GitHub は呼ばない。"""
     primary, note = leftover.primary_of(main)
     if primary == leftover.GITHUB and main is not None:
         # 別のリポジトリの設定で起票を許可しない（許可する設定と起票先を同じリポジトリにする）
-        note = leftover.unconfirmed_target(main, store.repo_of(data))
+        note = filer.confirm(main, store.repo_of(data))
     return primary, note
 
 
@@ -553,9 +556,9 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
     rows = leftover.candidates(data, manual=filer.manual) if hub.leftovers is not None else []
     if not rows and (hub.leftovers is None or not leftover.unrecorded_urls(data)):
         return []
-    # 起票の前提は、公開のロックの待ちとスレッドの同期の後に読む。公開し直すかの判定の結果は使い回さない
+    # 起票の設定は、公開のロックの待ちとスレッドの同期の後に読む。リモートの確認（`filer.confirm`）だけは公開の判定と共有する
     main = filer.locate()
-    primary, note = _filing_target(data, main)
+    primary, note = _filing_target(data, main, filer)
     if primary != leftover.GITHUB or note is not None:
         # 見送るときは元の PR のロックを取らない（取れなくても記録のコメントを書く）
         leftover.defer(data, rows, note)
@@ -712,8 +715,14 @@ def cmd_run(args: argparse.Namespace) -> int:
             made.append(HUB(args.repo, state_repo, cfg.worktree))
         return made[0]
 
+    def target_of() -> Optional[str]:
+        try:
+            return hub_once().repo or None
+        except Exception:  # noqa: BLE001,NDF401 ネットワーク: 接続先が分からなければ照らし先を残さない（読めないことは注意に出ている）
+            return None
+
     try:
-        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr), lambda texts: hub_once().clean(texts))
+        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr), lambda texts: hub_once().clean(texts), target_of)
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:
@@ -752,17 +761,17 @@ def _report(
     previous = data.get(report_decide.COMMENT_KEY)
     # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
     now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
-    filer = Filer(lambda: cfg.main, repo_arg)
+    filer = Filer(lambda: cfg.main, repo_arg, confirm=functools.cache(lambda m, r: leftover.unconfirmed_target(m, r)))
     skipped = None
     published = got.reused and isinstance(previous, str) and data.get(report_decide.PUBLISHED_KEY) == now
-    # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由か同じ設定
+    # 起票の候補（失敗した指摘と、増えた引き継ぎの URL とまだ照らしていない指摘）があれば、同じ状態でも公開し直す。今も同じ理由か同じ設定
     # （起票先が GitHub でない）で見送るだけなら、公開済みの記録を使う。リモートの確認は、起票先の設定が github で、
     # 前回の見送りが設定によるものでないときだけにする（ほかは公開の中で確認する。#3780）
     rows = leftover.candidates(data) if published else []
     if published and (rows or leftover.unrecorded_urls(data)):
         if leftover.SKIPPED not in data:
-            # 起票の記録へ書けていない URL があれば、行に失敗が無くても公開し直して書き直す
-            published = not (leftover.unrecorded_urls(data) or any(leftover_decide.Filed.ERROR in row for row in rows))
+            # 候補が残るか、起票の記録へ書けていない URL があるので、公開し直す
+            published = False
         else:
             skipped = data[leftover.SKIPPED]
             main = filer.locate()
@@ -771,7 +780,7 @@ def _report(
                 published = note == skipped
             else:
                 # 設定が変わって起票できるようになった打ち直しは、確認せずに公開し直す
-                published = skipped not in (None, leftover.UNDECLARED) and _filing_target(data, main)[1] == skipped
+                published = skipped not in (None, leftover.UNDECLARED) and _filing_target(data, main, filer)[1] == skipped
     if published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings + ([skipped] if skipped else [])

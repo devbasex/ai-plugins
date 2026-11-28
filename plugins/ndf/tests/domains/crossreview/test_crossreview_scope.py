@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf.adapters import git
 from ndf.core.converge import participants
-from ndf.domains.crossreview import changes, round_scope, scope_decide, store, threads
+from ndf.domains.crossreview import changes, reviewed_pr, round_scope, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
@@ -899,3 +900,17 @@ def test_since_diff_without_pr_files_is_empty(wt: Path) -> None:
     base = _head(wt)
     moved = commit(wt, "other.txt", "x\n", "比較先")
     assert changes.since_diff(git.Git.offline(wt), changes.Range(base, base), changes.Range(moved, moved), (), {}) == ""
+
+
+@pytest.mark.parametrize(("ident", "branch", "bound"), [("o/r#41", BRANCH, True), ("o/x#41", BRANCH, False), ("o/r#41", "other", False)])
+def test_issue_3780_rounds_saved_without_reading_the_pr_are_bound_only_to_the_same_target(
+    tmp_path: Path, ident: str, branch: str, bound: bool
+) -> None:
+    """最初に PR を読めなかったラウンドは、接続先のリポジトリとブランチが同じ打ち直しだけが対象を書いて続ける。"""
+    run = SimpleNamespace(cfg=SimpleNamespace(branch=BRANCH, state_dir=tmp_path), data={}, read_pr=None)
+    assert reviewed_pr.bind_target(run, lambda: "o/r") == (False, None)
+    run.data["rounds"] = [{"round": 1}]
+    run.cfg.branch = branch
+    run.read_pr = threads.ReadPr(ident, branch, "h", "o/r")
+    changed, refused = reviewed_pr.bind_target(run, lambda: "o/r")
+    assert (changed, refused is None, store.repo_of(run.data)) == (bound, bound, "o/r" if bound else None)

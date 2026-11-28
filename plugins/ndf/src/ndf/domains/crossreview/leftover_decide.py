@@ -245,17 +245,24 @@ def issue_prs(body: str) -> tuple[int, ...]:
     return tuple(dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", _prose(body))))
 
 
+def _has_mark(body: str, ident: str) -> bool:
+    """引用とコードブロックの外に、目印だけの行があるか。目印の文字列を含まない本文は解析しない。"""
+    mark = issue_mark(ident)
+    return mark in body and any(line.strip() == mark for line in _lines_of(_prose(body)))
+
+
 def names_finding(listed: Listed, ident: str, text: str, prs_of: Callable[[str], Sequence[int]] = issue_prs) -> bool:
     """起票の記録か引き継ぎの URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。
+    引用かコードブロックに転載した目印は数えない。
 
     目印は、今の識別値 `ident` か、本文の PR の URL の番号（起票時の元の PR）と指摘の本文 `text` の識別値を受ける。PR を
     巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。
     本文の解析（`prs_of`）は `ident` の目印が無いときだけする。"""
     if listed.is_pull:
         return False
-    if issue_mark(ident) in listed.body:
+    if _has_mark(listed.body, ident):
         return True
-    return any(issue_mark(identity(pr, text)) in listed.body for pr in prs_of(listed.body))
+    return any(_has_mark(listed.body, identity(pr, text)) for pr in prs_of(listed.body))
 
 
 def _issue_number(url: str, issues_url: str) -> Optional[int]:
