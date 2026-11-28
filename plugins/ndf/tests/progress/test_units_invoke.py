@@ -792,6 +792,37 @@ def test_a_failed_units_run_stays_failed_until_retry(repo, st, flow, capsys, tmp
     assert [step for step, _ in flow.calls] == ["implement", "implement", "gathered"]
 
 
+def test_the_commands_of_units_run_keep_the_target_repository_from_another_directory(repo, st, flow, capsys, tmp_path, monkeypatch):
+    tid = _ready(capsys, repo, tmp_path)
+    flow.script["implement"] = [lambda r: invoke.StageResult(result.stopped("plan", "test_failed", "落ちた"), {})]
+    units_cli.run_implement(st, tid, repo, flow.env)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    target = ["--cwd", str(repo.resolve())]
+    capsys.readouterr()
+
+    gate.progress_main(["units", "run", tid, *target])
+    retry = last_result(capsys.readouterr().out)["routes"]["retry"]["argv"]
+    assert retry[-2:] == target
+    assert gate.progress_main([*retry[2:], "--reason", "直した"]) == 0, capsys.readouterr().out
+
+    with store.run_lock(st, tid):
+        capsys.readouterr()
+        assert gate.progress_main(["units", "run", tid, *target]) == 0
+    wait = last_result(capsys.readouterr().out)["next"]["argv"]
+    assert wait == ["ndf", "progress", "wait", tid, *target]
+    assert gate.progress_main(wait[2:]) == 0, capsys.readouterr().out
+
+
+def test_units_run_repeated_after_success_returns_the_same_result_without_running(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+    first = units_cli.run_implement(st, tid, repo, flow.env)
+    again = units_cli.run_implement(st, tid, repo, flow.env)
+    assert again == first and again["status"] == "ok", again
+    assert [step for step, _ in flow.calls] == ["implement", "gathered"]
+
+
 def test_a_waiting_answer_of_units_run_is_carried_over_to_next(repo, st, flow, capsys, tmp_path):
     tid = _ready(capsys, repo, tmp_path)
     routes = {"approved": result.command("plan", "next", "x"), "rejected": None}
@@ -830,6 +861,7 @@ def test_units_run_skips_the_stage_whose_condition_is_false_without_running_it(r
     monkeypatch.setattr(run, "_when_off", lambda d, v, s: "code_in_diff")
     out = units_cli.run_implement(st, tid, repo, flow.env)
     assert out["status"] == "ok" and "code_in_diff" in out["summary"], out
+    assert units_cli.run_implement(st, tid, repo, flow.env) == out
     assert flow.calls == [] and _kinds(st, tid) == ["created", "skipped"]
 
 

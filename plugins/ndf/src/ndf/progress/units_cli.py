@@ -5,6 +5,7 @@ ndf progress units run <ステートマシンの ID> [--cwd <作業場所>]
 `run` は工程「実装」だけを、`ndf progress next` と同じ処理（`run.decide`・`run.play_move`）で流し、同じ工程のイベントを書く。
 別の流し方を持つと、失敗や回答の待ちが記録に残らず、開始前の検査も抜ける。`next` との違いは、別のプロセスを起動せず
 その場で流すことと、工程「実装」の外へ進まないことの 2 つである。承認した HEAD や、承認が要らないという指定は引数で受けない。
+`--cwd` で対象を指定したときは、結果の後続コマンド（`next`・`routes`）にも同じ指定を足し、別の場所からそのまま打てるようにする。
 
 サブコマンドの引数は `add_parsers` が `ndf progress` の解析器へ足し、エントリポイント（`ndf.progress.gate`）が `dispatch` へ渡す。
 """
@@ -31,7 +32,19 @@ def add_parsers(sub: Any) -> None:
 
 def dispatch(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     """`a.env` は `ndf progress next` と同じ外との接点。今のサブコマンドは `run` だけである。"""
-    return run_implement(st, a.machine_id, cwd, a.env)
+    out = run_implement(st, a.machine_id, cwd, a.env)
+    if a.cwd is not None:
+        _carry_cwd(out, cwd)
+    return out
+
+
+def _carry_cwd(out: dict[str, Any], cwd: Path) -> None:
+    """結果の後続コマンド（どれも `ndf progress`）へ、対象のリポジトリの指定を足す。"""
+    routes = list(out["routes"].values()) if "routes" in out else []
+    nxt = [out["next"]] if "next" in out else []
+    for cmd in [*nxt, *routes]:
+        if cmd is not None:
+            cmd["argv"] = [*cmd["argv"], "--cwd", str(cwd)]
 
 
 def run_implement(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
@@ -69,9 +82,25 @@ def _flow(d: run.Drive) -> dict[str, Any]:
             return out
     if ours and m.action in (run.Action.FAILED, run.Action.GATE):
         return run.report(v, m)
-    if played is None:
-        return _not_next(v, m)
-    return _done(v, played.name)
+    if played is not None:
+        return _done(v, played.name)
+    ended = _ended_stage(v)
+    return _done(v, ended) if ended is not None else _not_next(v, m)
+
+
+def _end_event(v: run.View, stage: str) -> model.EventDraft | None:
+    """工程の行の状態を最後に変えたイベント。"""
+    changed = [e.draft for e in v.row_events(stage) if e.draft.state is not None]
+    return changed[-1] if changed else None
+
+
+def _ended_stage(v: run.View) -> str | None:
+    """前の実行が工程「実装」を流し終えた（完了か、開始の条件が偽で飛ばした）なら工程の名前。打ち直しに同じ結果を返すために読む。"""
+    for s in v.snap.stages:
+        if s.id == design_record.IMPLEMENT_DEFINITION.stem:
+            last = _end_event(v, s.name)
+            return s.name if last is not None and last.kind in (run.FINISHED, "skipped") else None
+    return None
 
 
 def _not_next(v: run.View, m: run.Move) -> dict[str, Any]:
@@ -82,7 +111,8 @@ def _not_next(v: run.View, m: run.Move) -> dict[str, Any]:
 
 def _done(v: run.View, stage: str) -> dict[str, Any]:
     """流し終えた結果。開始の条件が偽で飛ばしたときは、その条件を書く。"""
-    last = v.row_events(stage)[-1].draft
+    last = _end_event(v, stage)
+    assert last is not None
     summary = f"工程 {stage} を流した"
     if last.kind == "skipped":
         summary = f"工程 {stage} は{last.reason}なので飛ばした"
