@@ -19,7 +19,7 @@ import fcntl
 import hashlib
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import UTC, datetime
@@ -473,6 +473,24 @@ def read_events(conn: sa.Connection, machine_id: str, after: int = 0) -> list[mo
 def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any]]:
     row = conn.execute(sa.select(MACHINES).where(MACHINES.c.id == machine_id)).first()
     return dict(row._mapping) if row is not None else None
+
+
+def read_sprint_definitions(conn: sa.Connection, repo: str) -> dict[str, tuple[int, dict[str, Any]]]:
+    """リポジトリ `repo` のスプリントの ID → 最新の定義の改訂（番号, スナップショット）。作った順で、SQL は 1 回。"""
+    joined = MACHINES.join(DEFINITIONS, DEFINITIONS.c.machine_id == MACHINES.c.id)
+    q = sa.select(DEFINITIONS.c.machine_id, DEFINITIONS.c.rev, DEFINITIONS.c.definition).select_from(joined)
+    q = q.where(MACHINES.c.repo == repo, MACHINES.c.level == "sprint")
+    rows = conn.execute(q.order_by(MACHINES.c.created_at, MACHINES.c.id, DEFINITIONS.c.rev))
+    return {r.machine_id: (r.rev, r.definition) for r in rows}
+
+
+def read_events_of_kind(conn: sa.Connection, machine_ids: Collection[str], kind: str) -> dict[str, list[model.Event]]:
+    """ステートマシンの ID → 種類 `kind` の事象（番号の順）。SQL は 1 回で、当たる事象の無い ID は持たない。"""
+    q = sa.select(EVENTS).where(EVENTS.c.machine_id.in_(list(machine_ids)), EVENTS.c.kind == kind)
+    found: dict[str, list[model.Event]] = {}
+    for row in conn.execute(q.order_by(EVENTS.c.machine_id, EVENTS.c.seq)):
+        found.setdefault(row.machine_id, []).append(_event(row))
+    return found
 
 
 def read_definition(conn: sa.Connection, machine_id: str) -> tuple[int, dict[str, Any]]:

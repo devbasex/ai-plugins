@@ -159,16 +159,21 @@ def reset_drafts(v: run_view.View, stage: stages.StageDef, why: str) -> list[mod
     ]
 
 
-def _latest_answer(v: run_view.View, stage_id: str, kind: Optional[str] = None) -> Optional[dict[str, Any]]:
-    """工程の最新の回答の payload。`kind` を渡せば、その作業種別の待ちへの回答だけを読む。"""
+def _latest_answer_event(v: run_view.View, stage_id: str, kind: Optional[str] = None) -> Optional[model.Event]:
+    """工程の最新の回答の事象。`kind` を渡せば、その作業種別の待ちへの回答だけを読む。"""
     stage = _stage_by_id(v.snap, stage_id)
     if stage is None:
         return None
     for ev in reversed(v.row_events(stage.name)):
-        p = run_view.event_payload(ev)
-        if ev.draft.kind == run_view.ANSWERED and (kind is None or p.get("kind") == kind):
-            return p
+        if ev.draft.kind == run_view.ANSWERED and (kind is None or run_view.event_payload(ev).get("kind") == kind):
+            return ev
     return None
+
+
+def _latest_answer(v: run_view.View, stage_id: str, kind: Optional[str] = None) -> Optional[dict[str, Any]]:
+    """`_latest_answer_event` の payload。"""
+    ev = _latest_answer_event(v, stage_id, kind)
+    return None if ev is None else run_view.event_payload(ev)
 
 
 def _target_of(payload: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]:
@@ -182,6 +187,12 @@ def _target_of(payload: Optional[Mapping[str, Any]]) -> Optional[dict[str, Any]]
 def approved_of(v: run_view.View) -> Optional[dict[str, Any]]:
     """工程「ドキュメントレビュー」の承認ゲートの最新の回答が承認なら、その記録。後の変更要求があれば None。"""
     return _target_of(_latest_answer(v, REVIEW_STAGE_ID, invoke.LISTEN))
+
+
+def approval_seq_of(v: run_view.View) -> Optional[int]:
+    """`approved_of` が読む回答の事象の番号（承認の識別子）。同じ HEAD でも、承認し直せば変わる。回答が無ければ None。"""
+    ev = _latest_answer_event(v, REVIEW_STAGE_ID, invoke.LISTEN)
+    return None if ev is None else ev.seq
 
 
 def reapproved_of(v: run_view.View) -> Optional[dict[str, Any]]:

@@ -199,10 +199,12 @@ def test_render_does_not_write_through_an_existing_symlink(tmp_path):
     assert not out.is_symlink() and _mode(out) == 0o600
 
 
-def test_needed_asks_for_the_issue_only_to_build_the_default_acceptance():
+def test_the_implement_issue_is_filled_from_the_acceptance_for_the_guard():
+    """課題を束ねた単位は `issue` を渡さなくても組める。実装の前の確かめ（guard）が読む `issue` は acceptance の最小の番号にする。"""
     t = route.choose("implement")
     assert "issue" in route.needed(t)
-    assert "issue" not in route.needed(t, given={"acceptance": ["--issue", "3", "--issue", "4"]})
+    assert route.launch_values(t, {"acceptance": ["--issue", "4", "--issue", "3"]})["issue"] == "3"
+    assert "issue" not in route.launch_values(t, {"issue": "9", "acceptance": ["--issue", "3"]})
 
 
 def test_render_implement_refuses_an_acceptance_without_an_issue(tmp_path, capsys, last_result):

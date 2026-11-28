@@ -33,6 +33,8 @@ class SprintPlan:
     new_definition: bool = False
     # ステートマシンの作業の保存先（承認した文書を送るコミットの記録 `design-sync.json` を持つ）
     work_root: Optional[Path] = None
+    # 単位の起動の記録を書く関数（`units_guard.record_launch`。`(branch, base, *, issues, unit_file)`）。承認の記録が無ければ None
+    launched: Optional[Callable[..., None]] = None
 
 
 @dataclass(frozen=True)

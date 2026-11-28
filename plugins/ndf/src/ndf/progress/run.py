@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
+import functools
 import json
 import subprocess
 import time
@@ -35,7 +35,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import command, definition, design_record, invoke, issue_values, model, plan_runs, stages, store
+from ndf.progress import command, definition, design_record, invoke, issue_values, model, plan_runs, stages, store, units_guard
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, SyncFailure, github_records, sync_records
 from ndf.progress.run_view import (
@@ -56,6 +56,7 @@ from ndf.progress.run_view import (
     read_accepted_head,
     resync_drafts,
     sync_warnings,
+    work_root,
 )
 
 TOOL = __package__.rpartition(".")[2]
@@ -67,8 +68,7 @@ REJECTED = answer_word("rejected")
 # 外から待つ問い合わせの間隔と、作業が排他を取るまでの待ちの間隔（どちらも設定の値）
 WAIT_POLL = plan_cli.WAIT_POLL
 LOCK_POLL = durable.POLL
-# 作業の保存先（チェックアウトの保存先の下）と、起動した作業が排他を取るまで置く起動のマーカー（作業の保存先の下）
-WORK_DIR = "progress-work"
+# 起動した作業が排他を取るまで置く起動のマーカー（作業の保存先の下）
 LAUNCH_FILE = "launched.json"
 
 
@@ -332,11 +332,6 @@ class Env:
     ended: Callable[[Any, str], Any] = lambda _conn, _machine_id: None  # スプリントの完了と同じトランザクションで打つ
     # スプリントが計画のレーンの行にあるか（読み手役のステップを済ませる判定。レーンは `ndf.progress.gate.lane_env` が読む）
     in_lane: Callable[[store.Store, str], bool] = lambda _st, _machine_id: False
-
-
-def work_root(root: Path, machine_id: str) -> Path:
-    """ステートマシンごとの作業の保存先（プランの実行の保存先と作業の記録）。名前はステートマシンの識別子の sha256 の頭。"""
-    return root / WORK_DIR / hashlib.sha256(machine_id.encode()).hexdigest()[: model.REPO_KEY_LENGTH]
 
 
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
@@ -817,13 +812,17 @@ def sprint_plan(v: View, s: stages.StageDef, root: Path) -> Optional[plan_runs.S
     required = design_record.required(v.snap)
     record = design_record.approved_of(v) if required else None
     compared = {"issues": context["issues"] if "issues" in context else [], "plan_omitted": list(omitted)}
+    work = work_root(root, v.machine_id)
     return plan_runs.SprintPlan(
         required=required,
         record=record,
         differences=None if record is None else lambda tree: design_record.mismatches(record, tree, compared),
         omitted=omitted,
         new_definition="plan_omitted" in s.optional_inputs,
-        work_root=work_root(root, v.machine_id),
+        work_root=work,
+        launched=None
+        if record is None
+        else functools.partial(units_guard.record_launch, work, approval=units_guard.Approval(record, design_record.approval_seq_of(v))),
     )
 
 

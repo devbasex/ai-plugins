@@ -247,6 +247,29 @@ def test_units_run_in_order_on_their_own_branches_and_each_is_cut_after_the_prev
     assert _git(world.sprint, "rev-parse", "HEAD") == _git(world.sprint, "rev-parse", f"origin/{BRANCH}")
 
 
+def test_each_unit_plan_is_recorded_as_launched_before_it_runs(world):
+    """#3702 の決定 12: 実装のプランの確かめが照らす起動の記録を、単位を起動する前に残す。"""
+    launched: list[tuple] = []
+
+    def record(branch, base, *, issues, unit_file):
+        launched.append((branch, base, issues[0], None if unit_file is None else str(unit_file), len(world.impl_runs())))
+
+    plain = world.stage_run
+
+    def with_sprint():
+        return replace(plain(), sprint=plan_runs.SprintPlan(launched=record))
+
+    world.stage_run = with_sprint
+    got = world.run()
+
+    assert got is not None and got.status == "ok", got.report
+    runs = [r for r, _ in world.impl_runs()]
+    assert [x[:4] for x in launched] == [
+        (r.overrides["branch"], BRANCH, int(r.overrides["issue"]), r.overrides["unit_file"] or None) for r in runs
+    ]
+    assert [x[4] for x in launched] == [0, 1, 2]
+
+
 def test_the_ci_steps_are_dropped_when_the_unit_waits_for_no_checks(world):
     (world.sprint / ".ndf" / "project.json").write_text(
         json.dumps({**json.loads((world.sprint / ".ndf" / "project.json").read_text()), "ci": {"required_checks": []}}), encoding="utf-8"

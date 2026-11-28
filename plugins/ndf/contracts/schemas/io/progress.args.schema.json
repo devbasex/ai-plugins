@@ -376,6 +376,57 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "units guard",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "--issue": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "プランの課題の番号（繰り返せる）"
+        },
+        "--base": {
+          "type": "string",
+          "description": "単位の PR のマージ先のブランチ"
+        },
+        "--branch": {
+          "type": "string",
+          "description": "作業のブランチ"
+        },
+        "--unit-file": {
+          "type": "string",
+          "description": "担当への指示を書いたファイルのパス。指示がない場合は `--unit-file=` を指定する"
+        },
+        "--criteria": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "受け付けるが使わない（受け入れ条件の確かめの引数）"
+        },
+        "--no-criteria": {
+          "type": "boolean",
+          "description": "受け付けるが使わない（受け入れ条件の確かめの引数）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "--issue",
+        "--base",
+        "--branch",
+        "--unit-file"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "units run",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },

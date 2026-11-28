@@ -260,7 +260,7 @@ def test_impl_plan_ends_when_ci_passes_at_the_reviewed_head():
     """#3879 決定 2: 実装のプランは単位の PR をレビューしてから CI を待ち、CI が通った HEAD がレビューした HEAD なら終える。"""
     visited, state = walk(plan_of("implement"), {})
     assert visited == [
-        "done-check", "work", "acceptance", "test", "push", "pr", "conflict-check", "base-fetch", "review",
+        "done-check", "guard", "work", "acceptance", "test", "push", "pr", "conflict-check", "base-fetch", "review",
         "push-reviewed", "review-head", "ci", "head-reviewed", "resolved",
     ]  # fmt: skip
     assert state.status == OK

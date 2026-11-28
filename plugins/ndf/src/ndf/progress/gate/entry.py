@@ -525,7 +525,7 @@ def _progress_units(argv: list[str]) -> int:
     env = lane_env(run.Env(facts=command.facts_of))
     return command.run_main(
         command.parser((units_cli.add_parsers,)),
-        lambda a, cwd: command.with_store(cwd, units_cli.dispatch, run.with_env(a, env)),
+        lambda a, cwd: units_cli.handle_units(run.with_env(a, env), cwd),
         argv,
     )
 

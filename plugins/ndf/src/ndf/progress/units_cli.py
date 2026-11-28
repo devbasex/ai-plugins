@@ -1,23 +1,29 @@
 """`ndf progress units`: レビューの単位を扱うサブコマンド（#3702 の決定 12）。
 
 ndf progress units run <ステートマシンの ID> [--cwd <作業場所>]
+ndf progress units guard --issue <N>... --base <ブランチ> --branch <ブランチ> --unit-file=<ファイルか空>
+    [--criteria <課題>:<番号>]... [--no-criteria] [--cwd <作業場所>]
 
 `run` は工程「実装」だけを、`ndf progress next` と同じ処理（`run.decide`・`run.play_move`）で流し、同じ工程のイベントを書く。
 別の流し方を持つと、失敗や回答の待ちが記録に残らず、開始前の検査も抜ける。`next` との違いは、別のプロセスを起動せず
 その場で流すことと、工程「実装」の外へ進まないことの 2 つである。承認した HEAD や、承認が要らないという指定は引数で受けない。
 
-サブコマンドの引数は `add_parsers` が `ndf progress` の解析器へ足し、エントリポイント（`ndf.progress.gate`）が `dispatch` へ渡す。
+`guard` は実装のプランが実装の前に打つ確かめ（`units_guard`。決定 12）で、人は打たない。
+
+サブコマンドの引数は `add_parsers` が `ndf progress` の解析器へ足し、エントリポイント（`ndf.progress.gate`）が `handle_units` へ渡す。
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import os
 from pathlib import Path
 from typing import Any
 
 from ndf.contracts import result
-from ndf.progress import command, design_record, model, run, store
+from ndf.core import route
+from ndf.progress import command, design_record, model, run, store, units_guard, units_invoke
 from ndf.progress.run_view import completion_warnings
 
 _PLAYABLE = (run.Action.START, run.Action.RESUME)
@@ -27,12 +33,49 @@ def add_parsers(sub: Any) -> None:
     """`ndf progress` のサブコマンドの並び `sub` へ `units` とその下のサブコマンドを足す。"""
     units = sub.add_parser("units", help="レビューの単位を扱う").add_subparsers(dest="units_action", required=True)
     units.add_parser("run", help="工程「実装」だけを next と同じ処理で流す").add_argument("machine_id")
+    check = units.add_parser("guard", help="実装のプランを通すかを確かめる（実装のプランが打つ）")
+    check.add_argument("--issue", action="append", type=int, required=True, help="プランの課題の番号（繰り返せる）")
+    check.add_argument("--base", required=True, help="単位の PR のマージ先のブランチ")
+    check.add_argument("--branch", required=True, help="作業のブランチ")
+    check.add_argument("--unit-file", required=True, help="担当への指示を書いたファイルのパス。指示がない場合は `--unit-file=` を指定する")
+    # 実装のプランは受け入れ条件の確かめの引数の並び（`{{acceptance}}`）をそのまま足すので、課題のほかのフラグは受けて使わない
+    check.add_argument(route.ACCEPTANCE_CRITERIA, action="append", help="受け付けるが使わない（受け入れ条件の確かめの引数）")
+    check.add_argument("--no-criteria", action="store_true", help="受け付けるが使わない（受け入れ条件の確かめの引数）")
     command.add_cwd(units.choices.values())
 
 
+def handle_units(a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    """状態の保存先を開いてサブコマンドを打つ。`guard` は、保存先を読めなければ理由の語を `precondition` にして止める。"""
+    try:
+        return command.with_store(cwd, dispatch, a)
+    except (*command.STOPPABLE, OSError) as exc:
+        if a.units_action != "guard":
+            raise
+        reason = command.stopped_from(exc)["summary"] if isinstance(exc, command.STOPPABLE) else str(exc)
+        return result.stopped(run.TOOL, "precondition", f"状態の保存先を読めないので、実装のプランを通さない: {reason}")
+
+
 def dispatch(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    """`a.env` は `ndf progress next` と同じ外との接点。今のサブコマンドは `run` だけである。"""
+    """`a.env` は `ndf progress next` と同じ外との接点（`run` だけが使う）。"""
+    if a.units_action == "guard":
+        return check_plan(st, a, cwd)
     return run_implement(st, a.machine_id, cwd, a.env)
+
+
+def check_plan(st: store.Store, a: argparse.Namespace, cwd: Path) -> dict[str, Any]:
+    """実装のプランを通せば `ok`、通さなければ `refused`（指示のファイルを読めなければ `precondition`）で止まる。"""
+    unit_file = (cwd / a.unit_file) if a.unit_file else None
+    # 後のステップのレビュー（cross-review）が読む指示。プランの実行の環境変数は、このステップにも同じ値が渡る
+    given = os.environ.get(units_invoke.UNIT_FILE_ENV)
+    review_file = (cwd / given) if given else None
+    try:
+        repo = command.repo_id(cwd, st.root)
+        reasons = units_guard.guard(st, repo, a.issue, a.base, a.branch, units_guard.Instructions(unit_file, review_file))
+    except units_guard.Unreadable as exc:
+        return result.stopped(run.TOOL, "precondition", str(exc))
+    if reasons:
+        return result.stopped(run.TOOL, "refused", "; ".join(reasons))
+    return result.result(run.TOOL, result.OK, f"実装のプラン（{a.branch} → {a.base}）を通す")
 
 
 def run_implement(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
