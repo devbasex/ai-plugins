@@ -39,6 +39,12 @@ class TargetReader:
         self._pulls.clear()
         self._configs.clear()
 
+    def pull(self, number: int) -> Any:
+        """PR（読んであれば同じ応答を使う）。読めなければ GitHub の例外をそのまま上げる。"""
+        if number not in self._pulls:
+            self._pulls[number] = self._hub().pull(number)
+        return self._pulls[number]
+
     def read(self, q: Question, *, config: bool = True) -> Reading:
         """質問の対象。`config` が偽ならマージ先の設定を読まず、head・本文・題だけを返す。読めなければ `model.Refused`。"""
         if q.pr is None:
@@ -46,9 +52,7 @@ class TargetReader:
         found = None
         try:
             hub = self._hub()
-            if q.pr not in self._pulls:
-                self._pulls[q.pr] = hub.pull(q.pr)
-            pull = self._pulls[q.pr]
+            pull = self.pull(q.pr)
             if config:
                 if pull.base_ref not in self._configs:
                     self._configs[pull.base_ref] = hub.branch_file(pull.base_ref, production_merge.PROJECT_FILE)

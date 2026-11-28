@@ -15,9 +15,10 @@ import merge_hub
 import pytest
 from result_json import last_result
 
+from ndf.adapters.github import Authored
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, gate, invoke, model, run, store
-from ndf.progress.gate import answering, asking, finishing, rechecking, release, targets
+from ndf.progress.gate import answering, asking, delivery_check, finishing, rechecking, release, targets
 from ndf.progress.run_view import APPROVAL_POSTING
 
 ISSUE = 4520
@@ -60,6 +61,7 @@ def env(repo, st, monkeypatch):
         records=lambda cwd: lanes._NoRecords(),
         sleep=lambda s: None,
         standing=rechecking.standing(reader, st.root),
+        confirm=delivery_check.held_check(lambda: hub, repo, reader.pull),
         forget=reader.forget,
     )
     monkeypatch.setattr(finishing, "shared_hub", lambda cwd: lambda: hub)
@@ -418,6 +420,12 @@ def test_a_machine_finished_by_hand_before_the_change_stays_finished(repo, st, e
 DEPLOY = "デプロイ"
 
 
+def _record(env) -> None:
+    """スプリントの PR（#8）に、手で置いた本番のリリース記録を足す（デプロイの工程の確かめが読む）。"""
+    body = "## リリース記録\n\n段階: 本番\nバージョン: 10.9.0 → 11.0.0（MINOR）\nスプリント: PR #8\n"
+    env.hub.comments_of.setdefault(8, []).append(Authored("octocat", "OWNER", body, author_id=1))
+
+
 def _released_values(repo) -> dict:
     values = lanes.values(repo, "sprint/s1")
     return {k: values[k] for k in ("delivery", "product_version", "mvv_gate")}
@@ -428,6 +436,7 @@ def test_a_hand_finished_deploy_waits_for_the_release_approval(repo, st, env, ca
     _before_design(capsys, repo, tid)
     assert _finish(capsys, repo, tid, "Pull Request", {"pr": 8})["status"] == "ok"
 
+    _record(env)
     out = _finish(capsys, repo, tid, DEPLOY, _released_values(repo))
 
     assert out["status"] == "ok" and _state(st, tid, DEPLOY) == "running", out
@@ -447,6 +456,7 @@ def test_a_deploy_approved_in_the_flow_is_not_asked_again_by_finish(repo, st, en
     _next(st, tid, repo, env)
     assert _state(st, tid, DEPLOY) == "failed"
 
+    _record(env)
     out = _finish(capsys, repo, tid, DEPLOY, _released_values(repo))
 
     assert out["status"] == "ok" and _state(st, tid, DEPLOY) == "finished", out
@@ -490,6 +500,7 @@ def test_a_hand_finished_deploy_does_not_issue_a_release_request(repo, st, env, 
     tid = _new(capsys)
     _before_design(capsys, repo, tid)
     assert _finish(capsys, repo, tid, "Pull Request", {"pr": 8})["status"] == "ok"
+    _record(env)
     assert _finish(capsys, repo, tid, DEPLOY, _released_values(repo))["status"] == "ok"
     monkeypatch.setattr(release, "_plan_request", lambda *a: pytest.fail("リクエストを出した"))
     q = release.Question("q", tid, DEPLOY, "release-gate", "release", ("approved",), 8)
@@ -543,6 +554,7 @@ def test_a_hand_finished_deploy_revokes_the_old_approval_and_its_answer_does_not
     assert judged(merge_hub.HEAD) is not None
     env.hub.pulls_of[8] = merge_hub.pull(8, head=merge_hub.OTHER)
 
+    _record(env)
     assert _finish(capsys, repo, tid, DEPLOY, _released_values(repo))["status"] == "ok"
 
     assert judged(merge_hub.HEAD) is None

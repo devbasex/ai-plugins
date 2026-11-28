@@ -17,12 +17,21 @@ from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import result
 from ndf.core import merge_approval
-from ndf.progress import approval_decide, command, definition, invoke, model, reopening, run, stages, store
+from ndf.progress import approval_decide, command, definition, delivery_decide, invoke, model, reopening, run, stages, store
+from ndf.progress.gate import delivery_check
 from ndf.progress.gate.answering import github_observe, shared_hub
 from ndf.progress.gate.asking import check_stage_pr, gate_result, gate_stage, off_wait_question, pr_url, question, show_question
 from ndf.progress.gate.rechecking import standing
 from ndf.progress.gate.targets import TargetReader
-from ndf.progress.run_view import FINISH_HELD, work_root
+from ndf.progress.run_view import (
+    DEPLOY_STAGE_ID,
+    FINISH_HELD,
+    NO_RELEASE,
+    NO_RELEASE_REASON,
+    RECORD_PR,
+    no_release_disables,
+    work_root,
+)
 from ndf.progress.records import github_records, sync_records
 
 # 手で終える操作が MVV 判定のステップを打つ口。テストは差し替える
@@ -189,7 +198,9 @@ def _read_stage_output(a: argparse.Namespace, st: store.Store) -> _StageOutput:
     with store.transaction(st) as conn:
         snap = command.read_current(conn, a.machine_id).snapshot
     stage = snap.stage(a.stage)
-    errs, missing = definition.check_stage_output(stage, output, handwritten=bool(stage.gates))
+    if (a.no_release or a.record_pr is not None) and stage.id != DEPLOY_STAGE_ID:
+        raise model.Refused(f"--record-pr と --no-release はデプロイの工程だけで指定できる（{a.stage} はデプロイの工程でない）")
+    errs, missing = definition.check_stage_output(stage, output, handwritten=bool(stage.gates), no_release=a.no_release)
     outputs = output["outputs"] if not errs and "outputs" in output else {}
     made = definition.generated_outputs(stage.id) if stage.gates else ()
     generated = [k for k in made if k in outputs]
@@ -200,19 +211,39 @@ def _generated_warnings(read: _StageOutput) -> list[str]:
     return [f"工程 {read.stage.name} の {k} は NDF が作るので、手で書いた値は使わない" for k in read.generated]
 
 
-def _standing_answer(v: run.View, read: _StageOutput, cwd: Path, root: Path) -> Optional[model.Event]:
+def _release_facts(a: argparse.Namespace, v: run.View, read: _StageOutput, cwd: Path, reader: TargetReader) -> dict[str, Any]:
+    """手で終えるデプロイの工程のリリース記録と CD の結果を確かめ、事象に残す値を返す。ほかの工程は空。
+
+    条件に合わなければ `model.Refused`、読めなければ `delivery_decide.Unreadable`。承認の有無は問わない（#4520）。"""
+    if read.stage.id != DEPLOY_STAGE_ID:
+        return {}
+    context = {**v.context(), **read.outputs}
+    record_pr = a.record_pr if a.record_pr is not None else delivery_check.default_record_pr(context)
+    got = delivery_check.check(shared_hub(cwd), cwd, context, record_pr, a.no_release, reader.pull)
+    if not got.ok:
+        raise model.Refused(f"工程 {a.stage} を終えられない: {got.why}（読んだ PR #{record_pr}。別の PR は --record-pr <番号>）")
+    facts: dict[str, Any] = {RECORD_PR: record_pr}
+    if a.no_release:
+        facts.update({NO_RELEASE: True, NO_RELEASE_REASON: got.no_release_reason})
+    if got.cd_result is not None:
+        facts["cd_result"] = got.cd_result
+    return facts
+
+
+def _standing_answer(v: run.View, read: _StageOutput, root: Path, reader: TargetReader, facts: Mapping[str, Any]) -> Optional[model.Event]:
     """手で終える工程の有効な承認の事象。無ければ None（承認の記録が無ければ PR を読まない）。
 
     設計の工程で、承認した PR が未マージなら `model.Refused`。"""
     gate_step = next(s for s in read.stage.steps if s.kind == stages.GATE_KIND)
     rows = v.row_events(read.stage.name)
-    found = approval_decide.counted_approval(rows, gate_step.gate, gate_step.id)
+    reason = facts.get(NO_RELEASE_REASON)
+    found = approval_decide.counted_approval(rows, gate_step.gate, gate_step.id, closing=True, no_release_reason=reason)
     if found is None:
         return None
     # 手で書いた出力の値を、文脈より先に承認の対象にする
     context = {**v.context(), **read.outputs}
     pr = approval_decide.gate_pr(context, read.stage, {}, gate_step.gate, by_hand=True)
-    got = standing(TargetReader(shared_hub(cwd)), root)(v, gate_step.gate, pr, found)
+    got = standing(reader, root)(v, gate_step.gate, pr, found)
     if got.differences:
         return None
     if gate_step.gate == approval_decide.DESIGN_GATE and not got.merged:
@@ -267,6 +298,8 @@ def ask_question(st: store.Store, machine_id: str, stage: str, pr: Optional[int]
     m = run.decide(v)
     waits = m.action == run.Action.GATE and m.stage is not None and m.stage.name == stage and invoke.is_listen(step)
     q = question(v, m, repo=repo) if waits else off_wait_question(v, stage, pr=number, repo=repo)
+    if not waits and found.id == DEPLOY_STAGE_ID and delivery_check.released(hub)(v, stage):
+        q = replace(q, after_release=True)
     # 対象の PR の記録が無い待ちの質問は、`--pr` の番号を対象にする
     adopted = waits and q.pr is None and number is not None
     if adopted:
@@ -333,13 +366,20 @@ def _judge_design(st: store.Store, v: run.View, read: _StageOutput, cwd: Path) -
 
 
 def _finish_drafts(
-    a: argparse.Namespace, v: run.View, read: _StageOutput, held: bool, judged: Optional[_Judgement] = None
+    a: argparse.Namespace,
+    v: run.View,
+    read: _StageOutput,
+    held: bool,
+    judged: Optional[_Judgement] = None,
+    facts: Optional[Mapping[str, Any]] = None,
 ) -> tuple[list[model.EventDraft], list[str]]:
     """手で終える事象（`held` なら回答待ちの `finish_held`）と、工程が流れたときと同じ形で出力を文脈へ書く事象
     （後の工程と承認の対象が読む）。捨てた出力のキーの警告も返す。
 
-    `judged` は回答待ちの工程の MVV 判定で、結果を回答待ちの事象に持たせ、出力にも書く。"""
-    payload: dict[str, Any] = {"output": a.output}
+    `judged` は回答待ちの工程の MVV 判定で、結果を回答待ちの事象に持たせ、出力にも書く。`facts` はデプロイの工程の
+    確かめた値で、事象に残す。リリースしないで終了を書くなら、出したバージョンを読む工程を同じ追記で無効にする。"""
+    facts = facts if facts is not None else {}
+    payload: dict[str, Any] = {"output": a.output, **facts}
     outputs = read.outputs
     if held:
         payload["step"] = next(s.id for s in read.stage.steps if s.kind == stages.GATE_KIND)
@@ -352,7 +392,8 @@ def _finish_drafts(
     kind = FINISH_HELD if held else "manual_finished"
     done = model.EventDraft(kind, command.ACTOR, a.stage, reason=a.reason, payload=payload, rev=v.rev)
     draft, dropped = stages.outputs_draft(read.stage, v.rev, outputs, command.ACTOR)
-    return [done, *([draft] if draft is not None else [])], dropped
+    off = no_release_disables(v, a.stage) if not held and facts.get(NO_RELEASE) else []
+    return [done, *([draft] if draft is not None else []), *off], dropped
 
 
 class _HandFinished(NamedTuple):
@@ -391,10 +432,14 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
     refused = _finish_refusal(v, a.stage)
     if refused is not None:
         raise model.Refused(refused)
-    held = _standing_answer(v, read, cwd, st.root) is None
-    drafts, dropped = _finish_drafts(a, v, read, held)
+    reader = TargetReader(shared_hub(cwd))
+    facts = _release_facts(a, v, read, cwd, reader)
+    held = _standing_answer(v, read, st.root, reader, facts) is None
+    drafts, dropped = _finish_drafts(a, v, read, held, facts=facts)
 
     def append(skips: bool = False) -> _HandFinished:
+        if facts.get("cd_result") == delivery_decide.UNKNOWN:
+            st.warnings.append("CD の実行の結果が分からず、未確定の記録を受けた（cd_result: unknown）")
         with store.transaction(st) as conn:
             return _HandFinished(held, store.append_events(conn, a.machine_id, drafts, v.events[-1].seq), dropped, skips)
 
@@ -407,7 +452,7 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
         if not judged.done:
             got = _judge_design(st, v, read, cwd)
             judged.done, judged.report, judged.warnings = got.done, got.report, got.warnings
-        drafts, dropped = _finish_drafts(a, v, read, held, judged)
+        drafts, dropped = _finish_drafts(a, v, read, held, judged, facts)
         skips = _skips(v, read.stage, judged)
     # 取り消してから追記するまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
     with store.approval_lock_after_answer(st, a.machine_id, time.sleep):
@@ -436,7 +481,10 @@ def _cmd_finish(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, 
         raise model.Refused(f"{a.stage} の出力が規約に合わない: {'; '.join(read.errors)}")
     held = skips = False
     if read.stage.gates:
-        held, seqs, dropped, skips = _hand_finish(a, cwd, st, read)
+        try:
+            held, seqs, dropped, skips = _hand_finish(a, cwd, st, read)
+        except delivery_decide.Unreadable as exc:
+            return result.stopped(command.TOOL, exc.kind, exc.detail)
     else:
         dropped = []
 

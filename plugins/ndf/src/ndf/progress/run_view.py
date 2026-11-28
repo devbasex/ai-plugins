@@ -45,6 +45,12 @@ FINISH_HELD = _event_kind("finish_held")
 RETRY_EVENT = _event_kind("retry")
 # 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）
 DEFINITION_MIGRATED = _event_kind("definition_migrated")
+# デプロイの工程の回答待ちと回答の payload のキー: リリースしないで閉じる用途とその理由、起きたリリースの追認、
+# 読んだ記録の PR。`NO_RELEASE` は、それで無効にした工程の事象の `cause` でもある（このデプロイを開き直すと有効に戻す）
+NO_RELEASE, NO_RELEASE_REASON = "no_release", "no_release_reason"
+AFTER_RELEASE, RECORD_PR = model.AFTER_RELEASE, "record_pr"
+# 工程を無効にする事象の種類
+DISABLED = _event_kind("disabled")
 # 移行で並べ替える工程（定義の id）。クリーンアップをデプロイの直後へ移す
 CLEANUP_STAGE_ID, DEPLOY_STAGE_ID = "cleanup", "deploy"
 # 作業の保存先（チェックアウトの保存先の下）
@@ -198,9 +204,17 @@ def posts_rejection(ev: model.Event) -> bool:
 
 
 def closes_only(payload: Mapping[str, Any]) -> bool:
-    """回答が、手で終えた工程を閉じるだけの確認（`closes_stage`）か。マージや後の操作の承認に数えない。
-    リリースの実行は確かめていないので、追認とは記録しない。"""
-    return payload.get("closes_stage") is True
+    """回答が、デプロイの工程を閉じるためだけの確認（実行済みのリリースの追認 `after_release` か、リリースせずに閉じる
+    `no_release`）か。マージや後の操作の事前の承認に数えない。"""
+    return payload.get(AFTER_RELEASE) is True or payload.get(NO_RELEASE) is True
+
+
+def no_release_disables(v: View, stage: str) -> list[model.EventDraft]:
+    """デプロイの工程 `stage` をリリースしないで終えるとき、出したバージョンを読む未着手の工程を無効にする事象。"""
+    rows = v.rows
+    names = [s.name for s in v.snap.stages if PRODUCT_VERSION in s.inputs and (s.name not in rows or rows[s.name].state == "pending")]
+    payload = {"cause": NO_RELEASE, "stage": stage}
+    return [model.EventDraft(DISABLED, CONDUCTOR, n, reason="デプロイなし", payload=payload, rev=v.rev) for n in names]
 
 
 _UNSEEN: Any = object()

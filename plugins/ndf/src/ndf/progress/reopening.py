@@ -16,7 +16,18 @@ from typing import Any, Optional
 
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, model, run, stages, store
-from ndf.progress.run_view import ANSWERED, CONDUCTOR, FINISHED, REOPENED, STARTED, STEP_EVENT, View, event_payload
+from ndf.progress.run_view import (
+    ANSWERED,
+    CONDUCTOR,
+    DISABLED,
+    FINISHED,
+    NO_RELEASE,
+    REOPENED,
+    STARTED,
+    STEP_EVENT,
+    View,
+    event_payload,
+)
 
 # 後ろの工程の扱い（開き直す・残す）
 REOPEN, KEEP = "reopen", "keep"
@@ -83,6 +94,21 @@ def _acted(rows: Mapping[str, model.RowState], since: Since, s: stages.StageDef)
     return any(p.get("step") in outward and p.get("status") == FINISHED for p in recorded)
 
 
+def _enables(v: View, rows: Mapping[str, model.RowState], names: list[str], reason: str) -> list[model.EventDraft]:
+    """開き直すデプロイの工程がリリースしないで終えて無効にした工程を、有効に戻す事象。
+
+    この無効はデプロイなしで終えた結果なので、後ろの扱い（`keep`）によらず戻す。人が無効にした工程は戻さない。"""
+    off: dict[str, Mapping[str, Any]] = {}
+    for ev in v.events:
+        if ev.draft.rev == v.rev and ev.draft.kind == DISABLED and ev.draft.row_key is not None:
+            off[ev.draft.row_key] = event_payload(ev)
+    return [
+        model.EventDraft("enabled", CONDUCTOR, name, reason=reason, rev=v.rev)
+        for name, p in off.items()
+        if p.get("cause") == NO_RELEASE and p.get("stage") in names and _state(rows, name) == DISABLED
+    ]
+
+
 def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mapping[str, Any], notes: Optional[str] = None) -> Reopen:
     """工程 `stage`（`later` が `reopen` なら進みのある後ろの工程も）を開き直す事象と、取り消すものを組む（書かない）。
 
@@ -102,6 +128,7 @@ def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mappin
         )
         for name in names
     ]
+    drafts += _enables(v, rows, names, reason)
     warnings = [f"工程 {s.name} のマージ・リリースは取り消されない" for s in order if s.name in names and _acted(rows, since, s)]
     return Reopen(drafts, names, warnings, approval_decide.revocations(since, v.machine_id, names))
 

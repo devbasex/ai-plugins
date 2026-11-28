@@ -23,7 +23,7 @@ from ndf import cli
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, lane, model, plan, run, stages
-from ndf.progress.run_view import APPROVAL_POSTING, MATERIAL_DIR
+from ndf.progress.run_view import APPROVAL_POSTING, MATERIAL_DIR, NO_RELEASE, NO_RELEASE_REASON
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
 TOOL = cli.tool_of(__package__)
@@ -126,6 +126,8 @@ class Question:
     pr: Optional[int] = None
     pr_url: Optional[str] = None
     target: Target = field(default_factory=Target)
+    # 待っていないデプロイの工程の質問で、リリースの実行の証拠があった（回答は追認になる。#4520）
+    after_release: bool = False
 
     @property
     def label(self) -> str:
@@ -422,8 +424,11 @@ def material(v: run.View, q: Question, *, private: bool = True) -> str:
         lines.append(f"- 見る head: {q.target.head}")
     if q.target.base:
         lines.append(f"- マージ先: {q.target.base}")
-    if q.gate == RELEASE_GATE and run.step_progress(v, q.stage).held_finish is not None:
-        lines.append(f"- {HAND_FINISH_LINE}")
+    held = run.step_progress(v, q.stage).held_finish if q.gate == RELEASE_GATE else None
+    if held is not None and held.get(NO_RELEASE) is True:
+        lines.append(f"- {NO_RELEASE_LINE}（理由: {held.get(NO_RELEASE_REASON)}）。{CLOSES_ONLY_LINE}")
+    elif held is not None or q.after_release:
+        lines.append(f"- {AFTER_RELEASE_LINE}。{CLOSES_ONLY_LINE}")
     elif q.target.production:
         lines.append(f"- {PRODUCTION_LINE}")
     if q.gate == RELEASE_GATE and isinstance(ctx.get("product_version"), str):
@@ -526,7 +531,7 @@ def _write_pair(root: Path, v: run.View, q: Question, private: bool) -> Path:
     """`write_material` の本体（承認資料と提示した対象の組を書く）。"""
     path = material_path(root, q)
     shown = presented_path(root, q)
-    if presented_stale(root, q):
+    if presented_stale(root, q) or _lacks_after_release(path, q):
         path.unlink(missing_ok=True)
         shown.unlink(missing_ok=True)
     if not path.exists():
@@ -557,8 +562,15 @@ def _private_temp(directory: Path, text: str) -> Iterator[str]:
 PRESENTED_SUFFIX = ".target.json"
 # 承認資料の、本番へ反映され得ることを示す行（`ndf ci ask` の承認資料と同じ文）
 PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
-# 手で終えたデプロイの回答待ちの承認資料の行（回答はマージの承認の証跡を書かない。リリースの実行は確かめていない）
-HAND_FINISH_LINE = "手で終えたという申告の確認（NDF はリリースの実行を確かめていない）。回答は工程を閉じるためで、マージの承認にならない"
+# デプロイの工程を閉じるための質問の承認資料の行（回答はマージの承認の証跡を書かない。#4520）
+AFTER_RELEASE_LINE = "リリースは実行済みで、この回答は事前の承認ではない（追認）"
+NO_RELEASE_LINE = "リリースせずにこの工程を終える"
+CLOSES_ONLY_LINE = "回答は工程を閉じるためで、マージの承認にならない"
+
+
+def _lacks_after_release(path: Path, q: Question) -> bool:
+    """実行の前に書いた承認資料が残っていて、追認の質問には使えないか。"""
+    return q.after_release and path.exists() and AFTER_RELEASE_LINE not in path.read_text(encoding="utf-8")
 
 
 def _presented_target_moved(held: Target, now: Target) -> bool:

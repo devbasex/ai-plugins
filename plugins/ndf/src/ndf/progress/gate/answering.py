@@ -42,7 +42,15 @@ from ndf.progress.gate.asking import (
 )
 from ndf.progress.gate.records import record_answer, rejections_path
 from ndf.progress.gate.targets import TargetReader
-from ndf.progress.run_view import APPROVAL_POSTING, REJECTING_KEY, closes_only
+from ndf.progress.run_view import (
+    AFTER_RELEASE,
+    APPROVAL_POSTING,
+    DEPLOY_STAGE_ID,
+    NO_RELEASE,
+    NO_RELEASE_REASON,
+    REJECTING_KEY,
+    closes_only,
+)
 
 # 回答した者の形（人・conductor・サービス。サービスは `service:<主体>`。プランの承認待ちと共有する）
 ACTORS = actors.ACTORS
@@ -372,31 +380,54 @@ def _note_posting(conn: Any, v: run.View, q: Question, a: Answer, seen: Target) 
     return store.append_events(conn, v.machine_id, [draft], v.events[-1].seq)[-1]
 
 
+# デプロイの工程のリリースの実行の証拠があるかを読む口（ステートマシンと工程の名前）
+Released = Callable[[run.View, str], bool]
+
+
+def never_released(v: run.View, stage: str) -> bool:
+    """リリースの実行の証拠を読まない口（PR を読まないテスト）。"""
+    return False
+
+
+def _purpose(v: run.View, q: Question, effects: _Effects, released: Released) -> dict[str, Any]:
+    """デプロイの工程への回答の用途（事象の payload に持たせる）。事前の承認なら空（#4520）。
+
+    手で終えた回答待ちは、リリースせずに閉じる確認（`no_release`）か、起きたリリースの追認（`after_release`）。待っていない
+    回答は、リリースの実行の証拠があれば追認である。"""
+    if q.gate != RELEASE_GATE or v.snap.stage(q.stage).id != DEPLOY_STAGE_ID:
+        return {}
+    held = run.step_progress(v, q.stage).held_finish
+    if held is not None and held.get(NO_RELEASE) is True:
+        return {NO_RELEASE: True, NO_RELEASE_REASON: held.get(NO_RELEASE_REASON)}
+    done = held is not None or (effects.late and released(v, q.stage))
+    return {AFTER_RELEASE: True} if done else {}
+
+
 @dataclass(frozen=True)
 class _Checked:
-    """確かめを通った回答。`closes` は手で終えたデプロイの工程を閉じるだけの確認か。`planned` は回答に伴う開き直し。"""
+    """確かめを通った回答。`purpose` はデプロイの工程への回答の用途（`_purpose`）。`planned` は回答に伴う開き直し。"""
 
     q: Question
     a: Answer
     seen: Target
     text: Optional[str]
-    closes: bool
+    purpose: dict[str, Any]
     effects: _Effects
     planned: Optional[reopening.Reopen]
 
 
-def _check_answer(conn: Any, v: run.View, a: Answer, observe: Observe, root: Path, text: Optional[str]) -> tuple[_Checked, Optional[str]]:
+def _check_answer(conn: Any, v: run.View, a: Answer, ports: _Ports, root: Path, text: Optional[str]) -> tuple[_Checked, Optional[str]]:
     """回答を受けられるかを確かめ、確かめを通った回答と証跡の担い手（証跡を書かないなら None）を返す。"""
-    q, seen = _refusal(v, a, observe, root)
+    q, seen = _refusal(v, a, ports.observe, root)
     # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
     q = replace(q, target=seen)
-    # 手で終えたデプロイの回答待ちへの回答は、工程を閉じる確認で、マージの事前の承認ではない
-    closes = run.step_progress(v, q.stage).held_finish is not None and q.gate == RELEASE_GATE
     by = _trail_by(conn, q, a, seen)
-    if closes and a.value == run.APPROVED:
-        by = None
     effects = _effects(v, q, a.value)
-    return _Checked(q, a, seen, text, closes, effects, _plan_reopen(v, q, a, text, effects)), by
+    purpose = _purpose(v, q, effects, ports.released)
+    # 追認とリリースせずに閉じる承認は、マージの事前の承認ではないので証跡を書かない（却下の証跡は書く）
+    if purpose and a.value == run.APPROVED:
+        by = None
+    return _Checked(q, a, seen, text, purpose, effects, _plan_reopen(v, q, a, text, effects)), by
 
 
 def _plan_reopen(v: run.View, q: Question, a: Answer, text: Optional[str], effects: _Effects) -> Optional[reopening.Reopen]:
@@ -453,7 +484,7 @@ def _commit_answer(conn: Any, v: run.View, got: _Checked, last_seq: int) -> tupl
         "dropped": list(a.drop),
         "carried_row": carried,
         "release_request": rejected,
-        **({"closes_stage": True} if got.closes else {}),
+        **got.purpose,
         **({"late": True} if got.effects.late else {}),
         **({"reopened": got.planned.stages, "warnings": got.planned.warnings} if got.planned is not None else {}),
     }
@@ -461,13 +492,13 @@ def _commit_answer(conn: Any, v: run.View, got: _Checked, last_seq: int) -> tupl
 
 
 def _begin_answer(
-    conn: Any, v: run.View, a: Answer, observe: Observe, root: Path, text: Optional[str]
+    conn: Any, v: run.View, a: Answer, ports: _Ports, root: Path, text: Optional[str]
 ) -> tuple[_Checked, Optional[str], int, Optional[tuple[list[int], Optional[str]]]]:
     """回答の 1 つ目のトランザクション。確かめを通った回答、証跡の担い手、回答を書くときに期待する事象の番号、書いた結果を返す。
 
     PR へ書くもの（証跡の投稿と承認の取り消し）が無い回答はここで書く。ある回答は書かず（結果は None）、投稿前の記録だけを
     追記する（`_note_posting`）。"""
-    got, by = _check_answer(conn, v, a, observe, root, text)
+    got, by = _check_answer(conn, v, a, ports, root, text)
     last = v.events[-1].seq if v.events else 0
     if by is None and (got.planned is None or not got.planned.revoke):
         return got, by, last, _commit_answer(conn, v, got, last)
@@ -477,6 +508,14 @@ def _begin_answer(
 
 def _no_revoke(revocations: list[merge_approval.Revocation]) -> None:
     """承認の取り消しを書かない口（PR を読まないテスト）。"""
+
+
+class Outward(NamedTuple):
+    """回答が PR に触れる口のうち、対象と証跡のほか。`revoke` は開き直しで承認を取り消し、`released` はリリースの実行の
+    証拠を読む。"""
+
+    revoke: reopening.Revoke = _no_revoke
+    released: Released = never_released
 
 
 def _needs_stopped_work(v: run.View, a: Answer, root: Path) -> bool:
@@ -493,7 +532,7 @@ def answer(
     a: Answer,
     observe: Observe = no_observe,
     post: Post = no_post,
-    revoke: reopening.Revoke = _no_revoke,
+    outward: Outward = Outward(),
 ) -> dict[str, Any]:
     """回答を事象 `answered` に残す（外した課題の行と、今のスプリントの課題から外す事象も同じトランザクション）。
     同じ冪等のキーは書かずに同じ結果を返す。
@@ -506,12 +545,12 @@ def answer(
     送り直すと続きから回復する。同じ冪等のキーの回答が既に
     記録されていても、証跡が無ければ書いてから戻る。
 
-    工程を開き直す回答は、却下の証跡と、開き直す工程の承認の取り消し（`revoke`）の後に、開き直しと回答を 1 回で追記する。
+    工程を開き直す回答は、却下の証跡と、開き直す工程の承認の取り消し（`outward.revoke`）の後に、開き直しと回答を 1 回で追記する。
     待ちへの回答でない承認でない回答は、工程を流す作業が動いていれば断る。"""
     if not ACTORS.match(a.by):
         raise model.Refused(actors.invalid_message(a.by))
     text = run.notes_text(a.value, a.notes)
-    ports = _Ports(observe, post, revoke)
+    ports = _Ports(observe, post, outward.revoke, outward.released)
     out = _answer_locked(st, machine_id, a, text, ports, stopped=False)
     if out is None:
         # 作業の排他が要ると分かったら、何も書かずに排他を放し、取得の順を守って最初から読み直す
@@ -521,11 +560,12 @@ def answer(
 
 
 class _Ports(NamedTuple):
-    """`answer` が受けた、対象を読む口・証跡を書く口・承認を取り消す口。"""
+    """`answer` が受けた、対象を読む口・証跡を書く口・承認を取り消す口・リリースの実行の証拠を読む口。"""
 
     observe: Observe
     post: Post
     revoke: reopening.Revoke
+    released: Released
 
 
 def _answer_locked(
@@ -548,7 +588,7 @@ def _answer_locked(
             elif not stopped and _needs_stopped_work(v, a, st.root):
                 return None
             else:
-                got, by, last, done = _begin_answer(conn, v, a, ports.observe, st.root, text)
+                got, by, last, done = _begin_answer(conn, v, a, ports, st.root, text)
         if held is not None:
             send()
             return replayed

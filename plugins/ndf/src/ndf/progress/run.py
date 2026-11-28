@@ -36,7 +36,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.contracts.worker_kinds import Recorded
 from ndf.core import durable, merge_approval
 from ndf.core.plan import cli as plan_cli
-from ndf.progress import approval_decide, command, definition, invoke, issue_values, model, stages, store
+from ndf.progress import approval_decide, command, definition, delivery_decide, invoke, issue_values, model, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, Action, Move, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
 from ndf.progress.run_approval import approved_seen, consume, prior_approval, standing_approval
@@ -327,6 +327,8 @@ class Env:
     in_lane: Callable[[store.Store, str], bool] = lambda _st, _machine_id: False
     # 記録した承認を今の対象に照らす口と、読んだ対象を捨てる口（GitHub を読むのは `ndf.progress.gate`）
     standing: approval_decide.StandingOf = approval_decide.unreadable
+    # 手で終えたデプロイの回答待ちを終える前に、リリース記録と CD の結果を確かめ直す口（GitHub を読むのは `ndf.progress.gate`）
+    confirm: Callable[[View, Mapping[str, Any]], delivery_decide.Verdict] = delivery_decide.unconfirmable
     forget: Callable[[], None] = lambda: None
     # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
     revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None

@@ -546,12 +546,14 @@ class GitHub:
         path = f"/repos/{self.repo}/compare/{quote(base, safe='')}...{quote(head, safe='')}"
         return self._counted_pages(path, _Counted("commits", "total_commits", "github.list-pages", f"{base}...{head} のコミットが"))
 
-    def _counted_pages(self, path: str, spec: _Counted) -> list[dict]:
-        """件数のキーを持つ REST の一覧を、行が件数に届くか空のページが来るまで読む。`spec.cap` ページを超えたら途中で切らずに止まる。"""
+    def _counted_pages(self, path: str, spec: _Counted, query: Optional[dict] = None) -> list[dict]:
+        """件数のキーを持つ REST の一覧を、行が件数に届くか空のページが来るまで読む。`spec.cap` ページを超えたら途中で切らずに止まる。
+        `query` はページの指定に足す絞り込み。"""
         pages = _page_cap(spec.cap)
         rows: list[dict] = []
         for page in range(1, pages + 1):
-            body = self.rest("GET", path, params={"per_page": PER_PAGE, "page": page})
+            narrow = dict(query) if query is not None else {}
+            body = self.rest("GET", path, params={**narrow, "per_page": PER_PAGE, "page": page})
             rows.extend(body[spec.rows])
             if len(rows) >= int(body[spec.total]) or not body[spec.rows]:
                 return rows
@@ -712,6 +714,12 @@ class GitHub:
     def workflow_run(self, run_id: int) -> dict:
         """ワークフローの実行（`GET /actions/runs/<id>`。`path` が `.github/workflows/<ファイル>@<ref>` の形）の本文。"""
         return self.rest("GET", f"/repos/{self.repo}/actions/runs/{int(run_id)}")
+
+    def workflow_runs(self, workflow: str, *, branch: str, head_sha: str) -> list[dict]:
+        """workflow のファイル名 `workflow` の、ブランチ `branch` のコミット `head_sha` に対する実行の一覧（#4520）。"""
+        path = f"/repos/{self.repo}/actions/workflows/{quote(workflow, safe='')}/runs"
+        spec = _Counted("workflow_runs", "total_count", "github.list-pages", f"{workflow} の実行が")
+        return self._counted_pages(path, spec, {"branch": branch, "head_sha": head_sha})
 
     def run_artifacts(self, run_id: int) -> list[dict]:
         """ワークフローの実行の成果物の一覧を `total_count` に届くまで読む（`github.list-pages` ページまで）。"""

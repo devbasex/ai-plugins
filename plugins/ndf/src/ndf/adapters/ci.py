@@ -89,6 +89,13 @@ def check_of(run: dict) -> Check:
     return Check(text_of(run["name"]), state, conclusion if state == State.DONE else "", int(run["id"]))
 
 
+def ended_with(run: Mapping[str, Any]) -> Optional[str]:
+    """workflow の実行（REST の 1 件）が終わっていれば結論、終わっていなければ None。"""
+    if text_of(run["status"]).lower() != "completed":
+        return None
+    return text_of(run["conclusion"]).lower()
+
+
 def _newness(run: dict, index: int) -> tuple:
     """新しさ（大きいほど新しい）。時刻の無い実行（まだ始まっていない再実行）は最も新しい。"""
     stamp = max(text_of(run["completed_at"]), text_of(run["started_at"]))

@@ -20,6 +20,8 @@
   `progress.reopening`）。承認ゲートを持つ工程の `finish` は、有効な承認（`progress.approval_decide`）が無ければ回答待ちにする。
   `question` は待っていない工程の質問を作り、`ndf answer` が受ける（#4520）
 - 承認の対象の読み取り（`targets`）: PR とマージ先の設定を 1 回の呼び出しで 1 回だけ読む
+- デプロイの工程の確かめ（`delivery_check`）: 手で終える前と後に、PR のリリース記録と CD の実行を読む。判定は
+  `progress.delivery_decide`（#4520）
 - サブコマンドのエントリポイント（`entry`）: `ndf answer`（`main`）と `ndf progress`（`progress_main`。エントリポイントは `progress_cli`）
 """
 

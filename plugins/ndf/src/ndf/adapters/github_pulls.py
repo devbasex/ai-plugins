@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any, NamedTuple, Optional, Protocol
 
 from ndf.contracts import limits
@@ -19,6 +21,14 @@ PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql`
 def text_of(value: Any) -> str:
     """文字列ならそのまま、ほかの値（None など）は空文字。"""
     return value if isinstance(value, str) else ""
+
+
+_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$")
+
+
+def _time_of(value: Any) -> datetime | None:
+    """ISO 8601 の時刻の文字列（REST の `2026-01-01T00:00:00Z` の形）を読む。形が違えば None（時刻が分からない）。"""
+    return datetime.fromisoformat(value) if isinstance(value, str) and _TIMESTAMP.match(value) else None
 
 
 def _login(user: Any) -> str:
@@ -73,14 +83,18 @@ class Authored(NamedTuple):
     edited: bool = False
     # 書き手のアカウント ID（REST の `user.id`）。同じ名前の別のアカウントを分けるのに使う（#4409）。無ければ 0
     author_id: int = 0
+    # 作成の時刻（REST の `created_at`。直近の開き直しより後に書かれたリリース記録かを見る。#4520）。無ければ None
+    created: datetime | None = None
 
     @classmethod
     def from_rest(cls, raw: dict) -> Authored:
         url = text_of(raw["html_url"]) if isinstance(raw.get("html_url"), str) else ""
         created, updated = raw.get("created_at"), raw.get("updated_at")
         edited = isinstance(created, str) and isinstance(updated, str) and updated != created
+        written = _time_of(created)
         user = raw["user"]
-        return cls(_login(user), text_of(raw["author_association"]).upper(), text_of(raw["body"]), url, edited, account_id_of(user))
+        association = text_of(raw["author_association"]).upper()
+        return cls(_login(user), association, text_of(raw["body"]), url, edited, account_id_of(user), written)
 
 
 class Pull(NamedTuple):

@@ -13,18 +13,22 @@ from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf.contracts import result
-from ndf.progress import approval_decide, invoke, model, stages, store
+from ndf.progress import approval_decide, delivery_decide, invoke, model, stages, store
 from ndf.progress.folding import Action, Move
 from ndf.progress.run_view import (
     ACTOR,
     ANSWERED,
     CONDUCTOR,
+    DEPLOY_STAGE_ID,
     FINISHED,
+    NO_RELEASE,
+    RECORD_PR,
     STEP_EVENT,
     StageAnswers,
     View,
     closes_only,
     event_payload,
+    no_release_disables,
     read_accepted_head,
     work_root,
 )
@@ -248,18 +252,48 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
             d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
         d.warn(why)
         return None
+    released: dict[str, Any] = {}
+    if m.stage.id == DEPLOY_STAGE_ID:
+        released, stopped = _released_check(d, v, m)
+        if stopped is not None:
+            return stopped
     ran: list[Optional[dict[str, Any]]] = []  # 終了の確かめを打ったら 1 件（終了を書いたら None）
     if event_payload(m.event).get("by") != model.MVV_SERVICE:
-        ran.append(_finish_held_stage(d, v, m, got))
+        ran.append(_finish_held_stage(d, v, m, got, released))
     else:
         # MVV 判定の承認は、マージの確かめの前に証跡を書く（設計 PR のマージが読む）
-        _confirm_mvv(d, v, m, lambda: ran.append(_finish_held_stage(d, v, m, got)))
+        _confirm_mvv(d, v, m, lambda: ran.append(_finish_held_stage(d, v, m, got, released)))
     if ran == [None]:
         d.synced()  # 進捗記録の書き直しは、回答と共有する排他を放してから行う
     return ran[0] if ran else None
 
 
-def _finish_held_stage(d: Hands, v: View, m: Move, got: approval_decide.Standing) -> Optional[dict[str, Any]]:
+def _released_check(d: Hands, v: View, m: Move) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """手で終えたデプロイの工程のリリース記録と CD の結果を、終了を書く直前に確かめ直す。待つ間に `反映失敗` の記録が
+    足されうるためである。終了の事象に残す値と、通らないときの止まる結果を返す。"""
+    assert m.stage is not None and m.progress is not None and m.progress.held_finish is not None and m.event is not None
+    held = m.progress.held_finish
+    again = result.command(TOOL, "next", v.machine_id)
+    try:
+        got = d.env.confirm(v, held)
+    except delivery_decide.Unreadable as exc:
+        return {}, result.stopped(TOOL, exc.kind, exc.detail, next=again)
+    if not got.ok:
+        detail = f"リリースの確かめに合わない: {got.why}。直してから ndf progress next {v.machine_id} を打つ"
+        return {}, result.stopped(TOOL, "precondition", detail, next=again)
+    reason = got.no_release_reason if held.get(NO_RELEASE) is True else None
+    differ = approval_decide.purpose_differences(event_payload(m.event), closing=True, no_release_reason=reason)
+    if differ:
+        retry = f"ndf progress retry {v.machine_id} {m.stage.name} --reason <理由> --later keep"
+        detail = f"承認の用途が今の記録と違う: {' / '.join(differ)}。{retry} の後に手で終え直す"
+        return {}, result.stopped(TOOL, "precondition", detail)
+    if got.cd_result == delivery_decide.UNKNOWN:
+        d.warn("CD の実行の結果が分からないまま終える（cd_result: unknown）")
+    kept = {k: held[k] for k in (RECORD_PR, NO_RELEASE) if k in held}
+    return {**kept, **({"cd_result": got.cd_result} if got.cd_result else {})}, None
+
+
+def _finish_held_stage(d: Hands, v: View, m: Move, got: approval_decide.Standing, released: dict[str, Any]) -> Optional[dict[str, Any]]:
     """有効な承認を読んだ手で終えた回答待ちの工程に終了を書く。設計の PR が未マージなら、終了を書かずに止まる結果を返す。
     進捗記録は呼び手が書き直す。"""
     assert m.stage is not None and m.step is not None and m.progress is not None and m.progress.held_finish is not None
@@ -270,8 +304,9 @@ def _finish_held_stage(d: Hands, v: View, m: Move, got: approval_decide.Standing
         )
         return result.stopped(TOOL, "precondition", detail, next=result.command(TOOL, "next", v.machine_id))
     reason = f"手で終えた工程の承認（回答の事象 {m.event.seq}）を読んだ"
-    payload = {"output": m.progress.held_finish["output"], "approval": m.event.seq}
-    d.write(model.EventDraft(FINISHED, ACTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
+    payload = {"output": m.progress.held_finish["output"], "approval": m.event.seq, **released}
+    done = model.EventDraft(FINISHED, ACTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev)
+    d.write(done, *(no_release_disables(v, m.stage.name) if released.get(NO_RELEASE) else []))
     return None
 
 

@@ -74,7 +74,9 @@ def test_only_finish_takes_output(name, capsys):
 @pytest.mark.parametrize("name", STAGE_ACTIONS)
 def test_stage_actions_keep_their_options(name):
     opts = {o for act in _sub(name)._actions for o in act.option_strings}
-    want = {"-h", "--help", "--reason", "--cwd"} | {"finish": {"--output"}, "retry": {"--later"}}.get(name, set())
+    want = {"-h", "--help", "--reason", "--cwd"} | {"finish": {"--output", "--record-pr", "--no-release"}, "retry": {"--later"}}.get(
+        name, set()
+    )
     assert opts == want
 
 
@@ -95,7 +97,7 @@ def test_check_takes_machine_stage_output_and_cwd_without_reason():
     a = command.parser().parse_args(["check", "m1", "計画", "--output", "o.json", "--cwd", "/tmp/x"])
     assert (a.action, a.machine_id, a.stage, a.output, a.cwd) == ("check", "m1", "計画", "o.json", Path("/tmp/x"))
     opts = {o for act in _sub("check")._actions for o in act.option_strings}
-    assert opts == {"-h", "--help", "--output", "--cwd"}
+    assert opts == {"-h", "--help", "--output", "--no-release", "--cwd"}
 
 
 def test_check_requires_output(capsys):

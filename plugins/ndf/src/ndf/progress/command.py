@@ -7,8 +7,8 @@ ndf progress new <スプリント名> --loop <ループの名前> --parent <レ�
 ndf progress show <ステートマシンの ID>
 ndf progress disable|enable <ステートマシンの ID> <工程> --reason <理由>
 ndf progress retry <ステートマシンの ID> <工程> --reason <理由> [--later reopen|keep]
-ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由>
-ndf progress check <ステートマシンの ID> <工程> --output <出力のファイル>
+ndf progress finish <ステートマシンの ID> <工程> --output <出力のファイル> --reason <理由> [--record-pr <番号>] [--no-release]
+ndf progress check <ステートマシンの ID> <工程> --output <出力のファイル> [--no-release]
 ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
@@ -668,12 +668,19 @@ def _cmd_new(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     return result.result(TOOL, result.OK, summary, items=rows, metrics={"machine_id": tid, "rows": len(rows), "disabled": off})
 
 
+def ratifies(ev: model.Event) -> bool:
+    """事象が、起きたリリースの追認の回答か。"""
+    return ev.draft.payload is not None and ev.draft.payload.get(model.AFTER_RELEASE) is True
+
+
 def _cmd_show(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
     with store.transaction(st) as conn:
         rev, _, snap, events = read_current(conn, a.machine_id)
     rows = _rows(snap, events, rev)
     whole = model.table_state("sprint", events)
-    metrics = {"machine_id": a.machine_id, "mode": snap.mode, "rev": rev, "state": whole, "history": [e.as_dict() for e in events]}
+    # 起きたリリースの追認の回答は、事前の承認と取り違えないように示す（#4520）
+    history = [{**e.as_dict(), **({"note": "追認"} if ratifies(e) else {})} for e in events]
+    metrics = {"machine_id": a.machine_id, "mode": snap.mode, "rev": rev, "state": whole, "history": history}
     return result.result(
         TOOL, result.OK, f"ステートマシン {a.machine_id} は{model.label(whole)}（{len(rows)} 行）", items=rows, metrics=metrics
     )
@@ -826,9 +833,13 @@ def parser() -> argparse.ArgumentParser:
     finish = sub.add_parser("finish", help="工程に finish を書く")
     add_stage_target(finish)
     finish.add_argument("--output", required=True, help="工程の出力の規約に合う JSON のファイル")
+    finish.add_argument("--record-pr", type=int, help="デプロイの工程のリリース記録を持つ PR（省けば文脈の release_pr か pr）")
     check = sub.add_parser("check", help="工程の出力を finish と同じ規則で確かめる（書かない）")
     add_stage_target(check, reason=False)
     check.add_argument("--output", required=True, help="確かめる工程の出力の JSON のファイル")
+    check.set_defaults(record_pr=None)
+    for ending in (finish, check):
+        ending.add_argument("--no-release", action="store_true", help="デプロイの工程をリリースしないで終える（デプロイなしの記録が要る）")
     asking = sub.add_parser("question", help="承認ゲートの工程の質問・承認資料・回答のコマンドを作る")
     add_stage_target(asking, reason=False)
     asking.add_argument("--pr", type=int, help="設計承認ゲートの対象の PR（文脈に design_pr が無いとき）")

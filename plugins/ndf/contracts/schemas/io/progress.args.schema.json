@@ -51,6 +51,10 @@
           "type": "string",
           "description": "確かめる工程の出力の JSON のファイル"
         },
+        "--no-release": {
+          "type": "boolean",
+          "description": "デプロイの工程をリリースしないで終える（デプロイなしの記録が要る）"
+        },
         "--cwd": {
           "type": "string",
           "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
@@ -176,6 +180,14 @@
         "--output": {
           "type": "string",
           "description": "工程の出力の規約に合う JSON のファイル"
+        },
+        "--record-pr": {
+          "type": "integer",
+          "description": "デプロイの工程のリリース記録を持つ PR（省けば文脈の release_pr か pr）"
+        },
+        "--no-release": {
+          "type": "boolean",
+          "description": "デプロイの工程をリリースしないで終える（デプロイなしの記録が要る）"
         },
         "--cwd": {
           "type": "string",

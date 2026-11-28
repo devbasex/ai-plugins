@@ -243,11 +243,11 @@
 | 呼び方 | 引数 |
 | --- | --- |
 | `ndf progress cancel` | `machine_id`（string・必須・位置）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
-| `ndf progress check` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--output`（string・必須）: 確かめる工程の出力の JSON のファイル<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf progress check` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--output`（string・必須）: 確かめる工程の出力の JSON のファイル<br>`--no-release`（boolean・任意）: デプロイの工程をリリースしないで終える（デプロイなしの記録が要る）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress disable` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress docs-only` | `--base`（string・必須）: ベースブランチ<br>`--remote`（string・任意）: リモート名（省けば worktree の設定の remote か既定）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress enable` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
-| `ndf progress finish` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--output`（string・必須）: 工程の出力の規約に合う JSON のファイル<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf progress finish` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--reason`（string・必須）<br>`--output`（string・必須）: 工程の出力の規約に合う JSON のファイル<br>`--record-pr`（integer・任意）: デプロイの工程のリリース記録を持つ PR（省けば文脈の release_pr か pr）<br>`--no-release`（boolean・任意）: デプロイの工程をリリースしないで終える（デプロイなしの記録が要る）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress gathered` | `--branch`（string・任意）: スプリントブランチ（省けば worktree のブランチ）<br>`--remote`（string・任意）: リモート名（省けば worktree の設定の remote か既定）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress new` | `name`（string・必須・位置）: スプリント名<br>`--mode`（string・任意）<br>`--issues`（array of integer・任意）<br>`--loop`（string・任意）: 開発ループの行のステートマシンを作る（工程なし。ループの名前）<br>`--pace`（string・任意・既定 `"normal"`）<br>`--disable`（array of string・任意）: <工程>=<理由><br>`--requirements`（string・任意）: 要求と受け入れ条件の出力（工程の出力の規約に合う JSON）<br>`--parent`（string・任意）: 親のステートマシン（レーンのステートマシン）の ID<br>`--carry`（string・任意）: 無効にした工程の出力のキーを、中止したこのステートマシンの文脈から写す<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress question` | `machine_id`（string・必須・位置）<br>`stage`（string・必須・位置）: 工程の名前（工程表の行名）<br>`--pr`（integer・任意）: 設計承認ゲートの対象の PR（文脈に design_pr が無いとき）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |

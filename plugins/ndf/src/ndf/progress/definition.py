@@ -28,6 +28,7 @@ from jsonschema import Draft202012Validator
 
 from ndf import contracts, identity
 from ndf.contracts import result
+from ndf.contracts.worker_kinds import DELIVERY, PRODUCT_VERSION
 from ndf.progress import model, stages
 
 DSL = "workflow/dsl/workflow-1.0.3.json"
@@ -205,13 +206,22 @@ def generated_outputs(stage_id: str) -> tuple[str, ...]:
     return tuple(meta["generated_outputs"]) if "generated_outputs" in meta else ()
 
 
-def check_stage_output(stage: stages.StageDef, obj: Any, *, handwritten: bool = False) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
+def check_stage_output(
+    stage: stages.StageDef, obj: Any, *, handwritten: bool = False, no_release: bool = False
+) -> tuple[list[str], list[tuple[str, Optional[str]]]]:
     """工程の出力を確かめ、誤りと、欠けた文脈のキーと取り場所の組（工程の定義の `outputs` の順）を返す。
 
-    手で書いた出力（`handwritten`）には、NDF が作るキー（`generated_outputs`）を求めない。"""
+    手で書いた出力（`handwritten`）には、NDF が作るキー（`generated_outputs`）を求めない。リリースしないで終える出力
+    （`no_release`）には、出したバージョンと届け先と MVV 判定を求めず、前の 2 つがあれば誤りにする。"""
     skipped = generated_outputs(stage.id) if handwritten else ()
+    unreleased = (PRODUCT_VERSION, DELIVERY) if no_release else ()
+    if no_release:
+        skipped = (*skipped, *unreleased, model.MVV_KEY)
     keys = tuple(k for k in stage.outputs if k not in skipped)
-    return _validate_stage(stage, obj, stage.output_ref, keys, "outputs", "出力")
+    errs, missing = _validate_stage(stage, obj, stage.output_ref, keys, "outputs", "出力")
+    written = obj.get("outputs") if isinstance(obj, dict) else None
+    errs += [f"リリースしないで終える出力に {k} は書けない" for k in unreleased if isinstance(written, dict) and k in written]
+    return errs, missing
 
 
 def validate_stage_output(stage: stages.StageDef, obj: Any) -> list[str]:

@@ -60,6 +60,15 @@ class MergeHub:
     # コミット → 必須のチェック `pytest` の結論。無いコミットは success
     conclusions: dict[str, str] = field(default_factory=dict)
     checked: list[str] = field(default_factory=list)
+    # (workflow, コミット) → workflow の実行の一覧
+    runs_of: dict[tuple[str, str], list[dict]] = field(default_factory=dict)
+
+    def trusts(self, authored: Authored) -> bool:
+        return authored.association == "OWNER"
+
+    def workflow_runs(self, workflow: str, *, branch: str, head_sha: str) -> list[dict]:
+        self.calls.append("workflow_runs")
+        return list(self.runs_of.get((workflow, head_sha), []))
 
     def check_runs(self, sha: str) -> list[dict]:
         self.calls.append("check_runs")

@@ -16,6 +16,9 @@ from ndf.progress.run_view import (
     ANSWERED,
     APPROVAL_POSTING,
     FINISH_HELD,
+    AFTER_RELEASE,
+    NO_RELEASE,
+    NO_RELEASE_REASON,
     REJECTING_KEY,
     STEP_EVENT,
     View,
@@ -137,15 +140,38 @@ def objection_bars_skip(rows: Callable[[], Sequence[model.Event]], step_id: str)
     return step_id == model.MVV_GATE_STEPS[DESIGN_GATE] and objection_remains(rows(), DESIGN_GATE)
 
 
-def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:
+def purpose_differences(answer: Mapping[str, Any], *, closing: bool = False, no_release_reason: Optional[str] = None) -> list[str]:
+    """回答の用途が、今の操作と同じでない理由。空なら同じ（#4520）。
+
+    追認（`after_release`）は、デプロイの工程を閉じる判定（`closing`）だけが承認として読む。リリースせずに閉じる承認
+    （`no_release`）と、リリースする承認は互いに使わず、リリースしない理由が違う承認も使わない。"""
+    held = answer.get(NO_RELEASE) is True
+    if held != (no_release_reason is not None):
+        return ["リリースせずに閉じる承認" if held else "リリースする承認で、リリースせずに閉じる承認でない"]
+    if held and answer.get(NO_RELEASE_REASON) != no_release_reason:
+        return [f"リリースしない理由（承認した理由 {answer.get('no_release_reason')}・今の理由 {no_release_reason}）"]
+    return ["追認は事前の承認でない"] if answer.get(AFTER_RELEASE) is True and not closing else []
+
+
+def counted_approval(
+    rows: Sequence[model.Event],
+    gate: Optional[str],
+    gate_step: str,
+    *,
+    closing: bool = False,
+    no_release_reason: Optional[str] = None,
+) -> Optional[model.Event]:
     """対象を読まずに決まる承認の候補。境界より後の最新の回答が、数える承認でなければ None。
 
-    その回答の後に却下か変更要求の投稿を試みた記録があれば None。PR に却下が載っていて回答の確定だけが失敗した可能性がある。"""
+    その回答の後に却下か変更要求の投稿を試みた記録があれば None。PR に却下が載っていて回答の確定だけが失敗した可能性がある。
+    用途（`purpose_differences`）が違う回答も数えず、前の回答へはさかのぼらない。"""
     found = latest_answer(rows, gate, approval_boundary(rows, gate_step))
     if found is None or rejection_posted_after(rows, gate, found.seq):
         return None
     p = event_payload(found)
-    return None if p.get("answer") != invoke.APPROVED or closes_only(p) or model.mvv_answer_void(p, gate) else found
+    if p.get("answer") != invoke.APPROVED or model.mvv_answer_void(p, gate):
+        return None
+    return None if purpose_differences(p, closing=closing, no_release_reason=no_release_reason) else found
 
 
 def target_pr(v: View, stage: stages.StageDef, gate: Optional[str]) -> Optional[int]:

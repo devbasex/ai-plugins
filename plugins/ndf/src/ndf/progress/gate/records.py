@@ -17,7 +17,7 @@ from ndf import identity
 from ndf.contracts import facts
 from ndf.progress import approval_decide, invoke, model, run
 from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, sprint_issues
-from ndf.progress.run_view import closes_only, read_accepted_head
+from ndf.progress.run_view import AFTER_RELEASE, closes_only, read_accepted_head
 
 # --- 変更要求の記録 ---------------------------------------------------------------------------------
 
@@ -101,6 +101,8 @@ def answers(v: run.View) -> list[dict[str, Any]]:
                 "head": Target.from_dict(p.get("seen")).head,
                 "reason": ev.draft.reason,
                 "by": p["by"] if "by" in p else ev.draft.actor,
+                # 起きたリリースの追認は、事前の承認と取り違えないように示す（#4520）
+                **({AFTER_RELEASE: True, "note": "追認"} if p.get(AFTER_RELEASE) is True else {}),
             }
         )
     return out
