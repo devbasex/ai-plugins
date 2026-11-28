@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from concurrent.futures import Future
 from pathlib import Path
 
@@ -93,7 +94,7 @@ class Fake(FakePool):
     `merge_stops` はマージの停止理由。`during` は (`start` か `merge`, 単位の名前) → その操作の間に `impl` が終わる単位。
     """
 
-    def __init__(self, units, *finish, stops=None, merge_stops=None, merge_only=(), during=None) -> None:
+    def __init__(self, units, *finish, stops=None, merge_stops=None, merge_only=(), during=None, outdated=()) -> None:
         super().__init__()
         self.during = during or {}
         self.units = tuple(units)
@@ -101,6 +102,7 @@ class Fake(FakePool):
         self.stops = stops or {}
         self.merge_stops = merge_stops or {}
         self.merge_only = set(merge_only)
+        self.outdated = set(outdated)
         self.log: list[tuple[str, str]] = []
 
     # --- 待ち ---
@@ -135,6 +137,9 @@ class Fake(FakePool):
                 raise UnitsStopped(got, f"{unit.name} が {got}")
             if unit.name in self.merge_stops:
                 raise UnitsStopped(self.merge_stops[unit.name], f"{unit.name} をマージできない")
+            if unit.name in self.outdated:
+                self.outdated.discard(unit.name)
+                raise units_flow.Outdated("not_ci", f"{unit.name} が古い")
             self.log.append(("merge", unit.name))
             self.meanwhile("merge", unit.name)
             return {"name": unit.name, "status": "merged"}, github_pulls.MergedPull(1, unit.name)
@@ -188,6 +193,23 @@ def test_plans_that_finish_together_are_merged_one_by_one_in_the_merge_order():
     fake.flow()
 
     assert fake.names("merge") == ["A", "B"]
+
+
+def test_a_free_slot_is_filled_after_each_merge_of_plans_that_finish_together():
+    fake = Fake([_unit("A"), _unit("B"), _unit("C", "A")], ["A", "B"])
+
+    fake.flow()
+
+    assert fake.at("merge", "A") < fake.at("start", "C") < fake.at("merge", "B")
+
+
+def test_an_outdated_unit_is_started_again_and_merged():
+    fake = Fake([_unit("A"), _unit("B", "A")], outdated=["A"])
+
+    got = fake.flow()
+
+    assert fake.names("start") == ["A", "A", "B"] and fake.names("merge") == ["A", "B"]
+    assert not got.failures and len(got.items) == 2
 
 
 def test_a_failed_unit_holds_back_only_the_units_that_need_it():
@@ -398,6 +420,28 @@ def test_independent_units_run_at_the_same_time_and_the_sprint_pr_follows_the_la
     assert [i["name"] for i in got.report["items"]] == ["甲", "乙", "issue-4"]
     assert w.runs[-1][0].name == "pr"
     assert _git(w.sprint, "rev-parse", "HEAD") == _git(w.sprint, "rev-parse", "origin/sprint/s1")
+
+
+def test_a_unit_refused_as_behind_the_sprint_branch_is_updated_reviewed_and_merged_again(parallel_world):
+    w = parallel_world
+    original = w.command
+
+    def up_to_date_required(argv, cwd, env):
+        if "merge" in argv and "ci" in argv:
+            _git(cwd, "fetch", "-q", "origin")
+            if _git(cwd, "rev-list", "--count", "HEAD..origin/sprint/s1") != "0":
+                refused = result.stopped("ci", "not_ci", "behind")
+                return subprocess.CompletedProcess(argv, 1, json.dumps(refused) + "\n", "")
+        return original(argv, cwd, env)
+
+    w.command = up_to_date_required
+
+    got = w.run()
+
+    assert got.status == "ok", got.report
+    assert w.order == ["乙", "甲", "issue-4"]
+    again = [r for r, _ in w.runs if r.name == "impl" and w.name_of(r.overrides["branch"]) == "甲"]
+    assert [r.start for r in again] == [None, "test"]  # スプリントブランチのマージで HEAD が変わるので、手元のテストから流し直す
 
 
 def test_the_limit_of_one_runs_the_units_one_by_one(parallel_world, monkeypatch):

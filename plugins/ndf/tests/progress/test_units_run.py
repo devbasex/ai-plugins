@@ -365,6 +365,20 @@ def test_a_sprint_worktree_on_another_branch_is_only_told_to_switch(world, monke
     assert got.cause["detail"].split("コマンド: ", 1)[1].endswith(f"switch {BRANCH}") and ".." not in got.cause["detail"]
 
 
+def test_no_lookup_when_a_known_merge_commit_is_the_remote_head(world):
+    original = world.command
+
+    def only_the_last_answers_the_sha(argv, cwd, env):
+        world.answer_sha = world.unit_names()["issue-4"] in argv
+        return original(argv, cwd, env)
+
+    world.command = only_the_last_answers_the_sha
+
+    assert world.run().status == "ok"
+
+    assert len(world.lookups) == 1  # 開始時の一覧だけ
+
+
 def test_a_github_failure_on_the_lookup_of_the_last_unit_keeps_the_kind_the_wait_and_every_unit(world, monkeypatch):
     world.answer_sha = False
     first = world.lookup

@@ -5,6 +5,7 @@
 プランだけをプールで同時に流す。プールと待ちは引数で受ける（テストは終わる順を決める偽を渡す）。
 
 - 単位は、先に要る単位をすべてマージしたら始める。依存していない単位の終了は待たない
+- マージがスプリントブランチの先行で断られた単位（`Outdated`）は、始め直して最新化・テスト・レビューを通してから再送する
 - 失敗で始めないのは、その単位に依存する単位（間接を含む）だけである。利用上限（`usage_limit`）の後は何も始めず、
   実行中を待って成功した単位をマージする。`impl` が利用上限で終わっていれば、その結果を受ける前でも始めない
 - 単位のファイルから流すとき、補った単位（`Unit.supplemented`。触るファイルが分からない）は、単位のファイルの単位に
@@ -26,6 +27,7 @@ from typing import Any, NamedTuple, Optional
 
 from ndf.adapters import github, github_merge, github_pulls
 from ndf.contracts import result, worker_paths
+from ndf.core import route
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan import units_files
 from ndf.core.plan.review_units_decide import Unit, unit_key
@@ -43,6 +45,7 @@ STOPPED_HEAD_FILE = "stopped-head"
 MERGE_FILE = "merge.json"
 # 打ち直しの判定の、レビューのステップ（ほかのステップと停止理由の語は `resume_of` が持つ。定数にすると同じ語の別の事実と重なる）
 REVIEW_STEPS = frozenset({"review", "review-delta", "resolved"})
+
 
 class RoundState(NamedTuple):
     """単位の、プランの実行の記録（`run.json`）を持つ最新の回。`ran` が偽なら回が無く、`round_dir` は 1 回目の保存先。
@@ -68,9 +71,13 @@ class Resume(NamedTuple):
     start: Optional[str]
 
 
+class Outdated(UnitsStopped):
+    """単位の HEAD がスプリントブランチの HEAD を含まず、マージを断られた停止。単位を始め直せば進む。"""
+
+
 class Started(NamedTuple):
     """始めた単位。`call` はプールで流す `impl`（マージだけを打ち直す単位は None）、`land` はその結果を受けてマージし、
-    結果の項目とマージした PR を返す（呼んだスレッドで打つ。止めるときは `UnitsStopped`）。"""
+    結果の項目とマージした PR を返す（呼んだスレッドで打つ。止めるときは `UnitsStopped`、始め直すときは `Outdated`）。"""
 
     call: Optional[Callable[[], Any]]
     land: Callable[[Any], tuple[dict[str, Any], github_pulls.MergedPull]]
@@ -206,14 +213,23 @@ class _Flow:
             # 用意の間に利用上限が分かった単位は投入せず、始めていない単位に戻す
             self.order.started.discard(key)
         elif started.call is None:
-            self.land(key, started, None)
+            self.land(executor, key, started, None)
         else:
             self.running[executor.submit(started.call)] = (key, started)
 
-    def land(self, key: str, started: Started, future: Any) -> None:
-        """終わった単位をマージする。"""
+    def land(self, executor: Any, key: str, started: Started, future: Any) -> None:
+        """終わった単位をマージする。`Outdated` の単位は始め直す（利用上限の後は始めずに失敗にする）。
+
+        始め直しは、単位の HEAD を最新にしても別のマージが先に入ったときだけ繰り返すので、回数はマージの数を超えない。
+        """
         try:
             item, pull = started.land(None if future is None else future.result())
+        except Outdated as exc:
+            if self.halted():
+                self.failures[key] = exc
+            else:
+                self._start(executor, key)
+            return
         except Exception as exc:  # noqa: BLE001 外部コマンド: 単位の失敗にして依存しない単位を流す（分けられない例外は上げ直す）
             self.failures[key] = self.ops.failed(self.order.units[key], exc)
             return
@@ -229,7 +245,7 @@ class _Flow:
 def flow(order: Order, ops: Ops, limit: int, workers: Workers = Workers()) -> Flowed:
     """`order` の単位を依存の順に、同時に `limit` 本まで流す。
 
-    同時に終わった単位は、並び（マージの順）の順にマージする。`ops.failed` が例外を上げ直すときも、プールは実行中の単位の
+    同時に終わった単位は、並び（マージの順）の順にマージし、マージのたびに空きを埋める。`ops.failed` が例外を上げ直すときも、プールは実行中の単位の
     終わりを待つ。
     """
     state = _Flow(order, ops)
@@ -240,7 +256,8 @@ def flow(order: Order, ops: Ops, limit: int, workers: Workers = Workers()) -> Fl
                 break
             done, _ = workers.wait(list(state.running), return_when=futures.FIRST_COMPLETED)
             for future in sorted(done, key=lambda f: order.position[state.running[f][0]]):
-                state.land(*state.running.pop(future), future)
+                state.land(executor, *state.running.pop(future), future)
+                state.fill(executor, limit)
     return state.result()
 
 
@@ -285,14 +302,17 @@ def stopped_stage(
     return StageResult(report, {})
 
 
-def merged_pulls_of(hub: github.GitHub, base: str, landed: Sequence[tuple[str, github_pulls.MergedPull]]) -> list[github_pulls.MergedPull]:
+def merged_pulls_of(
+    hub: github.GitHub, base: str, landed: Sequence[tuple[str, github_pulls.MergedPull]], tip: str
+) -> list[github_pulls.MergedPull]:
     """単位のブランチと PR の組の、マージコミットを持つ PR の並び（スプリントの作業場所を進める先の候補）。
 
-    開始時の一覧かマージの応答がマージコミットを持てば、それを使う。持たないものだけ GitHub へまとめて読み直す。読み直しの失敗は、
+    開始時の一覧かマージの応答がマージコミットを持てば、それを使う。持たないものだけ GitHub へまとめて読み直し、持っているものの 1 つが
+    スプリントブランチのリモートの HEAD（`tip`）なら、ほかの候補は要らないので読み直さない。読み直しの失敗は、
     打ち直せば通りうるもの（不達・5xx・上限）を transient、ほかを precondition にし、待つ秒を持たせたまま単位の停止にする。
     """
     lacking = [branch for branch, pull in landed if not pull.merge_sha]
-    if not lacking:
+    if not lacking or any(pull.merge_sha == tip for _, pull in landed):
         return [pull for _, pull in landed]
     where = f"単位のブランチ {'、'.join(lacking)} の、{base} へマージ済みの PR を GitHub から読めない"
     try:
@@ -327,7 +347,7 @@ def _own_records(round_dir: Path) -> tuple[Optional[str], Optional[str]]:
     return (kind if isinstance(kind, str) else None), (stopped.strip() if stopped is not None else None)
 
 
-def write_record(round_dir: Path, name: str, text: str) -> None:
+def write_round_record(round_dir: Path, name: str, text: str) -> None:
     """回の保存先へ記録を書く。既存のファイルを開いて切り詰めず、ほかの利用者が名前を差し替えられない保存先にだけ書く。"""
     with worker_paths.open_or_create(round_dir) as wd:
         worker_paths.check_unshared(wd)
@@ -365,11 +385,11 @@ def stopped_step(done: Optional[Mapping[str, Any]]) -> Optional[str]:
 def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
     """打ち直しの扱い（docs/specifications/ndf-implement-stage-review-units.md の「打ち直し」の表。上の行を先に当てる）。`head` は、スプリントブランチをマージした後の単位の作業場所の HEAD。
 
-    マージだけを打ち直すのは、マージが CI の待ち（マージキューの待ちを含む）か基盤の待ちで止まった回である。HEAD が変わった単位を
-    手元のテストから流し直すのは、テストより後のステップで止まった回で、作業・受け入れ条件・テスト・修正で止まった回は含めない。
+    マージだけを打ち直すのは、マージが CI の待ち（マージキューの待ちを含む）か基盤の待ちで止まった回と、`impl` の成功の後にマージの結果を
+    残す前に中断した回である。HEAD が変わった単位を手元のテストから流し直すのは、テストより後のステップで止まった回で、作業・受け入れ条件・テスト・修正で止まった回は含めない。
     """
-    merge_only = set(WAIT_KINDS)
-    before_test = {"work", "acceptance", "test", "test-repeat", "fix"}
+    # None は `impl` の成功の後、マージの結果を残す前の中断
+    merge_only = {None, *WAIT_KINDS}
     if not state.ran:
         return Resume("run", False, None)
     finished = state.done is not None and state.done.get("status") == result.OK
@@ -380,6 +400,6 @@ def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
     retest = "test" if local_tests else "push"
     if finished or step in REVIEW_STEPS:
         return Resume("run", True, retest if moved else "push")
-    if step is not None and step not in before_test and moved:
+    if step is not None and route.stopped_after_test(step) and moved:
         return Resume("run", True, retest)
     return Resume("run", False, None)

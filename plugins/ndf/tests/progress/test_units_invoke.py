@@ -28,7 +28,20 @@ from ndf.core.plan import units_decide as ud
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import Unit
-from ndf.progress import command, definition, design_record, gate, invoke, issue_values, plan_runs, run, store, units_cli, units_flow, units_invoke
+from ndf.progress import (
+    command,
+    definition,
+    design_record,
+    gate,
+    invoke,
+    issue_values,
+    plan_runs,
+    run,
+    store,
+    units_cli,
+    units_flow,
+    units_invoke,
+)
 from ndf.progress.plan_runs import StageRun
 from ndf.progress.units_flow import RoundState
 
@@ -414,6 +427,7 @@ OK_DONE = result.result("plan", result.OK, "通った")
         (_state(None, ran=False), HEAD, True, ("run", False, None)),
         (_state(OK_DONE, merge="ci_pending", reviewed=HEAD, stopped_head=HEAD), HEAD, True, ("merge", False, None)),
         (_state(OK_DONE, merge="infra_wait", reviewed=HEAD, stopped_head=HEAD), HEAD, True, ("merge", False, None)),
+        (_state(OK_DONE, reviewed=HEAD), HEAD, True, ("merge", False, None)),
         # マージを待つ回でも、HEAD がレビューした HEAD と違えばレビューからやり直す
         (_state(OK_DONE, merge="ci_pending", reviewed=OTHER, stopped_head=OTHER), HEAD, True, ("run", True, "test")),
         (_state(OK_DONE, merge="refused", reviewed=HEAD, stopped_head=HEAD), HEAD, True, ("run", True, "push")),
@@ -434,6 +448,7 @@ OK_DONE = result.result("plan", result.OK, "通った")
         "回が無い",
         "CI の待ちでマージだけ",
         "基盤の待ちでマージだけ",
+        "成功の後の中断でマージだけ",
         "マージの待ちで HEAD が違う",
         "マージを拒まれ HEAD が同じ",
         "マージを拒まれ HEAD が違う",

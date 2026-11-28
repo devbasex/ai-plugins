@@ -678,6 +678,11 @@ def review_command(template_name: str, base: str) -> list[str]:
     return [entry, "cross-review", "run", "--state-dir", REVIEW_STATE, "--base", base, "--purpose", purpose]
 
 
+def stopped_after_test(step: str) -> bool:
+    """止まったステップが手元のテストより後か。作業・受け入れ条件・テスト・テストの修正は後でない。"""
+    return step not in {"work", "acceptance", "test", "test-repeat", "fix"}
+
+
 def unit_review_launch(repo: str, command: Sequence[str]) -> list[str]:
     """単位の経路の `{{review}}`: レビューの起動 `command`（`--pr` を持たない）を、読んだ PR を確かめる `UNIT_REVIEW` で打つ。"""
     return ["sh", "-c", UNIT_REVIEW, repo, "{state_dir}", *command]

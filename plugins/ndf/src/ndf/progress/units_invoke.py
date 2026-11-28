@@ -40,7 +40,7 @@ from ndf.core.plan import units_decide as ud
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup, unit_key
 from ndf.core.plan.transition_decide import USAGE_LIMIT
-from ndf.progress import issue_values, plan_runs, refactor_values, units_flow
+from ndf.progress import issue_values, refactor_values, units_flow
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
 from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
 from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
@@ -482,7 +482,7 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
     ordered = [items[units_flow.key_of(u)] for u in found.units]
     landed = [(branches[k], pull) for k, pull in done.items()]
     landed += [(branches[k], pull) for k, pull in zip(flowed.items, flowed.pulls)]
-    return _after_units(ctx, ordered, ports, lambda: units_flow.merged_pulls_of(hub, ctx.branch, landed))
+    return _after_units(ctx, ordered, ports, lambda tip: units_flow.merged_pulls_of(hub, ctx.branch, landed, tip))
 
 
 def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
@@ -558,10 +558,16 @@ def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_fl
     def land(got: Optional[StageResult]) -> tuple[dict[str, Any], github_pulls.MergedPull]:
         """マージした PR（マージの応答にマージコミットが無ければ `merge_sha` は空）を返す。"""
         if got is not None:
-            units_flow.write_record(round_dir, units_flow.STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
+            units_flow.write_round_record(round_dir, units_flow.STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
             if got.status != result.OK:
                 raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
-        report = merge_unit(ctx, branch, worktree, round_dir, ports)
+        try:
+            report = merge_unit(ctx, branch, worktree, round_dir, ports)
+        except UnitsStopped as exc:
+            # 最新化を必須とするスプリントブランチは、別の単位のマージで古くなった HEAD を断る
+            if exc.kind == "not_ci" and not g.is_ancestor(_fetch_sprint(g, ctx), "HEAD"):
+                raise units_flow.Outdated(exc.kind, exc.detail, retry_after=exc.retry_after) from exc
+            raise
         number = _pr_number(round_dir)
         assert number is not None, "merge_unit は PR の番号が無ければマージせずに止まる"
         return units_flow.unit_item(unit, number, "merged"), github_pulls.MergedPull(number, _merge_sha(report))
@@ -607,7 +613,7 @@ def _unit_stop_of(report: Mapping[str, Any], what: str, note: str = "") -> Units
 
 
 def _after_units(
-    ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Callable[[], Sequence[github_pulls.MergedPull]]
+    ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Callable[[str], Sequence[github_pulls.MergedPull]]
 ) -> StageResult:
     """すべての単位がマージ済みになった後に、スプリントの PR を開いた結果。開けなければ止まった単位を持たない `stopped`。
 
@@ -615,7 +621,7 @@ def _after_units(
     """
     metrics = {"unit_ci": ctx.unit_ci}
     try:
-        opened = sprint_pr(ctx, ports, landed())
+        opened = sprint_pr(ctx, ports, landed)
     except UnitsStopped as exc:
         report = result.stopped(plan_runner.TOOL, exc.kind, exc.detail, retry_after=exc.retry_after, items=items, metrics=metrics)
         return StageResult(report, {})
@@ -795,7 +801,7 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     report = result.last_line(done.stdout)
     ok = report is not None and report["status"] == result.OK
     kind = "merged" if ok else ("bad_report" if report is None else _unit_stop_of(report, "").kind)
-    units_flow.write_record(round_dir, units_flow.MERGE_FILE, json.dumps({"kind": kind}, ensure_ascii=False) + "\n")
+    units_flow.write_round_record(round_dir, units_flow.MERGE_FILE, json.dumps({"kind": kind}, ensure_ascii=False) + "\n")
     if report is None:
         raise UnitsStopped("bad_report", f"ndf ci merge が結果 JSON を返さない（終了コード {done.returncode}）")
     if not ok:
@@ -803,9 +809,9 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     return report
 
 
-def sprint_pr(ctx: Context, ports: Ports, landed: Sequence[github_pulls.MergedPull]) -> StageResult:
+def sprint_pr(ctx: Context, ports: Ports, landed: Callable[[str], Sequence[github_pulls.MergedPull]]) -> StageResult:
     """スプリントの作業場所を最後にマージした単位のマージコミット（`landed` のうち最も先のもの）まで進め、リモートのスプリントブランチの HEAD と同じことを
-    確かめてから、テンプレート `pr` を push のステップなしで流す。
+    確かめてから、テンプレート `pr` を push のステップなしで流す。`landed` はリモートの HEAD を受けて、マージした PR を返す。
 
     進めるのは、自分でマージした単位の結果までである。リモートの HEAD がそれと違えば、それ以上は進めず、push もせずに止める。
     違うコミットは単位のレビューを経ていないので、利用者が確かめてから揃えて打ち直す。打ち直しは `prepare` を通らない
@@ -813,7 +819,7 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Sequence[github_pulls.MergedPu
     """
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
-    head = _catch_up_to(g, ctx, landed, tip)
+    head = _catch_up_to(g, ctx, landed(tip), tip)
     if tip != head:
         _check_sprint_branch(g, ctx)
         raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
