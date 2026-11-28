@@ -13,7 +13,7 @@ import os
 import tempfile
 import uuid
 from dataclasses import dataclass, field, replace
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,8 +22,8 @@ from filelock import FileLock
 from ndf import cli
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
-from ndf.progress import approval_decide, lane, model, plan, run
-from ndf.progress.run_view import MATERIAL_DIR
+from ndf.progress import approval_decide, command, lane, model, plan, run, stages
+from ndf.progress.run_view import APPROVAL_POSTING, MATERIAL_DIR
 
 # 結果 JSON の tool（サブコマンドの表がこのパッケージを指す）
 TOOL = cli.tool_of(__package__)
@@ -69,6 +69,9 @@ class Target:
     title: Optional[str] = None
     # 今読んだ PR がマージ済みか。見た対象の中身ではないので、記録にも比較にも使わない
     merged: bool = field(default=False, compare=False)
+    # 今読んだ PR の head のブランチと、それがフォークにあるか（記録にも比較にも使わない）
+    head_ref: Optional[str] = field(default=None, compare=False)
+    cross_repository: bool = field(default=False, compare=False)
 
     def binding(self) -> Optional[merge_approval.MergeTarget]:
         """承認の対象の 4 つの値がそろえば `merge_approval.MergeTarget`、欠ければ None。"""
@@ -153,6 +156,33 @@ def waiting(v: run.View, **kw: Any) -> Optional[Question]:
     """ステートマシンが待っている質問。待っていなければ None。"""
     m = run.decide(v)
     return question(v, m, **kw) if m.action == run.Action.GATE else None
+
+
+def gate_stage(v: run.View, stage: str) -> tuple[stages.StageDef, stages.StepDef]:
+    """回答を記録できる承認ゲートの工程と、その承認ゲートのステップ。持たない・無効・中止の工程は、代わりの操作を添えて断る。"""
+    found = v.snap.stage(stage)
+    show = f"状態は ndf progress show {v.machine_id} で確かめる"
+    if model.is_terminal(v.whole):
+        raise model.Refused(f"ステートマシン {v.machine_id} は{model.label(v.whole)}で、回答を記録できない。{show}")
+    step = next((st for st in found.steps if st.kind == stages.GATE_KIND), None)
+    if step is None:
+        raise model.Refused(f"工程 {stage} は承認ゲートを持たないので、回答を記録できない。{show}")
+    state = v.rows[stage].state if stage in v.rows else None
+    if state == command.TOGGLE_KINDS["disable"]:
+        raise model.Refused(f"工程 {stage} は無効で、回答を記録できない。ndf progress enable {v.machine_id} {stage} --reason <理由> で戻す")
+    if model.is_terminal(state) and state != run.FINISHED:
+        raise model.Refused(f"工程 {stage} は{model.label(state)}で、回答を記録できない。{show}")
+    return found, step
+
+
+def off_wait_question(v: run.View, stage: str, *, pr: Optional[int], repo: Optional[str] = None) -> Question:
+    """待っていない承認ゲートの工程の質問（`ndf progress question`）。工程の最後の事象の番号から id を作るので、事象が
+    増えると古いコマンドは断られる。投稿前の記録は数えない（確定に失敗した回答を、同じ id へ打ち直せるようにする）。"""
+    found, step = gate_stage(v, stage)
+    anchor = max((e.seq for e in v.row_events(stage) if e.draft.kind != APPROVAL_POSTING), default=0)
+    qid = question_id(v.machine_id, v.rev, found.name, step.id, anchor)
+    move = run.Move(run.Action.GATE, found, step, run.step_progress(v, stage))
+    return Question(qid, v.machine_id, found.name, step.id, step.gate, tuple(run.choices(move)), pr, pr_url(repo, pr))
 
 
 # --- 回答ごとのルート -----------------------------------------------------------------------------
@@ -422,6 +452,40 @@ def write_material(root: Path, v: run.View, q: Question, *, private: bool = True
     """
     with _question_lock(root, q):
         return _write_pair(root, v, q, private)
+
+
+def show_question(
+    root: Path, v: run.View, q: Question, observe: Callable[[Question], Target], *, private: bool = True
+) -> tuple[Question, Path]:
+    """今の対象を読んで質問 `q` の承認資料を書き、見た対象を固定した質問と資料のパスを返す。
+
+    対象（承認の対象と本番へ反映されるか）を承認資料の前に読み、承認資料と提示した対象に載せる（#4409 の決定 7）。
+    その head の資料があり、提示した対象も変わっていなければ、書き直さない（#3959）。"""
+    seen = observe(q)
+    asked = replace(q, target=replace(seen, material=None))
+    # 資料・そのハッシュ・提示の識別子（リリースのリクエストの ID に使う）は、同じ排他の中でまとめて受け取る
+    path, sha, held = present_material(root, v, asked, private=private)
+    return replace(asked, target=replace(seen, material=sha, presentation=held.presentation)), path
+
+
+def check_stage_pr(v: run.View, stage: stages.StageDef, gate: Optional[str], pr: Optional[int], now: Target) -> None:
+    """待っていない工程の質問の対象 `pr` が、工程の成果物かを確かめる。違えば `model.Refused`。
+
+    工程の対象の PR が記録されていればその番号、無ければ同じリポジトリの、head のブランチが工程のブランチの PR だけを受ける。
+    利用者の回答はマージの承認の証跡になるので、別の作業の PR を承認の対象にしない。"""
+    known = approval_decide.target_pr(v, stage, gate)
+    if known is not None:
+        if pr != known:
+            raise model.Refused(f"工程 {stage.name} の対象の PR は #{known} で、#{pr} ではない。ndf progress question で質問し直す")
+        return
+    if pr is None:
+        return
+    branch = v.context().get("branch")
+    if now.cross_repository or branch is None or now.head_ref != branch:
+        raise model.Refused(
+            f"PR #{pr} の head のブランチ {now.head_ref} は工程 {stage.name} のブランチ {branch} でないか、フォークの PR。"
+            "工程のブランチの PR を --pr で指定するか、ndf progress finish の出力の design_pr に書く"
+        )
 
 
 def present_material(root: Path, v: run.View, q: Question, *, private: bool = True) -> tuple[Path, str, Target]:

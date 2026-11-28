@@ -87,7 +87,8 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
         if found is not None:
             d.write(_passed(v, m, found))
             return None
-        held = model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
+        objected = approval_decide.objection_remains(v.stage_events(m.stage.name), m.step.gate)
+        held = None if objected else model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
         if held is None:
             return d.report(v, waiting)
         qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)

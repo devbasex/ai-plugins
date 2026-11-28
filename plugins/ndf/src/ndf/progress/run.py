@@ -159,7 +159,9 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     held = prog.waiting is not None or step.id in prog.held
     # 手で終えた回答待ちは、前に流したステップの判定で省かない
-    skip = listen and not held and not by_hand and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
+    # 手で終えた回答待ちと、承認でない回答が残る承認ゲートは、判定で省かない
+    objected = listen and approval_decide.objection_remains(v.stage_events(s.name), step.gate)
+    skip = listen and not held and not by_hand and not objected and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
     if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, answer)
@@ -652,8 +654,13 @@ def answer_draft(v: View, stage: str, value: str, reason: str, text: Optional[st
     allowed = choices(m)
     if value not in allowed:
         raise model.Refused(f"工程 {stage} の回答は {', '.join(allowed)} のどれか（渡された値 {value}）")
-    payload = {"answer": value, "step": m.step.id, "kind": invoke.kind_of(m.step), "notes": text, **extra}
-    writer = ORGANIZER if "by" in extra and extra["by"] == ORGANIZER else CONDUCTOR
+    return answered_event(v, stage, m.step, reason, {"answer": value, "notes": text, **extra})
+
+
+def answered_event(v: View, stage: str, step: stages.StepDef, reason: str, answered: Mapping[str, Any]) -> model.EventDraft:
+    """ステップ `step` への回答の事象の下書き（待っているかは呼び手が確かめる）。`answered` は回答の語と指摘を持つ payload。"""
+    payload = {**answered, "step": step.id, "kind": invoke.kind_of(step)}
+    writer = ORGANIZER if "by" in answered and answered["by"] == ORGANIZER else CONDUCTOR
     return model.EventDraft(ANSWERED, writer, stage, reason=reason, payload=payload, rev=v.rev)
 
 
@@ -774,7 +781,9 @@ def _reading_inputs(v: View, s: stages.StageDef, gate: Optional[str], inputs: Ma
 def _reading_skipped(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef, prog: StepProgress) -> Optional[list[model.EventDraft]]:
     """読み手役のステップを打たずに済ませるなら、済ませた記録の事象。打つなら None（`model.reading_skip`）。"""
     gate = next((st for st in s.steps if st.kind == stages.GATE_KIND and st.gate == step.gate), None)
-    waiting_gate = gate is not None and gate.id in prog.held
+    # 承認でない回答が残る承認ゲートは人へ問うので、読み手役を打つ
+    objected = approval_decide.objection_remains(v.stage_events(s.name), step.gate)
+    waiting_gate = gate is not None and (gate.id in prog.held or objected)
     in_lane = step.gate == model.release_gate() and d.env.in_lane(d.st, v.machine_id)
     # 読み手役が文書を直すと承認した対象が変わるので、有効な先の承認がある設計では打たない
     approved = step.gate == approval_decide.DESIGN_GATE and gate is not None and standing_approval(d, v, s, gate) is not None

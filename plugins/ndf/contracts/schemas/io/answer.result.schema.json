@@ -90,6 +90,10 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "type": "string",
+            "description": "項目の種類。開き直した工程は reopened（回答）"
+          },
           "seq": {
             "type": "integer",
             "description": "回答の事象の番号（list）"

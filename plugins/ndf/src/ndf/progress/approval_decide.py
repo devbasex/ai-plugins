@@ -94,6 +94,22 @@ def rejection_posted_after(rows: Sequence[model.Event], gate: Optional[str], seq
     return any(ev.seq > seq and posts_rejection(ev) and event_payload(ev)[REJECTING_KEY] == gate for ev in rows)
 
 
+def objection_remains(rows: Sequence[model.Event], gate: Optional[str]) -> bool:
+    """待っていない工程への承認でない回答（`late`）の後に、承認ゲート `gate` の承認が無いか。
+
+    `rows` は工程のすべての事象で、開き直しより前も数える。残る間は MVV 判定で承認ゲートを省かず、人へ問う（#4520 の決定 4）。"""
+    remains = False
+    for ev in rows:
+        p = event_payload(ev)
+        if ev.draft.kind != ANSWERED or p.get("gate") != gate:
+            continue
+        if p.get("answer") == invoke.APPROVED:
+            remains = False
+        elif p.get("late"):
+            remains = True
+    return remains
+
+
 def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:
     """対象を読まずに決まる承認の候補。境界より後の最新の回答が、数える承認でなければ None。
 

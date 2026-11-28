@@ -59,8 +59,8 @@ from ndf.progress.gate.asking import (
     TOOL,
     Target,
     gate_result,
-    present_material,
     question,
+    show_question,
 )
 from ndf.progress.gate import finishing
 from ndf.progress.gate.rechecking import Recheck, git_docs_only, recheck, reread, standing, verifier
@@ -68,6 +68,7 @@ from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
 from ndf.progress.gate.targets import TargetReader
 from ndf.progress.plan import external
+from ndf.progress.records import github_records, sync_records
 
 
 def present(
@@ -83,14 +84,7 @@ def present(
         repo: Optional[str] = Git(cwd).remote_repo()
     except GitError:
         repo = None
-    # 対象（承認の対象と本番へ反映されるか）を承認資料の前に読み、承認資料と提示した対象に載せる（#4409 の決定 7）。
-    # その head の資料があり、提示した対象も変わっていなければ、書き直さない（#3959）
-    first = question(v, m, repo=repo)
-    seen = observe(first)
-    asked = replace(first, target=replace(seen, material=None))
-    # 資料・そのハッシュ・提示の識別子（リリースのリクエストの ID に使う）は、同じ排他の中でまとめて受け取る
-    path, sha, held = present_material(st.root, v, asked, private=st.private)
-    q = replace(asked, target=replace(seen, material=sha, presentation=held.presentation))
+    q, path = show_question(st.root, v, question(v, m, repo=repo), observe, private=st.private)
     metrics = dict(out["metrics"]) if isinstance(out.get("metrics"), dict) else {}
     warned = list(out["warnings"]) if "warnings" in out else []
     try:
@@ -528,7 +522,16 @@ def _cmd_give(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, An
     seen = Target(a.head, a.material_sha256, presentation=a.presentation, body=a.body_sha256, title=a.title_sha256)
     given = Answer(a.gate, a.result, a.reason, a.by, a.key, Path(a.notes) if a.notes else None, seen, tuple(a.drop))
     hub = shared_hub(cwd)
-    return answer(st, a.machine_id, given, github_observe(cwd, st.root, hub), github_post(cwd, hub))
+    revoke = finishing.revoker(hub, "回答を記録しない")
+    try:
+        out = answer(st, a.machine_id, given, github_observe(cwd, st.root, hub), github_post(cwd, hub), revoke)
+    except store.Conflict as exc:  # 追記の直前に事象が増えた。打ち直すと投稿済みの証跡を使う
+        return result.stopped(TOOL, "transient", f"{exc}。同じコマンドを打ち直す")
+    # 開き直した工程の終了のマーカーを課題と PR の本文から外す（同じキーの送り直しは書き直さない）
+    if out["items"] and not out["metrics"].get("replayed"):
+        _, errors = sync_records(run.read(st, a.machine_id), cwd, github_records)
+        return command.with_warnings(out, after=[f"{e}（ndf progress resync {a.machine_id} で揃える）" for e in errors])
+    return out
 
 
 def parser() -> argparse.ArgumentParser:

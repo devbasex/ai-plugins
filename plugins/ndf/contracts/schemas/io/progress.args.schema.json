@@ -279,6 +279,38 @@
       "additionalProperties": false,
       "properties": {
         "subcommand": {
+          "const": "question",
+          "description": "下位の命令（入れ子は空白でつなぐ）"
+        },
+        "machine_id": {
+          "type": "string",
+          "x-ndf-positional": true
+        },
+        "stage": {
+          "type": "string",
+          "description": "工程の名前（工程表の行名）",
+          "x-ndf-positional": true
+        },
+        "--pr": {
+          "type": "integer",
+          "description": "設計承認ゲートの対象の PR（文脈に design_pr が無いとき）"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
+        }
+      },
+      "required": [
+        "subcommand",
+        "machine_id",
+        "stage"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subcommand": {
           "const": "reread",
           "description": "下位の命令（入れ子は空白でつなぐ）"
         },
