@@ -3,6 +3,6 @@
   "seconds": 3600,
   "read_by": [
     "ndf.domains.crossrefactor.launch",
-    "ndf.progress.invoke"
+    "ndf.progress.skill_invoke"
   ]
 }

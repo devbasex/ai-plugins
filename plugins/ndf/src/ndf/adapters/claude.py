@@ -17,18 +17,20 @@ Skill を回す `full` の起動は、入っている旧い NDF を `--settings`
 
 from __future__ import annotations
 
-import errno
 import json
 import os
 import subprocess
+import time
+import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional, Protocol, Sequence, Union
 
 from ndf import identity, process_group
-from ndf.adapters import cli_floor, launch_slot, transcript
-from ndf.adapters.agents import usage_limit
+from ndf.adapters import claude_gate, claude_precheck, cli_floor, launch_slot, transcript
+from ndf.adapters.agents import ai_child_env, claude_body, claude_denials, usage_limit
 from ndf.adapters.run_log import child_process_env, record_cost
 from ndf.contracts import facts, limits
 
@@ -39,6 +41,10 @@ PLUGIN_LIST = "claude-plugins.list"
 LIST_UNREADABLE = "導入済みのプラグインの一覧を読めず、旧い NDF を外さずに起動する"
 # full の起動で許す Tool
 FULL_TOOLS = "Read,Edit,Write,Bash,Grep,Glob,Skill,Agent,Monitor,SendMessage,ToolSearch,WebFetch,WebSearch"
+# full の起動で読み込む組み込みの Tool。許す 13 個に、工程の中で使う 3 個を足す（#1959 の決定 5）。起動の設定の `load` を後ろに足す
+LOAD_TOOLS = FULL_TOOLS + ",TaskStop,NotebookEdit,ListAgents"
+# MCP を起動の設定で指定したものだけ読む引数（指定の無い工程は環境の MCP を読まない。#1959 の決定 1）
+STRICT_MCP = "--strict-mcp-config"
 # 起動の頭（質問を 1 回渡し、回答を JSON で受ける）
 PRINT_JSON = ["-p", "--output-format", "json"]
 # 逐次の起動の頭（1 歩ごとに 1 行の JSON を出す。stream-json は --verbose が無いと起動できない。#3945）
@@ -61,6 +67,9 @@ MODEL_TOKEN_FIELDS = ("inputTokens", "outputTokens", "cacheReadInputTokens", "ca
 # U11a の実機の確かめ（PR #4086。Claude Code 2.1.330）で json・stream・min-json・min-stream の 4 形はどれも、標準入力を読み終えるか
 # 3 秒待ち切るまで helper を呼ばなかったので、置く形は無い（キーの子の claude -p は `key_gate` で起動しない）
 KEY_FORMS: frozenset[str] = frozenset()
+# モデルを理由にした拒否の結果の JSON の値（#2944。2026-11-26・27 に Claude Code 2.1.332 を無いモデル名で起動して確かめた）
+REFUSED_STATUS = 404
+REFUSED_TOKENS = (*transcript.USAGE_KEYS, "output_tokens")
 
 
 class Permission(StrEnum):
@@ -68,7 +77,8 @@ class Permission(StrEnum):
 
     - `judge`: 判断の呼び出し。最小構成で Tool を使わせない
     - `tools`: 最小構成で、渡した Tool だけを許して編集を受ける（acceptEdits）
-    - `full`: Skill を回す起動。設定・プラグイン・hook をそのまま読み、`FULL_TOOLS` を許して編集を受ける
+    - `full`: Skill を回す起動。設定・プラグイン・hook をそのまま読み、`LOAD_TOOLS` の組み込みの Tool だけを読み込み、`FULL_TOOLS` を
+      許して編集を受ける。MCP は起動の設定が指定した工程だけが読む（#1959）
     """
 
     JUDGE = "judge"
@@ -80,6 +90,23 @@ class Permission(StrEnum):
 # （members の名前は id の大文字）
 FAILURES = "claude-failures"
 Failure = StrEnum("Failure", [(i.upper(), i) for i in facts.ids(FAILURES)])
+
+
+class LaunchGrant(Protocol):
+    """full の起動 1 回の指定（`launch_settings.Grant` が満たす）。`load` は読み込みに足す Tool、`allow` は尋ねずに使ってよい指定、
+    `inherit` は環境の MCP をすべて読むか、`mcp_files` は読む MCP の定義（確かめた中身のコピー）。"""
+
+    @property
+    def load(self) -> tuple[str, ...]: ...
+
+    @property
+    def allow(self) -> tuple[str, ...]: ...
+
+    @property
+    def inherit(self) -> bool: ...
+
+    @property
+    def mcp_files(self) -> tuple[Path, ...]: ...
 
 
 class Session(NamedTuple):
@@ -97,6 +124,8 @@ class ClaudeCall:
     `session` は会話の指定（None なら最小構成は会話を残さない。#4013）。`json_schema` は回答を縛るスキーマ。`stream` は標準出力を 1 歩ごとの
     行にする（結果をファイルで受け、標準出力を読まない担当だけが使う。無進捗の監視が作業中の担当を止まりと誤らない。#3945）。
     `readable` は作業ディレクトリのほかに読める場所で、`tools` の権限でだけ渡す。渡すと読める場所を限った起動になる（#3955）。
+    `grant` は起動の設定から解いた指定（`LaunchGrant`）で、`full` の権限でだけ渡す。None なら指定なしと同じ（#1959）。
+    `model`・`effort` は選んだ値で、None なら引数を足さない（#2944）。
     """
 
     system: str
@@ -105,14 +134,18 @@ class ClaudeCall:
     session: Optional[Session] = None
     json_schema: Optional[dict] = None
     model: Optional[str] = None
+    effort: Optional[str] = None
     stream: bool = False
     readable: tuple[Path, ...] = ()
+    grant: Optional[LaunchGrant] = None
 
     def __post_init__(self) -> None:
         if (self.permission is Permission.TOOLS) != bool(self.tools):
             raise ValueError(f"tools は権限 {Permission.TOOLS} のときだけ、空でなく渡す（権限 {self.permission}）")
         if self.readable and self.permission is not Permission.TOOLS:
             raise ValueError(f"readable は権限 {Permission.TOOLS} のときだけ渡す（権限 {self.permission}）")
+        if self.grant is not None and self.permission is not Permission.FULL:
+            raise ValueError(f"grant は権限 {Permission.FULL} のときだけ渡す（権限 {self.permission}）")
 
 
 class PluginArgs(NamedTuple):
@@ -279,13 +312,16 @@ def minimal_args(system: str, stream: bool = False, session: Optional[Session] =
     return head + ["--disable-slash-commands", "--system-prompt", system, *session_args(session)]
 
 
-def permission_args(permission: Permission, tools: Optional[str] = None, readable: Sequence[Path] = ()) -> list[str]:
+def permission_args(
+    permission: Permission, tools: Optional[str] = None, readable: Sequence[Path] = (), grant: Optional[LaunchGrant] = None
+) -> list[str]:
     """権限ごとの、使える Tool と許可のモードの引数。権限の引数はここだけが持つ。
 
     `readable` が空でなければ、Tool をその場所と作業ディレクトリへ閉じ込め（`--restricted`・`--add-dir`）、許していない操作を
-    断る（`dontAsk`）。値を 1 つだけ取る `--permission-mode` を最後に置き、後ろのリクエストを `--add-dir` の値と読ませない（#3955）。"""
+    断る（`dontAsk`）。値を 1 つだけ取る `--permission-mode` を最後に置き、後ろのリクエストを `--add-dir` の値と読ませない（#3955）。
+    `full` の引数は `_full_permission`（`grant` は full でだけ使う）。"""
     if permission is Permission.FULL:
-        return [*ACCEPT_EDITS, "--allowed-tools", FULL_TOOLS]
+        return _full_permission(grant)
     if permission is Permission.TOOLS:
         if not tools:
             raise ValueError(f"権限 {Permission.TOOLS} は許す Tool を要る")
@@ -296,6 +332,23 @@ def permission_args(permission: Permission, tools: Optional[str] = None, readabl
     return ["--tools", ""]
 
 
+def _full_permission(grant: Optional[LaunchGrant]) -> list[str]:
+    """full の起動の Tool と MCP の引数（#1959）。
+
+    読み込む Tool（`--tools`）は `LOAD_TOOLS` に `grant.load` を足し、尋ねずに使ってよい指定（`--allowed-tools`）は `FULL_TOOLS` に
+    `grant.allow` を足す。`load` の名前は許可に入れない。許可の指定は空白を含みうるので 1 件を 1 つの引数にする（値を複数取る引数）。
+    `inherit` でなければ `--strict-mcp-config` で環境の MCP を読まず、定義のコピーがあれば `--mcp-config` で渡す。後ろには必ず
+    `--` で始まる引数（プラグインの引数か `--append-system-prompt`）が続き、値を複数取る引数の終わりになる。
+    """
+    load = (*LOAD_TOOLS.split(","), *(grant.load if grant is not None else ()))
+    allow = (*FULL_TOOLS.split(","), *(grant.allow if grant is not None else ()))
+    args = [*ACCEPT_EDITS, "--tools", ",".join(dict.fromkeys(load)), "--allowed-tools", *dict.fromkeys(allow)]
+    if grant is not None and grant.inherit:
+        return args
+    files = [str(p) for p in grant.mcp_files] if grant is not None else []
+    return [*args, STRICT_MCP, *(["--mcp-config", *files] if files else [])]
+
+
 def _print_head(stream: bool) -> list[str]:
     """`-p` の出力の形の引数。`stream` なら逐次（stream-json）、でなければ 1 回の JSON。"""
     return list(PRINT_STREAM if stream else PRINT_JSON)
@@ -303,7 +356,7 @@ def _print_head(stream: bool) -> list[str]:
 
 def _full_args(call: ClaudeCall, root: Path, cwd: Optional[Path]) -> PluginArgs:
     plugins = plugin_args(root, cwd=cwd)
-    args = [*_print_head(call.stream), *permission_args(Permission.FULL)]
+    args = [*_print_head(call.stream), *permission_args(Permission.FULL, grant=call.grant)]
     args += plugins.args + ["--append-system-prompt", call.system]
     return PluginArgs(args + session_args(call.session), plugins.notice)
 
@@ -325,6 +378,8 @@ def claude_launch(call: ClaudeCall, root: Optional[Path] = None, base: Sequence[
         args += ["--json-schema", json.dumps(sent, ensure_ascii=False)]
     if call.model:
         args += ["--model", call.model]
+    if call.effort:
+        args += ["--effort", call.effort]
     return PluginArgs([*base, *args], notice)
 
 
@@ -388,11 +443,33 @@ def set_relay_checks(checks: Optional[RelayChecks]) -> None:
     relay_checks = checks
 
 
+class LaunchRecorder(Protocol):
+    """起動した子 1 つの使用量の行と、割り付け ID の効果指標（#2944）を書く処理（`ndf.domains.records.usage` が満たす。#1959 の決定 6）。"""
+
+    def record_cli(self, usage: Any, meta: Mapping[str, Any]) -> Any: ...
+
+    def record_outcome(self, assign_id: str, quality: Optional[float], detail: Mapping[str, Any]) -> Any: ...
+
+
+# 差し込まれた使用量ログの書き込み処理。None なら書かない（エントリポイントを通らない呼び出しとテスト）
+launch_recorder: Optional[LaunchRecorder] = None
+
+
+def set_launch_recorder(recorder: Optional[LaunchRecorder]) -> None:
+    """使用量ログの書き込み処理を差し込む（一番上のエントリポイントが起動時に 1 回呼ぶ）。"""
+    global launch_recorder
+    launch_recorder = recorder
+
+
 class ClaudeReply(NamedTuple):
     """`claude -p --output-format json` の 1 回の回答。`answer` は縛った回答（`structured_output`）か本文の JSON。
 
-    `failure` は打ち直しても直らない失敗の理由（`Failure`）。None の失敗（誤りで終えた・出力が JSON でない）は
-    打ち直せば直りうる。
+    `failure` は打ち直しても直らない失敗の理由（`Failure`）。None の失敗（誤りで終えた・出力が JSON でない）は打ち直せば直りうる。
+    使用量ログの行の元（#1959 の決定 6）: `session_id`・`usage`・`model_usage`（結果の `modelUsage`）・`session_cost_usd`
+    （結果の `total_cost_usd`）は結果の JSON の値で、読めなければ None。`usage` は起動 1 回分、`model_usage` と
+    `session_cost_usd` は会話の累計である（2026-11-27 に Claude Code 2.1.332 で同じ会話を 2 回再開して測った）。
+    `launched` は子プロセスを起動できたか（スロット・下限・照らし直しで止まった起動と、起動に失敗した起動は偽）、
+    `launched_at`・`seconds` は起動した時刻（UTC）とかかった秒。`denials` は結果の `permission_denials` の要素（辞書だけ）。
     """
 
     ok: bool
@@ -401,6 +478,14 @@ class ClaudeReply(NamedTuple):
     cost: float
     error: Optional[str] = None
     failure: Optional[Failure] = None
+    session_id: Optional[str] = None
+    usage: Optional[Mapping[str, Any]] = None
+    model_usage: Optional[Mapping[str, Any]] = None
+    session_cost_usd: Optional[float] = None
+    launched: bool = False
+    launched_at: Optional[str] = None
+    seconds: Optional[float] = None
+    denials: tuple[dict[str, Any], ...] = ()
 
     @classmethod
     def failed(cls, raw: str, error: str, cost: float = 0.0, failure: Optional[Failure] = None) -> "ClaudeReply":
@@ -421,8 +506,7 @@ def result_line(text: str) -> Optional[dict[str, Any]]:
     return found if isinstance(found, dict) and found.get("type") == "result" else None
 
 
-def _int(value: Any) -> Optional[int]:
-    """真偽値でない整数ならその値、ほかは None。"""
+def _int(value: Any) -> Optional[int]:  # 真偽値でない整数ならその値、ほかは None
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
@@ -437,8 +521,7 @@ def context_tokens(result: Optional[Mapping[str, Any]]) -> Optional[int]:
     return sum(values) if len(values) == len(found) else None
 
 
-def _count(value: Any) -> int:
-    """整数ならその値、ほか（無い・整数でない）は 0 と数える。"""
+def _count(value: Any) -> int:  # 整数ならその値、ほか（無い・整数でない）は 0 と数える
     found = _int(value)
     return 0 if found is None else found
 
@@ -448,16 +531,19 @@ def _model_tokens(row: Mapping[str, Any]) -> int:
     return sum(_count(row.get(k)) for k in MODEL_TOKEN_FIELDS)
 
 
+def main_model(models: Mapping[str, Any]) -> Optional[tuple[str, Mapping[str, Any]]]:
+    """`modelUsage` の主モデル（トークンの和が最も大きく、同じなら窓の小さい方）の名前と値。無いか空なら None（#1959・#4013）。"""
+    rows = ((name, row) for name, row in models.items() if isinstance(row, Mapping))
+    return max(rows, key=lambda nr: (_model_tokens(nr[1]), -_count(nr[1].get("contextWindow"))), default=None)
+
+
 def context_window(result: Optional[Mapping[str, Any]]) -> Optional[int]:
-    """結果の行の主モデル（トークンの和が最も大きく、同じなら窓の小さい方）の `contextWindow`。読めなければ None（#4013）。"""
+    """結果の行の主モデル（`main_model`）の `contextWindow`。読めなければ None（#4013）。"""
     models = result.get("modelUsage") if isinstance(result, Mapping) else None
-    if not isinstance(models, Mapping):
+    found = main_model(models) if isinstance(models, Mapping) else None
+    if found is None:
         return None
-    rows = (r for r in models.values() if isinstance(r, Mapping))
-    main = max(rows, key=lambda r: (_model_tokens(r), -_count(r.get("contextWindow"))), default=None)
-    if main is None:
-        return None
-    window = _int(main.get("contextWindow"))
+    window = _int(found[1].get("contextWindow"))
     return window if window is not None and window > 0 else None
 
 
@@ -496,16 +582,107 @@ def _limit_hit(payload: dict, text: str) -> bool:
     return payload.get("api_error_status") == 429 or usage_limit(text) is not None
 
 
-def _parse_reply(stdout: str) -> ClaudeReply:
+def _total_cost(payload: Mapping[str, Any]) -> Optional[float]:  # 結果の `total_cost_usd` が真偽値でない数値ならその値、ほかは None
+    spent = payload.get("total_cost_usd")
+    return float(spent) if isinstance(spent, (int, float)) and not isinstance(spent, bool) else None
+
+
+def parse_reply(stdout: str) -> ClaudeReply:
     payload = _payload(stdout)
     if isinstance(payload, ClaudeReply):
         return payload
-    spent = payload.get("total_cost_usd")
-    cost = float(spent) if isinstance(spent, (int, float)) else 0.0
-    text = payload.get("result") if isinstance(payload.get("result"), str) else stdout
-    if payload.get("is_error"):
-        return _error_reply(payload, text, cost)
-    return _answer_reply(payload, text, cost)
+    spent = _total_cost(payload)
+    cost = 0.0 if spent is None else spent
+    text = claude_body(payload, stdout)
+    reply = _error_reply(payload, text, cost) if payload.get("is_error") else _answer_reply(payload, text, cost)
+    return _with_usage(reply, payload)
+
+
+def _with_usage(reply: ClaudeReply, payload: Mapping[str, Any]) -> ClaudeReply:
+    """回答に、使用量ログの行の元になる結果の値を持たせる。形の違う値は None にする（#1959）。"""
+    sid, usage, models = (payload.get(k) for k in ("session_id", "usage", "modelUsage"))
+    return reply._replace(
+        denials=claude_denials(payload),
+        session_id=sid if isinstance(sid, str) and sid else None,
+        usage=usage if isinstance(usage, Mapping) else None,
+        model_usage=models if isinstance(models, Mapping) else None,
+        session_cost_usd=_total_cost(payload),
+    )
+
+
+def launch_meta(name: str, repo: Optional[str] = None) -> dict[str, Any]:
+    """使用量ログの行の工程の欄。`name` は工程の名前（作業種別か Skill の名前）、`repo` は呼び出し元が解決済みのリポジトリの識別子（`launch_approval.repo_digest` の値）。
+
+    `repo` を得るためだけに git を起動しない（起動 1 回ごとに git のプロセスが増えるため）。解決済みの値が無ければ欄を省く。
+    プランの実行の子なら、プランの実行の id・ステップの id・何回目かを環境変数から足す（#1959 の「子へ渡す環境変数」）。
+    無い値と、整数でない回数は欄を省く。
+    """
+    meta: dict[str, Any] = {"name": name}
+    if repo:
+        meta["repo"] = repo
+    for field_name, env in (("run_id", identity.env_name("plan-run-id")), ("step", identity.env_name("step-id"))):
+        value = os.environ.get(env)
+        if value:
+            meta[field_name] = value
+    raw = os.environ.get(identity.env_name("step-attempt"), "")
+    if raw.isdigit() and int(raw) > 0:
+        meta["attempt"] = int(raw)
+    return meta
+
+
+class LaunchLog:
+    """1 回の委譲か Skill の呼び出しが起動した子の行を、子が終わるたびに使用量ログの書き込み処理へ渡す（#1959 の決定 6）。
+
+    起動の前置き（`_prefaced`）が、起動した子 1 つが終わるたびに `report` を打つ。アカウントを替えて打ち直す場合も、
+    前の子の行は打ち直しより先に渡るので、打ち直しの途中で止められても残る。
+
+    `meta` は工程の欄（`launch_meta` の値。worker は指定した会話の id も入れる）。行の会話の id は、結果の JSON の
+    `session_id` を優先し、無ければ `meta` の値にする。`session_seq` は会話の id ごとに 0 から数える。アカウントを
+    替えても、同じ id のまま打ち直した子（worker は起動引数で id を指定する）は番号を続け、結果の id が変わった子
+    （id を指定しない Skill）だけがその id の 0 から始まる。会話の id がどちらからも分からない行は常に 0 にする。
+    書き込み処理が差し込まれていなければ渡さない。行に質問と回答の本文を入れない。
+    """
+
+    def __init__(self, meta: Mapping[str, Any], after: Optional[Callable[[ClaudeReply], Mapping[str, Any]]] = None) -> None:
+        self.meta = dict(meta)
+        self._seqs: dict[str, int] = {}
+        self.after = after  # 子が終わった後に決まる欄（#2944 の終わり方 `outcome`）を子の回答から作る処理
+
+    def report(self, child: ClaudeReply) -> None:
+        """起動した子 1 つの行を渡す。起動しなかった子（`launched` が偽）は渡さない。"""
+        if not child.launched:
+            return
+        named = self.meta["session_id"] if "session_id" in self.meta else None
+        session = child.session_id if child.session_id is not None else named
+        if session is None:  # どの会話の続きか分からない行は常に 0 で、ほかの会話の番号を進めない
+            seq = 0
+        else:
+            seq = self._seqs[session] if session in self._seqs else 0
+            self._seqs[session] = seq + 1
+        if launch_recorder is not None:
+            row = _launch_row(child, self.meta, session, seq)
+            launch_recorder.record_cli(child.usage, {**row, **(self.after(child) if self.after is not None else {})})
+
+
+def _launch_row(child: ClaudeReply, meta: Mapping[str, Any], session: Optional[str], seq: int) -> dict[str, Any]:
+    """子 1 つの行の欄（使用量を除く）。値の無い欄は None のまま渡し、書き込み処理が省く。"""
+    models = child.model_usage if child.model_usage is not None else {}
+    main = main_model(models)
+    tokens = {n: {k: _count(r.get(k)) for k in MODEL_TOKEN_FIELDS} for n, r in models.items() if isinstance(r, Mapping)}
+    row = {
+        **meta,
+        "launch_id": uuid.uuid4().hex,
+        "session_id": session,
+        "session_seq": seq,
+        "session_cost_usd": child.session_cost_usd,
+        "model": main[0] if main is not None else None,
+        "launched_at": child.launched_at,
+        "seconds": child.seconds,
+    }
+    row |= {"model_usage": tokens} if tokens else {}  # モデルの無い結果は欄を置かない
+    if child.failure is Failure.MODEL_REFUSED:  # 実験の記録の掃除の後も、使用量ログだけで見分ける（#2944）
+        row["model_refused"] = True
+    return row
 
 
 def _payload(stdout: str) -> dict | ClaudeReply:
@@ -520,10 +697,24 @@ def _payload(stdout: str) -> dict | ClaudeReply:
 
 
 def _error_reply(payload: dict, text: str, cost: float) -> ClaudeReply:
-    """誤りで終えた回答。利用上限なら打ち直しても直らない失敗（`Failure.USAGE_LIMIT`）にする。"""
+    """誤りで終えた回答。利用上限なら `Failure.USAGE_LIMIT`、モデルを理由にした拒否なら `Failure.MODEL_REFUSED` にする（打ち直しても直らない）。"""
     if _limit_hit(payload, text):
         return ClaudeReply.failed(text, f"claude の利用上限: {text[:200]}", cost, Failure.USAGE_LIMIT)
+    if model_refused(payload):
+        names = f"{identity.env_name('launch-model')}・{identity.env_name('launch-effort')}"
+        detail = f"claude がモデルか effort の指定を拒んだ: {text[:200]}。起動の設定（launch.json）の experiments か環境変数 {names} を直す"
+        return ClaudeReply.failed(text, detail, cost, Failure.MODEL_REFUSED)
     return ClaudeReply.failed(text, f"claude が誤りで終えた: {text[:200]}", cost)
+
+
+def model_refused(payload: Mapping[str, Any]) -> bool:
+    """誤りで終えた結果の JSON が、実行を始める前にモデルを理由に断ったと確かめられるか（#2944 の「起動できない組」）。
+
+    `api_error_status` が 404、4 つのトークン数がどれも欄として在って 0、`modelUsage` が空の辞書のとき真。欄の欠けは 0 とみなさない。
+    """
+    usage, models = payload.get("usage"), payload.get("modelUsage")
+    zero = isinstance(usage, Mapping) and all(k in usage and _int(usage[k]) == 0 for k in REFUSED_TOKENS)
+    return payload.get("api_error_status") == REFUSED_STATUS and zero and isinstance(models, Mapping) and not models
 
 
 def _answer_reply(payload: dict, text: str, cost: float) -> ClaudeReply:
@@ -559,6 +750,13 @@ class LaunchOptions:
       偽なら確かめ直さずに `Failure.REFUSED`（アカウントの設定の API を呼ばず、設定も変えない）
     - `switch_account`: 中継の起動先を継いだ起動が利用上限に当たったとき、替え先のアカウントで 1 回だけ打ち直すか。
       偽なら打ち直さずに `Failure.USAGE_LIMIT` を返す（1 回の判定で 1 回だけ起動すると決めた呼び手）
+    - `verify`: 子を起動する直前（スロット・アカウントの確かめ直しの後、CLI の下限の前）に打つ照らし直し。理由の 1 行を返せば起動せず `Failure.LAUNCH`。
+      承認を確かめた起動の設定が、確かめた後に変わったか取り消されたかを見る（`launch_settings.Grant.verify`。#1959）。
+      子プロセスを起動しない確かめなので、`claude --version` を打つ CLI の下限より前に打つ（止まる起動に `--version` を打たない）
+    - `ready`: 起動の前の確かめをすべて通った後、子を起動する直前に 1 回打つ準備（worker が前の結果ファイルを消すなど）。
+      どの確かめで止まった起動でも打たない
+    - `log`: 起動した子が終わるたびに使用量ログの行を渡す先（`LaunchLog`。#1959 の決定 6）。None なら渡さない
+    - `left`: 起動の期限の残りの秒を返す。スロット待ちと子の期限を残りに収め、残りが無ければ起動せず `Failure.TIMEOUT`（#2944）
     """
 
     slot_wait: Optional[float] = None
@@ -566,10 +764,23 @@ class LaunchOptions:
     cli_floor: bool = True
     ensure_training: bool = True
     switch_account: bool = True
+    verify: Optional[Callable[[], Optional[str]]] = None
+    ready: Optional[Callable[[], None]] = None
+    log: Optional[LaunchLog] = None
+    left: Optional[Callable[[], float]] = None
 
 
+Left = Optional[Callable[[], float]]  # 起動の期限の残りの秒を返す関数（`LaunchOptions.left`）
 # 選び方を省いた起動（今までどおり）
 DEFAULT_LAUNCH = LaunchOptions()
+
+# 起動の直前の確かめ（`claude_precheck.precheck_claude`）で止まった起動の失敗の理由。止めた確かめごとに決まる
+PRECHECK_FAILURES = {
+    claude_precheck.Check.RECHECK: Failure.REFUSED,
+    claude_precheck.Check.VERIFY: Failure.LAUNCH,
+    claude_precheck.Check.FLOOR: Failure.REFUSED,
+    claude_precheck.Check.DEADLINE: Failure.TIMEOUT,
+}
 
 
 def call_claude(
@@ -580,7 +791,8 @@ def call_claude(
     学習に使わない設定と確かめられていなければ起動せず `Failure.REFUSED`、重い起動のスロットが空かなければ
     `Failure.NO_SLOT` を返す。2 つを通った後、claude が下限より古ければ起動せず `Failure.REFUSED`（`cli_floor`）。期限を超えたら組ごと止めて回収する
     （claude が動かした Tool の子孫を残さない）。中継の起動先を継いだ起動は、確かめ（`begin`・`retry`）で確定した起動ごとの
-    環境と起動引数でこの前置きを打つ。
+    環境と起動引数でこの前置きを打つ。NDF が起動した AI のマーカー（`NDF_AI_CHILD`）は前置き（`_prefaced`）が子の最終の環境へ足す
+    （#1959。子は起動の承認を書けない）。中継の確かめは `child: drop` の指定でマーカーを除くため、確かめより前には足さない。
 
     `options`（`LaunchOptions`）は前置きの選び方で、スロットを待つ上限・プロセスの組・下限の確かめの有無を決める。
     """
@@ -616,50 +828,54 @@ def _accounted(
     return reply if again is None else _prefaced(again, prompt, timeout, cwd, options)
 
 
-def require_claude(run: AccountRun, cwd: Optional[Path], check: bool) -> Optional[ClaudeReply]:
-    """CLI の下限を確かめる。古ければ起動しない回答、下限を満たすか `check` が偽（確かめない）なら None。"""
-    try:
-        if check:
-            cli_floor.require("claude", run.argv[0], run.env, cwd)
-    except cli_floor.TooOld as exc:
-        return ClaudeReply.failed("", str(exc), failure=Failure.REFUSED)
-    return None
-
-
-def _precheck(run: AccountRun, cwd: Optional[Path], options: LaunchOptions) -> Optional[ClaudeReply]:
-    """起動の直前の確かめ。`run.recheck` が 1 行を返せば `Failure.REFUSED`、次に CLI の下限（`require_claude`）。通れば None。"""
-    refused = run.recheck() if run.recheck is not None else None
-    if refused is not None:
-        return ClaudeReply.failed("", refused, failure=Failure.REFUSED)
-    return require_claude(run, cwd, options.cli_floor)
-
-
 def _prefaced(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:
+    """`_launch_once` を打ち、起動した子が終わったその場で使用量ログの行を `options.log` へ渡す（#1959 の決定 6）。"""
+    reply = _launch_once(run, prompt, timeout, cwd, options)
+    if options.log is not None:
+        options.log.report(reply)
+    return reply
+
+
+def _launch_once(run: AccountRun, prompt: str, timeout: float, cwd: Optional[Path], options: LaunchOptions) -> ClaudeReply:
     """起動の前置き（学習の設定・スロット・下限）を `run` の環境と実行ファイルで打って起動し、どの終わり方でも `run.end` を 1 回だけ打つ。
 
     前置きの選び方は `options`（スロットを待つ上限・claude を置くプロセスの組・下限の確かめ）。関所の起動は今までどおり新しい組で起動する。
+    子の最終の環境には NDF が起動した AI のマーカー（`NDF_AI_CHILD`）を足す。中継の確かめが確定した環境（初回と替え先の打ち直し）にも足すためである（#1959）。
     """
     launched = False
     try:
         with launch_slot.gate(
-            "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=options.slot_wait, ensure=options.ensure_training
+            "claude", cwd=cwd, env=_absolute_config(run.env, cwd), wait=claude_precheck.slot_wait(options), ensure=options.ensure_training
         ) as slot_env:
-            run = run._replace(env={**run.env, **slot_env})
-            stopped = _precheck(run, cwd, options)
+            run = run._replace(env={**run.env, **slot_env, **ai_child_env()})
+            stopped = claude_precheck.precheck_claude(run, cwd, options)
             if stopped is not None:
-                return stopped
+                return ClaudeReply.failed("", stopped.detail, failure=PRECHECK_FAILURES[stopped.check])
+            at, started = _now()
+            if (late := claude_precheck.spent(options.left)) is not None:  # 起動の直前に残りを測り直す
+                return ClaudeReply.failed("", late, failure=Failure.TIMEOUT)
             if run.gate is None:
                 launched = True
-                return _run_claude(run.argv, prompt, timeout, cwd, run.env, options.new_group)
-            proc = _gated(run, cwd)
+                return _timed(_run_claude(run.argv, prompt, timeout, cwd, run.env, options), at, started)
+            proc = _gated(run, cwd, options.left)
             if isinstance(proc, ClaudeReply):
                 return proc
             launched = True
-            return _talk(proc, prompt, timeout)
+            return _timed(_talk(proc, prompt, claude_precheck.time_left(options.left, timeout)), at, started)
     except launch_slot.NotLaunched as exc:
-        return ClaudeReply.failed("", exc.detail, failure=Failure(exc.kind))
+        return ClaudeReply.failed("", exc.detail, failure=Failure(claude_precheck.slot_failure(options.left, exc.kind)))
     finally:
         run.end(launched)
+
+
+def _now() -> tuple[str, float]:  # 今の時刻（UTC の ISO 8601）と、かかった秒を測る単調な時計の値
+    return datetime.now(UTC).isoformat(timespec="seconds"), time.monotonic()
+
+
+def _timed(reply: ClaudeReply, at: str, started: float) -> ClaudeReply:  # 起動した子の回答に、起動した時刻とかかった秒を持たせる
+    if not reply.launched:
+        return reply
+    return reply._replace(launched_at=at, seconds=round(_now()[1] - started, 3))
 
 
 def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]:
@@ -670,12 +886,11 @@ def _absolute_config(env: dict[str, str], cwd: Optional[Path]) -> dict[str, str]
     return {**env, "CLAUDE_CONFIG_DIR": str(_workdir(cwd) / conf)}
 
 
-def _workdir(cwd: Optional[Path]) -> Path:
-    """子の作業ディレクトリ。`cwd` を省けばこのプロセスの場所（`Popen(cwd=None)` と同じ）。"""
+def _workdir(cwd: Optional[Path]) -> Path:  # 子の作業ディレクトリ。`cwd` を省けばこのプロセスの場所（`Popen(cwd=None)` と同じ）
     return cwd if cwd is not None else Path.cwd()
 
 
-def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeReply":
+def _gated(run: AccountRun, cwd: Optional[Path], left: Left = None) -> "subprocess.Popen | ClaudeReply":
     """関所で起動し、`attach` に通ったら開けて claude になったかを確かめる。なれなければ組を止めて `Failure.LAUNCH`。
 
     子を作った後の失敗（`attach` の例外・関所の口の `OSError`）も組を止めて回収してから返す（届けは呼び出し元が回収の後に消す）。
@@ -685,7 +900,7 @@ def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeRe
         for _ in range(2):
             opened.extend(os.pipe())
     except OSError as exc:
-        _close_fds(opened)
+        claude_gate.close_fds(opened)
         return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
     r, w, sr, sw = opened
     proc: Optional[subprocess.Popen] = None
@@ -695,7 +910,7 @@ def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeRe
         finally:
             os.close(r)
             os.close(sw)
-        why = _open_gate(run, proc, w, sr)
+        why = claude_gate.open_gate(run, proc, w, sr, left)
     except OSError as exc:
         if proc is None:
             return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
@@ -705,36 +920,12 @@ def _gated(run: AccountRun, cwd: Optional[Path]) -> "subprocess.Popen | ClaudeRe
             _stop(proc)
         raise
     finally:
-        _close_fds((w, sr))
+        claude_gate.close_fds((w, sr))
     if why is None:
         return proc
     _stop(proc)
-    return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=Failure.LAUNCH)
-
-
-def _close_fds(fds: Sequence[int]) -> None:
-    for fd in fds:
-        try:
-            os.close(fd)
-        except OSError:  # noqa: S110 ファイル: 閉じ済みの関所の口は閉じ直さない
-            pass
-
-
-def _open_gate(run: AccountRun, proc: subprocess.Popen, w: int, sr: int) -> Optional[str]:
-    """`attach` に通ったら関所を開け、起動の知らせを読む。claude になれば None、なれなければ理由の符号。"""
-    why = run.attach(proc.pid) if run.attach is not None else None
-    if why is not None:
-        return why
-    os.write(w, b"1")
-    got = process_group.read_status(sr, limits.seconds("relay.gate-exec"))
-    return "gate_timeout" if got is None else f"launch_failed errno {_errno_name(got)}" if got else None
-
-
-def _errno_name(got: bytes) -> str:
-    """関所が知らせた errno の数値を名前にする（`2` は `ENOENT`）。数値でなければ受けた文字列のまま。"""
-    text = got.decode(errors="replace").strip()
-    code = int(text) if text.isdigit() else None
-    return errno.errorcode[code] if code in errno.errorcode else text
+    failure = Failure.TIMEOUT if why == claude_precheck.EXPIRED else Failure.LAUNCH
+    return ClaudeReply.failed("", f"claude を関所で起動できない: {why}", failure=failure)
 
 
 def _stop(proc: subprocess.Popen) -> None:
@@ -754,21 +945,24 @@ def _popen(
 
 
 def _run_claude(
-    argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str], new_group: bool = True
+    argv: Sequence[str], prompt: str, timeout: float, cwd: Optional[Path], env: dict[str, str], options: LaunchOptions = DEFAULT_LAUNCH
 ) -> ClaudeReply:
     try:
-        proc = _popen(argv, cwd, env, new_group=new_group)
+        proc = _popen(argv, cwd, env, new_group=options.new_group)
     except OSError as exc:
         return _launch_failed(exc)
-    return _talk(proc, prompt, timeout)
+    return _talk(proc, prompt, claude_precheck.time_left(options.left, timeout))  # 起動の後に残りを測り直す
 
 
-def _launch_failed(exc: OSError) -> ClaudeReply:
-    """子を起動できなかったときの回答（`Failure.LAUNCH`）。"""
+def _launch_failed(exc: OSError) -> ClaudeReply:  # 子を起動できなかったときの回答
     return ClaudeReply.failed("", f"claude を起動できない: {exc}", failure=Failure.LAUNCH)
 
 
-def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
+def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:  # 起動した子の回答（`launched` が真）にする
+    return _read_answer(proc, prompt, timeout)._replace(launched=True)
+
+
+def _read_answer(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
     """質問を標準入力で渡して回答を読む。期限を超えたら組ごと止めて回収する。"""
     try:
         stdout, stderr = proc.communicate(prompt, timeout=timeout)
@@ -782,4 +976,4 @@ def _talk(proc: subprocess.Popen, prompt: str, timeout: float) -> ClaudeReply:
         limit = Failure.USAGE_LIMIT if usage_limit(stderr) else None
         return ClaudeReply.failed(stderr, f"claude が終了コード {proc.returncode} で終えた: {stderr[:200]}", failure=limit)
     record_cost(stdout)
-    return _parse_reply(stdout)
+    return parse_reply(stdout)

@@ -9,14 +9,18 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import identity
+from ndf.adapters import experiment_rows, model_choice
 from ndf.contracts import facts
-from ndf.domains.records import jsonl
+from ndf.contracts.internal import InternalError
+from ndf.domains.records import experiments, jsonl
 from ndf.domains.records import usage_decide as ud
 
 if TYPE_CHECKING:
@@ -25,6 +29,9 @@ if TYPE_CHECKING:
 # 書き手の区分（使用量ログの行の caller）
 SUBAGENT = "subagent"
 CLAUDE_CLI = "claude-p"
+CODEX_CLI = "codex-exec"
+# 使用量の取れない起動の、単価の有無だけを確かめるための使用量
+_NOTHING = SimpleNamespace(input_tokens=0, cached_input_tokens=0, cache_write_input_tokens=0, output_tokens=0)
 # 閉じた課題を数える GitHub の検索（GraphQL）
 _SEARCH = "query($q: String!) { search(query: $q, type: ISSUE) { issueCount } }"
 
@@ -45,7 +52,7 @@ def usage_log_path(env: Optional[Mapping[str, str]] = None) -> Path:
     return where / facts.value("ndf-files", "usage-log-file", "path")
 
 
-def _records(path: Path) -> list[dict[str, Any]]:
+def _transcript_records(path: Path) -> list[dict[str, Any]]:
     # usage を持たない行は JSON として読まない。書きかけ・辞書でない行は応答として数えない
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if '"usage"' in line]
     return jsonl.parse_lines(lines)[0]
@@ -54,7 +61,7 @@ def _records(path: Path) -> list[dict[str, Any]]:
 def transcript_usage(path: Path, since: Optional[datetime] = None, until: Optional[datetime] = None) -> ud.Usage | str:
     """会話の記録 1 本の使用量。読めなければ `UNKNOWN`（使用量ログの行は unknown になる。hook を落とさない）。"""
     try:
-        records = _records(path)
+        records = _transcript_records(path)
     except (OSError, UnicodeDecodeError):
         return ud.UNKNOWN
     return ud.transcript_total(records, since, until)
@@ -86,18 +93,67 @@ def record_subagent(
         return None
 
 
-def record_cli(usage: Mapping[str, Any], meta: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
-    """`claude -p` の 1 回を、サブエージェントと同じ使用量ログへ 1 行書く。書けなければ None。
+def record_cli(usage: Any, meta: Mapping[str, Any], env: Optional[Mapping[str, str]] = None) -> Optional[dict[str, Any]]:
+    """`claude -p`（`meta` の `caller` があれば `codex exec`）の起動した子 1 つを、サブエージェントと同じ使用量ログへ 1 行書く。書けなければ None（#1959 の決定 6）。
 
-    `meta` の欄は `contracts/schemas/internal/usage.schema.json` にあるものだけ（ほかの欄は書かずに `InternalError`）。
+    `meta` の欄は `contracts/schemas/internal/usage.schema.json` にあるものだけで、値が None の欄は置かない。使用量が
+    辞書でなければ（結果の JSON が無い起動）unknown にする。権限・容量・ロックの待ち・行の形の誤りで書けなくても
+    例外を外へ出さず、標準エラーへ 1 行出す（工程の結果を変えない。I4）。
     """
     u = ud.usage_of(usage)
-    row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **meta, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
+    filled = {key: value for key, value in meta.items() if value is not None}
+    row = {"at": jsonl.now(), "caller": CLAUDE_CLI, **filled, "usage": u.as_dict() if u is not None else ud.UNKNOWN}
     try:
         return jsonl.append_locked(usage_log_path(env), row, kind="usage")
-    except (LookupError, OSError) as exc:
+    except (LookupError, OSError, InternalError) as exc:
         print(f"使用量の使用量ログへ書けない: {exc}", file=sys.stderr)
         return None
+
+
+def codex_cost(used: Any, model: Optional[str]) -> tuple[str, Optional[float]]:
+    """換算に使うモデル（指定が無ければ単価表の `default_model`）と、起動 1 回の費用（USD。単価が無ければ None）。
+
+    `used` は `agents.CodexUsage`。キャッシュの読み書きは入力の内数なので、残りの入力と分けて単価を当てる。
+    """
+    prices = experiment_rows.codex_prices()
+    name = model if model is not None else prices["default_model"]
+    if name not in prices["models"]:
+        return name, None
+    price, cached, written = prices["models"][name], used.cached_input_tokens, used.cache_write_input_tokens
+    total = (used.input_tokens - cached - written) * price["input"] + cached * price["cached_input"]
+    total += written * price["cache_write"] + used.output_tokens * price["output"]
+    return name, total / 1_000_000
+
+
+def record_codex(used: Any, meta: Mapping[str, Any], choice: Any) -> None:
+    """`codex exec` の子 1 つを使用量ログへ 1 行書く（#2944）。`used` は `agents.CodexUsage`（取れなければ None）、`choice` は起動の値。
+
+    使用量の欄は claude の行の形へ移す（`input_tokens` はキャッシュの読み書きを除いた分）。子 1 つが 1 つの会話なので
+    `session_seq` は 0。単価の無いモデルは費用の欄を置かず、割り付けのある起動なら実験の記録に `unpriced` の行を足す
+    （その工程の割り付けは均等になる）。
+    """
+    name, cost = codex_cost(used if used is not None else _NOTHING, choice.model)
+    row = dict(meta, caller=CODEX_CLI, launch_id=uuid.uuid4().hex, session_seq=0)
+    mapped = None
+    if used is not None:
+        cached, written = used.cached_input_tokens, used.cache_write_input_tokens
+        plain = max(0, used.input_tokens - cached - written)
+        mapped = ud.Usage(
+            input_tokens=plain, output_tokens=used.output_tokens, cache_creation_input_tokens=written, cache_read_input_tokens=cached
+        ).as_dict()
+        if cost is not None:
+            row["session_cost_usd"] = cost
+    record_cli(mapped, row)
+    if cost is None and choice.assign_id is not None:
+        model_choice.append_row(dict(kind="unpriced", at=jsonl.now(), assign_id=choice.assign_id, model=name), choice.store)
+
+
+def record_outcome(assign_id: str, quality: Optional[float], detail: Mapping[str, Any]) -> bool:
+    """効果指標の差し込みの受け口（#2944）。起動の記録のインターフェースから呼ばれ、`experiments.write_outcome` へ渡す。
+
+    adapters と core は domains を読み込めないので、評価する工程はこの受け口を差し込みで呼ぶ。
+    """
+    return experiments.write_outcome(assign_id, quality, detail)
 
 
 def _transcripts(rows: list[dict[str, Any]], since: datetime, until: datetime) -> dict[str, ud.Usage | str]:

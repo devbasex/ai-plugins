@@ -18,14 +18,20 @@ kiro-cli chat --list-models        # 利用できるモデル一覧（JSON 出�
 ## 非対話実行
 
 ```bash
-cat prompt.md | kiro-cli chat --no-interactive --trust-all-tools \
-  > /tmp/kiro-stdout.log 2> /tmp/kiro-err.log
+cd <workdir>
+ndf delegate-run --runtime kiro -- kiro-cli chat --no-interactive '{args}' \
+  < prompt.md > /tmp/kiro-stdout.log 2> /tmp/kiro-err.log
 ```
 
+- 安全装置の引数は書かず、`ndf delegate-run` が `'{args}'` の位置へ入れる。`'{args}'` は `kiro-cli chat --no-interactive` のすぐ後に置く。kiro の委譲にはサンドボックスが無いので、
+  起動の設定（`.ndf/launch.json` の `permissions.unsandboxed`）で kiro を承認したときだけ `--trust-all-tools` で起動し、
+  承認が無ければ起動せずに止まる（`/ndf:launch-config` で承認する）。読むだけの委譲は `--use review` で、承認の有無に関わらず
+  `--trust-tools=fs_read` で起動する
 - `--no-interactive` は**標準入力からプロンプトを受け取る**（26KB で実測）。
   コマンド引数でも渡せるが、長いプロンプトのエスケープを避けるため標準入力に統一する
-- 作業ディレクトリの隔離が唯一のセキュリティ境界になるため、**必ず隔離した
-  worktree / コンテナの中で実行する**
+- Kiro に作業を委譲する場合は、ホストのファイルや認証情報へのアクセスを制限した**コンテナまたは仮想マシン**を使用する。
+  `--trust-all-tools` で起動した Kiro は任意のシェル実行とファイル編集を無確認で行うので、この制限が唯一の防御になる。
+  Git の worktree は作業ファイルを分けるために使う（worktree だけでは、ホストのファイルや認証情報へのアクセスを防げない）
 
 ## 4 つの落とし穴
 
@@ -66,8 +72,8 @@ sed -r 's/\x1b\[[0-9;?]*[ -\/]*[@-~]//g' /tmp/kiro-err.log
 何も信頼しない状態で全ツールが拒否されるため、「モデルが何もせず正常終了した」ように
 見えてしまう。
 
-防御力を持たないまま事故のリスクだけが残るので、`--trust-all-tools` を使い、
-**セキュリティ境界は作業ディレクトリの隔離に一本化する**。codex の
+防御力を持たないまま事故のリスクだけが残るので、委譲では `--trust-all-tools` を使い、
+**セキュリティ境界は外側の隔離に一本化する**。`ndf delegate-run` は承認のあるときだけこれを入れる。codex の
 `--dangerously-bypass-approvals-and-sandbox` / agy の `--dangerously-skip-permissions` と同じ整理である。
 
 ツール名は内部名（`execute_bash` / `fs_read` / `fs_write`）と表示名（`shell` / `write`）の
@@ -106,7 +112,7 @@ sed -r 's/\x1b\[[0-9;?]*[ -\/]*[@-~]//g' /tmp/kiro-err.log
 ## モデル指定
 
 ```bash
-kiro-cli chat --no-interactive --trust-all-tools --model claude-opus-5 < prompt.md
+ndf delegate-run --runtime kiro -- kiro-cli chat --no-interactive '{args}' --model claude-opus-5 < prompt.md
 ```
 
 kiro-cli は claude 系と gpt 系の**両方**を提供する。つまり実行環境（ハーネス）と

@@ -54,9 +54,22 @@ def test_on_cause_picks_the_step_for_the_kind():
 def test_retry_waits_then_reruns_the_same_step_without_counting_it():
     plan = _plan({"id": "a", "retry": {"ci_pending": {"attempts": 2, "interval": 5}}}, limit=1)
     acts, final = _drive(plan, {"a": [Outcome("stopped", "ci_pending"), Outcome("ok")]})
-    assert acts == [RunStep("a", 0), Sleep("a", 5.0), RunStep("a", 1)]
+    assert acts == [RunStep("a", 0, 1), Sleep("a", 5.0), RunStep("a", 1, 2)]
     assert final.status == "ok"
     assert final.count == 1
+
+
+def test_each_run_of_a_step_counts_its_nth_run_from_one():
+    """#1959: そのプランの実行でそのステップを実行した何回目か。打ち直しと、遷移で戻った実行の両方で 1 増える。"""
+    plan = _plan(
+        {"id": "a", "next": "end", "on_cause": {"test_failed": "fix"}, "retry": {"ci_pending": {"attempts": 2, "interval": 5}}},
+        {"id": "fix", "next": "a"},
+    )
+    outcomes = {"a": [Outcome("stopped", "test_failed"), Outcome("stopped", "ci_pending"), Outcome("ok")]}
+    acts, final = _drive(plan, outcomes)
+    runs = [(a.step, a.nth) for a in acts if isinstance(a, RunStep)]
+    assert runs == [("a", 1), ("fix", 1), ("a", 2), ("a", 3)]
+    assert final.status == "ok"
 
 
 def test_after_the_retry_limit_the_step_goes_to_on_fail():

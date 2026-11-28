@@ -31,6 +31,7 @@
 | `install-wrapper` | 内部（予告なく変えてよい） | `install`<br>`uninstall`<br>`status` | — | — | — | none | Claude Code の中継（ラッパー）を入れる・外す・状態を見る |
 | `investigation-rules` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 調べた手段を示さずに「無い」と書かないための規則 |
 | `issue-plan-strategy` | 内部（予告なく変えてよい） | （引数なし）<br>`.*` | — | `handoff`・`parallel` | — | none | 課題を読み、並べて進める実装のプランを立てる |
+| `launch-config` | 内部（予告なく変えてよい） | 引数を受けない | — | `launch` | — | none | 起動の設定（.ndf/launch.json）の候補を作り、利用者の承認を取ってから反映する（#1959） |
 | `layout-review` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | 画面の配置をレビューする手順 |
 | `logging-guidelines` | 内部（予告なく変えてよい） | 引数を受けない | — | — | — | none | ログのレベルの選び方と、秘密と個人の情報をログに出さない規則 |
 | `merged` | 内部（予告なく変えてよい） | （引数なし）<br>`[1-9][0-9]*` | — | `worktree` | — | none | マージ済みの Pull Request の作業場所とブランチを片付ける。引数は Pull Request の番号 |

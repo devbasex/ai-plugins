@@ -29,6 +29,8 @@ _SCP_URL = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^/:]+):(?P<path>.+)$")
 # GitHub のリモートの URL のスキームと、そのスキームで GitHub を指すホスト（`ssh.github.com` は SSH を 443 番で使う接続先）
 _SSH_HOSTS = frozenset({"github.com", "ssh.github.com"})
 _GITHUB_HOSTS = {"https": frozenset({"github.com"}), "http": frozenset({"github.com"}), "git": frozenset({"github.com"}), "ssh": _SSH_HOSTS}
+# GitHub のリポジトリのパス。所有者と名前に使える文字だけを受け、クエリ・フラグメント・余分な階層を含むパスは受けない
+_REPO_PATH = re.compile(r"^/?(?P<owner>[A-Za-z0-9-]+)/(?P<name>[A-Za-z0-9._-]+?)(?:\.git)?/?$")
 # `git cat-file --batch` がオブジェクトごとに置く見出しの行（無い名前の行は `<名前> missing`）
 _BATCH_HEAD = re.compile(rb"^[0-9a-f]{40,64} (\S+) ([0-9]+)$")
 # git の誤りの文に出る URL の、伏せる部分（利用者の情報と、`?`・`#` から後ろ）。トークンを URL に埋めたリモートの誤りに出る
@@ -178,8 +180,12 @@ def first_parent_lines(log_text: str) -> dict[str, int]:
 
 
 def repo_of_url(url: str) -> Optional[str]:
-    """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。ホストとパスを分けて読むので、パスの中に
-    `github.com` を持つほかのホストの URL は GitHub とみなさない。"""
+    """リモートの URL の `<所有者>/<リポジトリ>`。GitHub の URL でなければ None。
+
+    ホストとパスを分けて読むので、パスの中に `github.com` を持つほかのホストの URL は GitHub とみなさない。認証情報・クエリ・
+    フラグメントを除いたパスから所有者と名前だけを取る（URL に埋めたトークンを使用量ログなどへ写さない。#1959）。
+    パスがリポジトリの形でなければ None。
+    """
     url = url.strip()
     if "://" in url:
         try:
@@ -194,9 +200,8 @@ def repo_of_url(url: str) -> Optional[str]:
         scheme, host, path = "ssh", m.group("host").lower(), m.group("path")
     if scheme not in _GITHUB_HOSTS or host not in _GITHUB_HOSTS[scheme]:
         return None
-    owner, _, name = path.strip("/").partition("/")
-    name = name.removesuffix(".git")
-    return f"{owner}/{name}" if owner and name and "/" not in name else None
+    found = _REPO_PATH.match(path)
+    return f"{found.group('owner')}/{found.group('name')}" if found else None
 
 
 class WorktreeEntry(NamedTuple):
