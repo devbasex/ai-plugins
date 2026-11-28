@@ -7,11 +7,12 @@
 承認の対象は 4 つの値（ベースリポジトリ・PR の番号・マージ先・HEAD）で、証跡の行はその対象・回答・担い手・
 「本番へ反映されるか」・回答の記録の識別子を持つ。
 工程の開き直しは、承認した対象へ担い手 `reopen` の却下の行を足して承認を取り消し、PR をマージキューから外す
-（`write_revocations`）。
+（`write_revocations`）。残す承認が新しいときは、失効させる承認だけを指す却下の行（失効の行）を足す。
 """
 
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from typing import Iterable, Iterator, NamedTuple, Sequence
@@ -29,6 +30,8 @@ ANSWER_LINE = "回答:"
 TARGET_LINE = "対象:"
 PRODUCTION_LINE = "本番へ反映される:"
 RECORD_LINE = "回答の記録:"
+# 担い手 `reopen` の却下の行が、指した承認だけを失効させるときに持つ行（値は承認を指す値の JSON の並び）
+VOIDS_LINE = "失効する承認:"
 _YES, _NO = "はい", "いいえ"
 _TARGET = re.compile(r"^`(?P<repo>[^`]+)` (?P<number>\d+) `(?P<base>[^`]+)` `(?P<head>[^`]+)`$")
 # 承認資料の、承認でマージが本番へ反映され得ることを示す行（`ndf ci ask`・`ndf ci merge` と工程の承認ゲートの承認資料が使う）
@@ -52,7 +55,8 @@ class MergeTarget(NamedTuple):
 class MergeRow(NamedTuple):
     """マージの承認の証跡の 1 行。`production` は承認資料に示した「本番へ反映されるか」、`record_id` は回答の記録の識別子。
 
-    `url` は PR から読んだ行だけが持つ、行を書いたコメントの URL（本文には書かない）。"""
+    `url` は PR から読んだ行だけが持つ、行を書いたコメントの URL（本文には書かない）。`voids` は失効の行だけが持つ、
+    失効させる承認を指す値（記録の識別子かコメントの URL）。空の却下は、先の承認をすべて取り消す。"""
 
     answer: str
     by: str
@@ -60,6 +64,7 @@ class MergeRow(NamedTuple):
     production: bool
     record_id: str
     url: str = ""
+    voids: frozenset[str] = frozenset()
 
 
 class Revocation(NamedTuple):
@@ -79,10 +84,11 @@ def presented_record_id(gate_id: str, presentation: str | None) -> str:
 def render_merge_row(row: MergeRow) -> str:
     """証跡のコメントの本文（マーカーと行）。"""
     t = row.target
+    voids = f"{VOIDS_LINE} {json.dumps(sorted(row.voids), ensure_ascii=False)}\n" if row.voids else ""
     return (
         f"{MERGE_MARK}\n{MERGE_HEADING}\n\n{ANSWER_LINE} {row.answer}\n{BY_LINE} {row.by}\n"
         f"{TARGET_LINE} `{t.repo}` {int(t.number)} `{t.base}` `{t.head}`\n"
-        f"{PRODUCTION_LINE} {_YES if row.production else _NO}\n{RECORD_LINE} {row.record_id}\n"
+        f"{PRODUCTION_LINE} {_YES if row.production else _NO}\n{RECORD_LINE} {row.record_id}\n{voids}"
     )
 
 
@@ -107,7 +113,20 @@ def _parse_merge_row(body: str) -> MergeRow | None:
     if by == MVV_BY and MVV_NOTE_HEADING not in body:
         return None
     t = MergeTarget(got["repo"], int(got["number"]), got["base"], got["head"])
-    return MergeRow(str(answer), str(by), t, production == _YES, str(record))
+    voids = _parse_voids(body) if by == REOPEN_BY else frozenset()
+    return MergeRow(str(answer), str(by), t, production == _YES, str(record), voids=voids)
+
+
+def _parse_voids(body: str) -> frozenset[str]:
+    """失効の行が指す承認。行が無い・読めなければ空（先の承認をすべて取り消す却下として数える）。"""
+    held = _line(body, VOIDS_LINE)
+    if held is None:
+        return frozenset()
+    try:
+        values = json.loads(held)
+    except json.JSONDecodeError:
+        return frozenset()
+    return frozenset(v for v in values if isinstance(v, str)) if isinstance(values, list) else frozenset()
 
 
 # token の利用者を読めないときの理由（`approval_stale` と別の止まり方にする。承認し直しても数えられないため）
@@ -148,12 +167,29 @@ def _unedited_rows(comments: Iterable[Authored]) -> Iterator[tuple[Authored, Mer
 
 
 def merge_judgment(rows: Sequence[MergeRow], now: MergeTarget) -> MergeRow | None:
-    """今の承認の対象 `now` への、「本番へ反映される: はい」の承認とすべての却下のうち、最新の 1 件が承認ならその行。
-    無いか却下なら None。却下は本番へ反映されない期間のものも先の承認を取り消す。"""
-    kept = [r for r in rows if r.target.same(now) and (r.production or r.answer != APPROVED)]
-    if not kept or kept[-1].answer != APPROVED:
-        return None
-    return kept[-1]
+    """今の承認の対象 `now` への、まだ数える承認（`_live_approvals`）のうち最新の 1 件。無ければ None。"""
+    live = _live_approvals(rows, now)
+    return live[-1] if live else None
+
+
+def _live_approvals(rows: Sequence[MergeRow], now: MergeTarget) -> list[MergeRow]:
+    """`now` への「本番へ反映される: はい」の承認のうち、後の却下で取り消されていないもの（古い順）。
+
+    却下は本番へ反映されない期間のものも先の承認をすべて取り消す。失効の行（`voids` を持つ却下）は、指した承認だけを外す。"""
+    live: list[MergeRow] = []
+    for r in rows:
+        if not r.target.same(now):
+            continue
+        if r.answer == REJECTED:
+            live = [kept for kept in live if not _points_at(r.voids, kept)] if r.voids else []
+        elif r.production:
+            live.append(r)
+    return live
+
+
+def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
+    """`approvals`（記録の識別子かコメントの URL）が承認の行 `row` を指すか。"""
+    return not approvals.isdisjoint((row.record_id, row.url))
 
 
 def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
@@ -169,10 +205,14 @@ def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
 
 
 def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None:
-    """対象ごとに、最新の証跡が `approvals` の承認なら担い手 `reopen` の却下の行を投稿し、PR をマージキューから外す。
+    """対象ごとに、`approvals` の承認を担い手 `reopen` の却下の行で取り消し、PR をマージキューから外す。
 
-    承認が無い・既に却下なら行は書かない。最新の承認が別のもの（残す工程や別のステートマシンの承認）なら、行を書かず
-    キューからも外さない。キューは行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
+    最新の承認が `approvals` の承認なら、先の承認をすべて取り消す却下を投稿する。最新の承認が別のもの（残す工程や別の
+    ステートマシンの承認）なら、`approvals` の承認だけを指す失効の行を投稿する（残す承認のコメントが後で編集されても、
+    取り消した承認を数え直さない）。`approvals` の承認が無い・既に取り消し済みなら行は書かない。
+
+    キューから外すのは、残る承認の無い PR と、別のアカウントが `approvals` を今も承認と数える PR（キューに入れたのが
+    どの承認かは分からない）。行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
     打ち直しでも外す。
 
     別のアカウントが `approvals` を今も承認と数えるなら、token の利用者の分を書いてキューから外した後に `TrailError`
@@ -191,14 +231,17 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
         if target.number not in read:
             read[target.number] = list(_unedited_rows(hub.comments(target.number)))
         found = read[target.number]
-        mine = [row for c, row in found if same_writer(c, viewer)]
-        others.update(dict.fromkeys(_other_holders(found, viewer, target, approvals)))
-        latest = merge_judgment(mine, target)
-        if latest is not None and approvals.isdisjoint((latest.record_id, latest.url)):
-            continue
-        leaving[target.number] = None
-        if latest is not None:
-            publisher.comment(target.number, render_merge_row(MergeRow(REJECTED, REOPEN_BY, target, True, record_id)))
+        live = _live_approvals([row for c, row in found if same_writer(c, viewer)], target)
+        holders = _other_holders(found, viewer, target, approvals)
+        others.update(dict.fromkeys(holders))
+        revoked = any(_points_at(approvals, row) for row in live)
+        kept = bool(live) and not _points_at(approvals, live[-1])
+        if not kept or holders:
+            leaving[target.number] = None
+        if revoked:
+            voids = approvals if kept else frozenset()
+            row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id, voids=voids)
+            publisher.comment(target.number, render_merge_row(row))
     for number in leaving:
         hub.dequeue(number)
     if others:
@@ -207,19 +250,19 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
 
 
 def _other_holders(found: Sequence[tuple[Authored, MergeRow]], viewer: Viewer, target: MergeTarget, approvals: frozenset[str]) -> list[str]:
-    """`approvals` の承認を、今も対象の承認と数える別のアカウントの名前。
+    """`approvals` の承認を、今も取り消していない別のアカウントの名前。そのアカウントの最新でない承認も数える
+    （新しい承認のコメントが編集されると、下の承認が効く）。
 
     識別子はアカウントの間で差し引かない（投稿の後に確定が失敗した回答を別のアカウントで送り直すと、同じ識別子が両方に残る）。"""
     theirs: defaultdict[int, list[tuple[str, MergeRow]]] = defaultdict(list)
     for c, row in found:
         if c.author_id > 0 and not same_writer(c, viewer):
             theirs[c.author_id].append((c.author, row))
-    holders = []
-    for written in theirs.values():
-        latest = merge_judgment([row for _, row in written], target)
-        if latest is not None and not approvals.isdisjoint((latest.record_id, latest.url)):
-            holders.append(written[-1][0])
-    return holders
+    return [
+        written[-1][0]
+        for written in theirs.values()
+        if any(_points_at(approvals, row) for row in _live_approvals([row for _, row in written], target))
+    ]
 
 
 class TrailError(Exception):

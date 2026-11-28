@@ -326,10 +326,14 @@ def test_a_later_approval_from_elsewhere_is_not_revoked(repo, st, env, capsys):
     assert _judgment(env, target) == row
     # 残る承認の PR はキューから外さない
     assert env.hub.dequeued == []
+    # 残した承認のコメントが後で編集されても、取り消した承認は数え直さない
+    comments = env.hub.comments_of[target.number]
+    comments[1] = comments[1]._replace(edited=True)
+    assert _judgment(env, target) is None
 
 
-@pytest.mark.parametrize(("note", "revoked"), [(1, False), (2, True)])
-def test_an_mvv_approval_is_matched_by_its_comment(note, revoked):
+@pytest.mark.parametrize(("note", "left"), [(1, "url-2"), (2, None)])
+def test_an_mvv_approval_is_matched_by_its_comment(note, left):
     """2 つのスプリントの MVV 判定は記録の識別子が同じになるので、判定のコメントの URL で取り消す承認を分ける。"""
     hub = merge_hub.MergeHub()
     target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
@@ -340,7 +344,11 @@ def test_an_mvv_approval_is_matched_by_its_comment(note, revoked):
     revocation = merge_approval.Revocation(target, frozenset({f"url-{note}"}), "reopen:x")
     merge_approval.write_revocations(hub, [revocation], hub.viewer())
 
-    assert ("post_comment" in hub.calls) is revoked
+    judged = merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target)
+    assert (judged.url if judged is not None else None) == left
+    # 取り消した方のコメントだけが残っても、数え直さない
+    hub.comments_of[7] = [c for c in hub.comments_of[7] if c.url != f"url-{3 - note}"]
+    assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target) is None
 
 
 def test_revocations_read_the_comments_of_a_pr_once():
@@ -469,6 +477,21 @@ def test_the_same_record_id_written_by_two_accounts_is_still_held_by_the_other()
     hub.account_id = 2
     merge_approval.write_revocations(hub, [revocation], hub.viewer())
     assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target) is None
+
+
+def test_another_account_holding_a_revoked_approval_leaves_the_queue_even_with_a_kept_one():
+    """実行アカウントの最新が残す承認でも、別のアカウントに取り消す承認があれば、キューから外してから断る。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    for account, record in ((2, "gone"), (1, "kept")):
+        hub.account_id = account
+        merge_approval.write_merge_row(hub, merge_approval.MergeRow("approved", "user", target, True, record), hub.viewer())
+    revocation = merge_approval.Revocation(target, frozenset({"gone"}), "reopen:x")
+
+    with pytest.raises(merge_approval.TrailError, match="承認を書いたアカウント"):
+        merge_approval.write_revocations(hub, [revocation], hub.viewer())
+
+    assert hub.dequeued == [7]
 
 
 def test_a_revocation_of_another_repository_touches_nothing():
