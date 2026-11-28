@@ -860,17 +860,31 @@ def test_units_run_repeated_after_success_returns_the_first_result_without_touch
     def records(cwd):
         opened.append(cwd)
         if not writable:
-            raise github.GitHubError("届かない")
+            raise github.GitHubError("応答の本文", status=403)
         return lanes._NoRecords()
 
     first = units_cli.run_implement(st, tid, repo, replace(flow.env, records=records))
-    assert any("届かない" in w for w in first.get("warnings", [])) is not writable, first
+    assert any("HTTP 403" in w for w in first.get("warnings", [])) is not writable, first
+    # 例外の文（GitHub の応答本文）は結果にも進捗の DB にも残さない
+    assert "応答の本文" not in json.dumps([first, [e.as_dict() for e in run.read(st, tid).events]], ensure_ascii=False)
     synced = len(opened)
     # 打ち直しの時点では書けても、返すのは初回の警告である
     writable = True
     again = units_cli.run_implement(st, tid, repo, replace(flow.env, records=records))
     assert again == first and again["status"] == "ok", again
     assert len(opened) == synced and [step for step, _ in flow.calls] == ["implement", "gathered"]
+
+
+def test_units_run_interrupted_while_syncing_warns_on_the_next_run(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+
+    def interrupted(cwd):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        units_cli.run_implement(st, tid, repo, replace(flow.env, records=interrupted))
+    again = units_cli.run_implement(st, tid, repo, flow.env)
+    assert again["status"] == "ok" and any(f"ndf progress resync {tid}" in w for w in again["warnings"]), again
 
 
 def test_a_waiting_answer_of_units_run_is_carried_over_to_next(repo, st, flow, capsys, tmp_path):

@@ -37,7 +37,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import command, definition, design_record, invoke, issue_values, model, plan_runs, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
-from ndf.progress.records import Records, github_records, sync_records
+from ndf.progress.records import Records, SyncFailure, github_records, sync_records
 from ndf.progress.run_view import (
     ACTOR,
     ANSWERED,
@@ -48,12 +48,13 @@ from ndf.progress.run_view import (
     STARTED,
     STEP_EVENT,
     View,
-    completion_warning_drafts,
+    completion_sync_drafts,
     last_event,
     migrated_order,
     migration_drafts,
     event_payload,
     read_accepted_head,
+    sync_warnings,
 )
 
 TOOL = __package__.rpartition(".")[2]
@@ -341,7 +342,7 @@ def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, A
     v = read(st, machine_id)
     items, errors = sync_records(v, cwd, env.records)
     if errors:
-        return result.stopped(TOOL, "transient", "; ".join(errors), items=items, next=_cmd("resync", machine_id))
+        return result.stopped(TOOL, "transient", "; ".join(map(str, errors)), items=items, next=_cmd("resync", machine_id))
     return result.result(TOOL, result.OK, f"ステートマシン {machine_id} の進捗記録を揃えた（{len(items)} 件）", items=items)
 
 
@@ -362,10 +363,11 @@ class Drive:
     def write(self, *drafts: model.EventDraft) -> None:
         _write(self.st, self.machine_id, *drafts)
 
-    def synced(self) -> None:
-        """行を終えた後に進捗記録を書き直す。記録の失敗は工程を止めず警告に載せる。"""
+    def synced(self) -> list[SyncFailure]:
+        """行を終えた後に進捗記録を書き直す。記録の失敗は工程を止めず警告に載せ、返す。"""
         _, errors = sync_records(read(self.st, self.machine_id), self.cwd, self.env.records)
-        self.warnings.extend(errors)
+        self.warnings.extend(map(str, errors))
+        return errors
 
 
 def _forced(v: View, stage: str) -> bool:
@@ -538,9 +540,22 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     else:
         d.write(*_run_step(d, v, m.stage, m.step))
     if decide(read(d.st, d.machine_id)).stage != m.stage:
-        d.synced()
-        d.write(*completion_warning_drafts(read(d.st, d.machine_id), m.stage.name, d.warnings[mark:]))
+        _synced_stage(d, m.stage, mark)
     return None
+
+
+def _synced_stage(d: Drive, s: stages.StageDef, mark: int) -> None:
+    """工程を終えた後の同期。打ち直した `units run` が読む工程「実装」だけ、結果を残す（`completion_sync_drafts`）。
+
+    残す前に中断すれば、終了の事象だけが残り、同期を確かめていないと分かる。例外の文は保存せず、警告も残す値から組む。
+    """
+    before = d.warnings[mark:]
+    failed = d.synced()
+    if s.id != design_record.IMPLEMENT_DEFINITION.stem:
+        return
+    stored = [f.stored() for f in failed]
+    append(d.st, d.machine_id, lambda v: completion_sync_drafts(v, s.name, before, stored))
+    d.warnings[mark:] = [*before, *sync_warnings(d.machine_id, stored)]
 
 
 Hand = Callable[[Drive, View, Move], Optional[dict[str, Any]]]
@@ -684,24 +699,6 @@ def answer(st: store.Store, machine_id: str, stage: str, value: str, reason: str
 
 
 # --- work（next が起動する作業） ----------------------------------------------------------------
-
-
-def _retrying(call: Callable[[bool], invoke.StageResult], sleep: Callable[[float], None]) -> invoke.StageResult:
-    """打ち直しで直る止まりを方針どおりに打ち直す。`call(again)` の `again` は打ち直しか（プランは止まったステップから
-    新しい回を始める。`invoke.plan_start`・`invoke.plan_attempt`）。
-
-    打ち直しても同じプランの回の結果が返った（回が変わらず、バックアップの結果を返した）なら、それ以上は打ち直さない。
-    """
-    used = 0
-    res = call(False)
-    while res.status == result.STOPPED and (delay := causes.retry_delay(res.cause, used)) is not None:
-        sleep(delay)
-        used += 1
-        again = call(True)
-        if invoke.same_run(res, again):
-            return again
-        res = again
-    return res
 
 
 def _failed_with(s: stages.StageDef, step: Optional[str], rev: int, cause: dict[str, Any]) -> model.EventDraft:
@@ -869,7 +866,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if step.kind == stages.READING_KIND:
         work_dir.mkdir(parents=True, exist_ok=True)
         run = _reading_run(v, s, step, run, work_dir)
-    res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
+    res = invoke.retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 
 

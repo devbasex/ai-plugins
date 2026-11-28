@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import timedelta, timezone
 from pathlib import Path
@@ -103,7 +103,42 @@ def _targets(v: View) -> list[tuple[str, int, str, str]]:
     return out
 
 
-def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[list[dict[str, Any]], list[str]]:
+@dataclass(frozen=True)
+class SyncFailure:
+    """書けなかった進捗記録。`target`・`number` は保存先（保存先を作れなければ None）、`source` は失敗した接続先、
+    `status` は HTTP の状態（無ければ 0）。`detail` は例外の文で、GitHub の応答本文を含むので保存しない（`stored`）。
+    """
+
+    target: Optional[str]
+    number: Optional[int]
+    source: str
+    status: int
+    detail: str
+
+    def __str__(self) -> str:
+        return f"{_where(self.target, self.number)}進捗記録を書けない: {self.detail}"
+
+    def stored(self) -> dict[str, Any]:
+        """進捗の DB に残してよい値（対象の種別・番号と失敗の分類）。"""
+        return {"target": self.target, "number": self.number, "source": self.source, "status": self.status}
+
+
+def _where(target: Optional[str], number: Optional[int]) -> str:
+    return f"{target} #{number} の" if target is not None else ""
+
+
+def failure_summary(stored: Mapping[str, Any]) -> str:
+    """残した値（`SyncFailure.stored`）から組む、書けなかったことの文。"""
+    http = f"。HTTP {stored['status']}" if stored["status"] else ""
+    return f"{_where(stored['target'], stored['number'])}進捗記録を書けない（{stored['source']} の失敗{http}）"
+
+
+def _failure(exc: Exception, target: Optional[str] = None, number: Optional[int] = None) -> SyncFailure:
+    source = "GitHub" if isinstance(exc, GitHubError) else "Git"
+    return SyncFailure(target, number, source, getattr(exc, "status", 0), str(exc))
+
+
+def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[list[dict[str, Any]], list[SyncFailure]]:
     """課題と PR の本文の進捗のセクションを、ステートマシンの終了のマーカーから書き直す。書けなかった保存先は誤りに載せる。
 
     `make` は保存先を作る（`run.Env.records`）。
@@ -111,7 +146,7 @@ def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[l
     try:
         records = make(cwd)
     except (GitError, GitHubError) as exc:
-        return [], [f"進捗記録を書けない: {exc}"]
+        return [], [_failure(exc)]
     items, errors = [], []
     for kind, number, heading, content in _targets(v):
         try:
@@ -121,5 +156,5 @@ def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[l
                 records.write(number, new)
             items.append({"kind": kind, "number": number, "changed": new != body})
         except GitHubError as exc:
-            errors.append(f"{kind} #{number} の進捗記録を書けない: {exc}")
+            errors.append(_failure(exc, kind, number))
     return items, errors
