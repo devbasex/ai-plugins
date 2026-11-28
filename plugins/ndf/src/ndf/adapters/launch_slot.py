@@ -53,6 +53,12 @@ class NoSlot(NotLaunched):
     kind = "no_slot"
 
 
+class Expired(NotLaunched):
+    """呼び手の起動の期限が、スロットを待ち始める前に切れた。`kind` は `claude.Failure` の `timeout`。"""
+
+    kind = "timeout"
+
+
 def _memory_ok(read_memory: ReadMemory, floor_mib: int) -> bool:
     available = read_memory()
     return available is None or available >= floor_mib
@@ -158,13 +164,14 @@ def gate(
     *,
     cwd: Optional[Path] = None,
     env: Optional[Mapping[str, str]] = None,
-    wait: Optional[float] = None,
+    wait: float | Callable[[], float] | None = None,
     ensure: bool = True,
 ) -> Iterator[dict[str, str]]:
     """起動の前置き: 学習に使わない設定のスナップショットを読み、重い起動のスロットを取る。起動しないときは `NotLaunched`。
 
     `env` は起動先へ渡す環境（既定は今の環境）で、バックアップを確かめた認証の文脈と照らす。子へ足す環境変数を渡す。
-    `wait` はスロットを待つ上限の秒（None なら設定の上限、0 なら待たずに `NoSlot`）。
+    `wait` はスロットを待つ上限の秒（None なら設定の上限、0 なら待たずに `NoSlot`）。関数を渡すと、学習に使わない設定の確かめ
+    （API の応答を待つことがある）の後、スロットを待ち始める時点で呼んで上限を決める。関数が `NotLaunched` を送れば取り始めない。
     バックアップはスロットを待つ前と、取った後の起動の直前に読む（待つ間にバックアップが期限を過ぎるか、拒否へ変わることがある）。
     バックアップが無いか期限切れ・取り消し済み・認証の文脈が違うなら、断らずにその場で確かめて記録する（`training.ensure`。#3907）。
     `ensure` が偽なら確かめ直さず（アカウントの設定の API を呼ばず、設定も変えない）、その場合は `NotLaunched` を送る
@@ -172,7 +179,8 @@ def gate(
     取った後に拒否へ変われば、スロットを返して `NotLaunched` を送る。
     """
     _refuse_if_needed(agent, env, ensure)
-    with held(agent, cwd=cwd, environ=env, wait=wait) as slot_env:
+    limit = wait() if callable(wait) else wait
+    with held(agent, cwd=cwd, environ=env, wait=limit) as slot_env:
         _refuse_if_needed(agent, env, ensure)
         yield slot_env
 

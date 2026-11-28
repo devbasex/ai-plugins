@@ -1,4 +1,4 @@
-"""`_prefaced` の起動の直前の確かめ（`recheck` と CLI の下限）と `require_claude` の今の振る舞い（I-010 の作り直しの前の固定）。
+"""`_prefaced` の起動の直前の確かめ（`recheck` と CLI の下限）と `claude_precheck.require_claude` の今の振る舞い（I-010 の作り直しの前の固定）。
 
 スロットの取得（`launch_slot.gate`）・`Popen`・CLI の下限の確かめは偽物にし、実プロセスを起動しない。
 """
@@ -6,15 +6,19 @@
 from __future__ import annotations
 
 import json
+import os
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
 import pytest
 
-from ndf.adapters import claude, cli_floor, launch_slot
+from ndf.adapters import claude, claude_precheck, cli_floor, launch_slot
+from ndf.contracts import limits
 
 REPLY = json.dumps({"type": "result", "is_error": False, "result": "{}", "total_cost_usd": 0.0})
+# 差し替える前の前置き（スロットの取得を含む）
+REAL_GATE = launch_slot.gate
 # 偽のスロットが子へ足す環境
 SLOT_ENV = {"NDF_SLOT_HELD": "1"}
 
@@ -40,6 +44,7 @@ class Seen:
         self.popen: list[list[str]] = []
         self.ended: list[bool] = []
         self.too_old: Optional[cli_floor.TooOld] = None
+        self.waited = True  # 下限の確かめが `claude --version` の終わりを待ったか（偽なら記録を再利用した）
 
 
 @pytest.fixture
@@ -56,6 +61,7 @@ def seen(monkeypatch) -> Seen:
         got.floor.append((name, argv0, dict(env or {}), cwd))
         if got.too_old is not None:
             raise got.too_old
+        return got.waited
 
     def popen(argv, **kwargs):
         got.order.append("launch")
@@ -63,7 +69,7 @@ def seen(monkeypatch) -> Seen:
         return FakeProc()
 
     monkeypatch.setattr(launch_slot, "gate", gate)
-    monkeypatch.setattr(claude.cli_floor, "require", require)
+    monkeypatch.setattr(claude_precheck.cli_floor, "require", require)
     monkeypatch.setattr(claude.subprocess, "Popen", popen)
     return got
 
@@ -108,10 +114,10 @@ def test_i010_without_recheck_the_floor_is_still_checked(seen, tmp_path):
 
 
 def test_i010_floor_gets_argv0_the_slot_env_and_cwd(seen, tmp_path):
-    """下限の確かめは argv[0]・スロットの環境を足した環境・作業ディレクトリで打つ。"""
+    """下限の確かめは argv[0]・スロットの環境と AI の子のマーカーを足した環境・作業ディレクトリで打つ。"""
     claude._prefaced(_run(seen, argv=("/opt/claude", "-p")), "q", 30, tmp_path, claude.DEFAULT_LAUNCH)
 
-    assert seen.floor == [("claude", "/opt/claude", {"A": "1", **SLOT_ENV}, tmp_path)]
+    assert seen.floor == [("claude", "/opt/claude", {"A": "1", **SLOT_ENV, "NDF_AI_CHILD": "1"}, tmp_path)]
 
 
 def test_i010_too_old_floor_refuses_without_launch(seen, tmp_path):
@@ -148,19 +154,156 @@ def test_i010_require_claude_without_check_returns_none_without_checking(seen, t
     """`require_claude` は check が偽なら確かめずに None。"""
     seen.too_old = cli_floor.TooOld("claude", "/opt/claude", "1.0.0", "2.0.0")
 
-    assert claude.require_claude(claude.AccountRun({}, ["claude"]), tmp_path, False) is None and seen.floor == []
+    assert claude_precheck.require_claude(claude.AccountRun({}, ["claude"]), tmp_path, False) is None and seen.floor == []
 
 
 def test_i010_require_claude_passing_floor_returns_none(seen, tmp_path):
     """`require_claude` は下限を満たせば None（argv[0]・env・cwd を渡す）。"""
-    got = claude.require_claude(claude.AccountRun({"B": "2"}, ["/x/claude", "-p"]), tmp_path, True)
+    got = claude_precheck.require_claude(claude.AccountRun({"B": "2"}, ["/x/claude", "-p"]), tmp_path, True)
 
     assert got is None and seen.floor == [("claude", "/x/claude", {"B": "2"}, tmp_path)]
 
 
 def test_i010_require_claude_too_old_returns_refused_reply(seen, tmp_path):
-    """`require_claude` は古ければ `TooOld` の文を誤りにした `Failure.REFUSED` の回答。"""
+    """`require_claude` は古ければ `TooOld` の文を理由にした `Check.FLOOR` の `Stop`（`_prefaced` が `Failure.REFUSED` の回答にする）。"""
     seen.too_old = cli_floor.TooOld("claude", "/x/claude", "1.0.0", "2.0.0")
-    got = claude.require_claude(claude.AccountRun({}, ["/x/claude"]), None, True)
+    got = claude_precheck.require_claude(claude.AccountRun({}, ["/x/claude"]), None, True)
 
-    assert got == claude.ClaudeReply(False, None, "", 0.0, str(seen.too_old), claude.Failure.REFUSED)
+    assert got == claude_precheck.Stop(claude_precheck.Check.FLOOR, str(seen.too_old))
+
+
+def _verify_logged(seen: Seen, reason: Optional[str] = None) -> claude.LaunchOptions:
+    def verify() -> Optional[str]:
+        seen.order.append("verify")
+        return reason
+
+    return claude.LaunchOptions(verify=verify, ready=lambda: seen.order.append("ready"))
+
+
+def test_issue_1959_verify_runs_before_the_floor_and_ready_after_every_check(seen, tmp_path):
+    """照らし直し（`verify`）は確かめ直しの後・下限の前と、下限の後・本体の起動の直前に打ち、起動の準備（`ready`）は確かめをすべて通った後に打つ。"""
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
+
+    assert got.ok and seen.order == ["slot", "recheck", "verify", "floor", "verify", "ready", "launch"]
+
+
+def test_issue_1959_a_floor_from_the_record_verifies_only_once(seen, tmp_path):
+    """下限の確かめが記録を再利用して待たなかった起動は、照らし直しを 1 回で済ませる。"""
+    seen.waited = False
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
+
+    assert got.ok and seen.order == ["slot", "recheck", "verify", "floor", "ready", "launch"]
+
+
+def test_issue_1959_a_revoke_during_the_floor_check_stops_the_launch(seen, tmp_path):
+    """下限の確かめ（`claude --version` の終了を待つ）の間に承認が取り消されたら、本体を起動せず、起動の準備も打たない。"""
+    answers = iter([None, "取り消された"])
+
+    def verify() -> Optional[str]:
+        seen.order.append("verify")
+        return next(answers)
+
+    options = claude.LaunchOptions(verify=verify, ready=lambda: seen.order.append("ready"))
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, options)
+
+    assert got.failure is claude.Failure.LAUNCH and seen.order == ["slot", "recheck", "verify", "floor", "verify"] and seen.popen == []
+
+
+def test_issue_1959_a_refused_verify_stops_before_the_floor(seen, tmp_path):
+    """照らし直しで止まる起動は、下限（`claude --version`）を確かめず、起動の準備も打たない。"""
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen, "取り消された"))
+
+    assert got.failure is claude.Failure.LAUNCH and seen.order == ["slot", "recheck", "verify"] and seen.floor == []
+
+
+def test_issue_1959_a_too_old_cli_stops_before_ready(seen, tmp_path):
+    """下限より古ければ起動の準備を打たない（worker は前の結果ファイルを消さない）。"""
+    seen.too_old = cli_floor.TooOld("claude", "/opt/claude", "1.0.0", "2.0.0")
+    got = claude._prefaced(_run(seen, lambda: None), "q", 30, tmp_path, _verify_logged(seen))
+
+    assert got.failure is claude.Failure.REFUSED and seen.order == ["slot", "recheck", "verify", "floor"] and seen.popen == []
+
+
+def test_issue_2944_a_deadline_used_up_while_waiting_stops_the_launch(seen, tmp_path):
+    """期限の残り（`left`）はスロットと確かめの後に測る。残りが無ければ起動も準備もせず `Failure.TIMEOUT`、あれば子の期限を残りにする。"""
+    spent = claude.LaunchOptions(left=lambda: 0.0, ready=lambda: seen.order.append("ready"))
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, spent)
+
+    assert got.failure is claude.Failure.TIMEOUT and seen.order == ["slot"] and seen.ended == [False]
+
+
+@pytest.mark.parametrize(("after_check", "failure", "taken"), [(0.0, claude.Failure.TIMEOUT, []), (5.0, claude.Failure.NO_SLOT, [5.0])])
+def test_issue_2944_the_slot_wait_is_bounded_by_the_deadline(seen, tmp_path, monkeypatch, after_check, failure, taken):
+    """上限は学習の設定の確かめの後の残りで決める。確かめの間に期限が切れたら、スロットを取り始めない。"""
+    remaining, waits = [30.0], []
+
+    @contextmanager
+    def held(agent, *, cwd=None, environ=None, wait=None):
+        waits.append(wait)
+        raise launch_slot.NoSlot("空かない")
+        yield {}
+
+    monkeypatch.setattr(launch_slot, "gate", REAL_GATE)
+    monkeypatch.setattr(launch_slot, "_refuse_if_needed", lambda *a: remaining.__setitem__(0, after_check))
+    monkeypatch.setattr(launch_slot, "held", held)
+    options = claude.LaunchOptions(left=lambda: remaining[0], slot_wait=60.0)
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, options)
+
+    assert waits == taken and got.failure is failure and seen.popen == []
+
+
+@pytest.mark.parametrize("gated", [False, True])
+def test_issue_2944_the_wait_after_the_start_uses_the_time_left(seen, tmp_path, monkeypatch, gated):
+    """直接の起動はプロセスを作った後の残りで回答を待つ。中継の起動の知らせは残りで打ち切り、期限切れにする。"""
+    remaining, given, ends = [7.0], [], []  # `ends` は関所の読む側。偽の子の代わりに開けておき、開けるための書き込みが通るようにする
+
+    def popen(argv, **kwargs):
+        if not gated:
+            remaining[0] = 3.0
+        return FakeProc()
+
+    def read_status(fd, seconds):
+        given.append(seconds)
+        remaining[0] = 0.0
+        return None
+
+    monkeypatch.setattr(claude.subprocess, "Popen", popen)
+    monkeypatch.setattr(FakeProc, "communicate", lambda self, prompt="", timeout=0: given.append(timeout) or (REPLY, ""))
+    monkeypatch.setattr(claude.process_group, "read_status", read_status)
+    monkeypatch.setattr(claude, "_stop", lambda proc: None)  # 偽の子（pid 0）の組へ信号を送らない
+
+    def wrapped(argv, r, w):
+        ends.append(os.dup(r))
+        return list(argv)
+
+    run = _run(seen)._replace(gate=wrapped if gated else None)
+    got = claude._prefaced(run, "q", 30, tmp_path, claude.LaunchOptions(left=lambda: remaining[0]))
+    for fd in ends:
+        os.close(fd)
+
+    if gated:
+        assert given == [min(7.0, limits.seconds("relay.gate-exec"))] and got.failure is claude.Failure.TIMEOUT
+    else:
+        assert given == [3.0] and got.ok
+
+
+@pytest.mark.parametrize("at", ["ready", "attach"])
+def test_issue_2944_a_deadline_ending_just_before_the_launch_stops_it(seen, tmp_path, monkeypatch, at):
+    """起動の準備の間か、中継の関所を開ける前に期限が切れたら、claude を実行させない。"""
+    remaining = [7.0]
+    monkeypatch.setattr(claude, "_stop", lambda proc: None)  # 偽の子（pid 0）の組へ信号を送らない
+    run = _run(seen)
+    if at == "attach":
+        run = run._replace(gate=lambda argv, r, w: list(argv), attach=lambda pid: remaining.__setitem__(0, 0.0))
+    ready = (lambda: remaining.__setitem__(0, 0.0)) if at == "ready" else None
+    got = claude._prefaced(run, "q", 30, tmp_path, claude.LaunchOptions(left=lambda: remaining[0], ready=ready))
+
+    assert got.failure is claude.Failure.TIMEOUT and not got.launched and seen.ended == [False]
+
+
+def test_issue_2944_the_child_gets_the_time_left_after_the_checks(seen, tmp_path, monkeypatch):
+    given: list[float] = []
+    monkeypatch.setattr(FakeProc, "communicate", lambda self, prompt="", timeout=0: given.append(timeout) or (REPLY, ""))
+    got = claude._prefaced(_run(seen), "q", 30, tmp_path, claude.LaunchOptions(left=lambda: 7.0))
+
+    assert got.ok and given == [7.0]

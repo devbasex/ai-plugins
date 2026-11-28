@@ -118,6 +118,8 @@ KINDS: dict[str, Kind] = {
     "reading-check": Kind(contracts.schema_path("internal/reading-check"), (dict,)),
     "reading-docs": Kind(contracts.schema_path("internal/reading-docs"), (dict,)),
     "mvv-gate-failure": Kind(contracts.schema_path("internal/mvv-gate-failure"), (dict,)),
+    "experiment": Kind(contracts.schema_path("internal/experiment"), (dict,)),
+    "experiment-weights": Kind(contracts.schema_path("internal/experiment-weights"), (dict,)),
 }
 
 

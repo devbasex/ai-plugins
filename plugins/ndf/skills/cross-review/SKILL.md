@@ -100,8 +100,11 @@ ndf cross-review run --pr 123 --state-dir "$STATE_DIR" --base <ベースブラ�
 - `gh` CLI と git が origin へ送れる。相手役の CLI（既定は codex と kiro）と修正担当の claude がログイン済みで、PATH にある
 - `--worktree`（省けば打った場所）が git に登録された worktree で、PR の head ブランチを持つ。リポジトリのメインディレクトリ
   そのものは渡さない（同期が PR の `.ndf/` の設定で書き換えるため、実行者の設定を読む場所にならない。`run` は precondition で止まる）
-- ユーザー名前空間を作れない環境（`unshare -Ur true` が通らない）では、`run` は codex を自身のサンドボックスを外して
-  （`--dangerously-bypass-approvals-and-sandbox`）起動する。そうした環境では外で隔離されたコンテナの中で打つ
+- ユーザー名前空間を作れない環境（`unshare -Ur true` が通らない）では、codex は自身のサンドボックスを使えない。`run` が codex を
+  サンドボックスを外して（`--dangerously-bypass-approvals-and-sandbox`）起動するのは、起動の設定（`.ndf/launch.json` の
+  `permissions.unsandboxed`）で codex を承認したときだけである。承認が無ければ、どの担当も起動せずに `precondition` で止まる。
+  外で隔離されたコンテナの中であることを確かめてから `/ndf:launch-config` で承認する。承認は起動の直前にも照らし直し、
+  待っている間に取り消すとその担当は起動しない。kiro は承認の有無に関わらず読むだけの指定（`--trust-tools=fs_read`）で起動する
 
 **CI テストの設定（`.ndf/project.json` の `test.ci.only`）が真のリポジトリでは、テストを手元で打たない（個別・範囲のテストも含む）。** テストの合否は
 PR の CI の結果（`gh pr checks <PR>`）で読み、報告の「検証」には CI のチェックの名前と結論を書く。修正担当は hook の無い起動なので、

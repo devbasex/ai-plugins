@@ -73,6 +73,16 @@
 
 結果の `metrics`: `findings`（integer）・`rounds`（integer）。`items` の要素: `after`（string）・`base`（string か null）・`before`（string）・`branch`（string）・`conflicts`（array of string）・`current_pr`（integer）・`head`（string か null）・`id`（string）・`kind`（string）・`locked`（string）・`number`（integer）・`ok`（boolean）・`origin_head`（string か null）・`origin_pr`（integer）・`outcome`（string）・`path`（string）・`points_to`（string）・`reason`（string か null）・`rebased`（boolean）・`remote`（string）・`replayed`（integer）・`scope`（string）・`slug`（string）・`source`（string）・`unreviewed`（array of string）・`url`（string）
 
+## `ndf delegate-run`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/delegate-run.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/delegate-run.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf delegate-run` | `--runtime`（string・必須・値 `codex`・`agy`・`kiro`）: 起動するランタイム<br>`--use`（string・任意・既定 `"delegate"`・値 `review`・`delegate`）: 用途（読むだけの委譲は review）<br>`command`（array of string・任意・位置）: `--` の後に起動コマンドを指定する。{args} は `codex exec`、`agy`、`kiro-cli chat --no-interactive` の直後に置く |
+
+結果の `metrics`: 決まった項目を持たない。`items` の要素: `retired_from`（string）・`retired_to`（string）
+
 ## `ndf document-rebuild`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/document-rebuild.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/document-rebuild.result.schema.json)
@@ -165,6 +175,19 @@
 
 結果の `metrics`: 決まった項目を持たない。`items` の要素: `args`（array of string）・`kind`（string）・`reason`（string）
 
+## `ndf launch-config`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/launch-config.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/launch-config.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf launch-config approve` | `--sha256`（string・必須）: 示した承認の対象のハッシュ<br>`--request`（string・任意）: 承認のリクエストの識別子（質問で確認した場合）<br>`--candidate`（string・任意）: 反映する候補のパス |
+| `ndf launch-config draft` | 引数を受けない |
+| `ndf launch-config revoke` | `--sha256`（string・必須）: 取り消す承認の対象のハッシュ |
+| `ndf launch-config show` | `--candidate`（string・任意）: 候補のパス（draft が返したもの）<br>`--question`（string・任意・値 `approve`）: 承認の質問を作る |
+
+結果の `metrics`: `approved`（boolean）・`candidate`（string）・`cleanup_targets`（array of object）・`reflected`（boolean）・`request`（string）・`required`（boolean）・`sha256`（string）・`terminal`（string）。`items` の要素: `changes`（array of object）・`files`（array of object）・`input`（object）・`kind`（—）・`sha256`（string）・`steps`（object）・`unsandboxed`（array of string）
+
 ## `ndf loop`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/loop.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/loop.result.schema.json)
@@ -212,6 +235,21 @@
 
 結果の `metrics`: `gaps`（integer）・`issues`（integer）・`out`（string）。`items` の要素: `files`（array of object）・`files_found`（integer）・`kind`（string か null）・`number`（integer）・`public_interface`（object）
 
+## `ndf models`
+
+内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/models.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/models.result.schema.json)
+
+| 呼び方 | 引数 |
+| --- | --- |
+| `ndf models pick` | `--layer`（string・必須）: 起動の層（worker・skill・judge・seat）<br>`--name`（string・必須）: 作業の名前（worker の作業の名前・Skill の名前など）<br>`--runtime`（string・任意・既定 `"claude"`）: ランタイム（claude か codex）<br>`--unit`（string・任意）: 単位の ID（省けば割り付けない）<br>`--retry`（string・任意）: 同じ失敗への 2 回目以降の起動の理由（省けば引き上げない）<br>`--args`（boolean・任意）: CLI に渡す引数を 1 行に 1 つずつ出す（省けば結果 JSON） |
+| `ndf models report` | `--since`（string・必須）: 期間の最初の日（JST。YYYY-MM-DD）<br>`--until`（string・必須）: 期間の最後の日（JST。YYYY-MM-DD）<br>`--stage`（string・任意）: 工程（impl など。省けばすべて） |
+
+結果の `metrics`: `broken_experiment_rows`（integer）・`broken_rows`（integer）・`experiment_rows`（integer）・`kept_since`（string）・`repo`（string）・`usage_rows`（integer）。`items` の要素は次の 3 つの形のどれかである。各項目の意味は結果のスキーマにある。
+
+- pick の起動の値（1 件）: `args`（array of string）・`assign_id`（string）・`effort`（string）・`effort_source`（string）・`layer`（string）・`mode`（string）・`model_source`（string）・`name`（string）・`raised`（boolean）・`requested_model`（string）・`runtime`（string）・`stage`（string）・`unit`（string）
+- report の起動の区分（工程 × 行の指定値）ごとの値（`kind` が `launch_group`）: `cost_usd`（number）・`effort`（string）・`judge_requests`（integer）・`judge_retry_rate`（number か null）・`judge_returned`（integer）・`kind`（const "launch_group"）・`launch_count`（integer）・`mismatched`（integer）・`mode`（string）・`repo`（string）・`requested_model`（string）・`requests`（integer）・`retry_rate`（number か null）・`runtime`（string）・`seconds`（number）・`stage`（string）・`steps`（integer）・`success_rate`（number か null）・`tokens`（object）・`unpriced_launches`（integer）
+- report の実験のキー（リポジトリ × 工程 × ランタイム × 互換性のキー）の組ごとの値（`kind` が `arm`）: `arm`（integer）・`best`（number か null）・`cost_usd`（number か null）・`dropped`（—）・`dropped_until`（string）・`effort`（string）・`key`（string）・`kind`（const "arm"）・`leader`（const true）・`model`（string）・`modes`（object）・`note`（string）・`phase`（—）・`probability`（number か null）・`quality`（number か null）・`quality_interval`（null か array of number）・`repo`（string）・`roi`（number か null）・`roi_ratio`（number か null）・`runtime`（string）・`stage`（string）・`units`（integer）・`unpriced_models`（array of string）・`unpriced_units`（integer）・`verdict`（—）
+
 ## `ndf notify`
 
 内部（予告なく変えてよい）。[引数のスキーマ](../../contracts/schemas/io/notify.args.schema.json)・[結果のスキーマ](../../contracts/schemas/io/notify.result.schema.json)
@@ -234,7 +272,7 @@
 | `ndf plan queue` | `plans`（array of string・必須・位置）<br>`--then`（array of array of string・任意）<br>`--from`（array of string・任意）<br>`--resume`（boolean・任意）<br>`--fresh`（boolean・任意）<br>`--max`（integer・任意）: 同時に流すプランの本数の上限（無ければ触るファイルの重ならない組の本数まで）<br>`--queue-dir`（string・任意） |
 | `ndf plan wait` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意）<br>`--timeout`（number・任意・既定 `3000.0`） |
 
-結果の `metrics`: `gates`（integer）・`ok`（integer）・`pending`（integer）・`plans`（integer）・`production`（boolean）・`round`（integer）・`steps`（integer）・`stopped`（integer）・`waited_seconds`（number）・`waves`（integer）。`items` の要素: `cause`（object）・`detail`（string）・`gate`（boolean）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`plans`（array of string）・`presentation_path`（string）・`production`（boolean）・`reason`（string）・`routes`（object）・`run`（string）・`status`（string か null）・`step`（string か null）・`updated_at`（string か null）・`workflow`（string）
+結果の `metrics`: `gates`（integer）・`models`（object）・`ok`（integer）・`pending`（integer）・`plans`（integer）・`production`（boolean）・`round`（integer）・`steps`（integer）・`stopped`（integer）・`waited_seconds`（number）・`waves`（integer）。`items` の要素: `cause`（object）・`detail`（string）・`gate`（boolean）・`kind`（string）・`name`（string）・`number`（integer）・`path`（string）・`plans`（array of string）・`presentation_path`（string）・`production`（boolean）・`reason`（string）・`routes`（object）・`run`（string）・`status`（string か null）・`step`（string か null）・`updated_at`（string か null）・`workflow`（string）
 
 ## `ndf progress`
 
@@ -464,10 +502,10 @@
 | `ndf worker plan-edit` | `plan`（string・必須・位置）<br>`--new`（string・必須）<br>`--reason`（string・必須）<br>`--state-dir`（string・任意） |
 | `ndf worker plan-edits` | `plans`（array of string・必須・位置）<br>`--state-dir`（string・任意） |
 | `ndf worker prepare` | `--dir`（string・必須）<br>`--name`（string・必須） |
-| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意）<br>`--require-version-number`（boolean・任意） |
+| `ndf worker run` | `--kind`（string・必須）<br>`--prompt-file`（string・必須）<br>`--result-file`（string・必須）<br>`--cwd`（string・必須）<br>`--state-dir`（string・必須）<br>`--sources`（string・任意）<br>`--unit`（string・任意）<br>`--mode`（string・任意）<br>`--timeout`（number・任意）<br>`--result-dir-id`（string・任意）<br>`--require-output`（array of string・任意）<br>`--require-version-number`（boolean・任意） |
 | `ndf worker write` | `--path`（string・必須）: 書き込むファイル。書き込み先は、`ndf worker run` の `--result-file` に指定したファイルの親ディレクトリの配下に限る。`--state-dir` の指定は、書き込める範囲に影響しない。相対パスは、このコマンドを実行する作業ディレクトリから解決する。本文は標準入力に渡し、ファイルの全文を置き換える。このコマンドは、書き込み先のディレクトリが `ndf worker run` の開いたディレクトリと同じかを確かめる。`ndf worker run` は、開いたディレクトリのデバイス番号・inode 番号とパスを環境変数 `NDF_WORKER_RESULT_DIR` で worker へ渡す。このコマンドは自分で開いた書き込み先のディレクトリの番号をその値と比べ、違えば書かずに止まる（precondition）。環境変数は呼び出し元が変えられるので、呼び出し元が `ndf worker run` の起動した worker かどうかは検証しない。信頼できる呼び出し元だけが使う |
 
-結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
+結果の `metrics`: `attempts`（integer）・`attention`（integer）・`edits`（integer）・`expectation_search`（object か null）・`launch`（object）・`paths`（object）・`report`（string）。`items` の要素: `action`（string）・`at`（—）・`backup`（string）・`diff`（string か null）・`kind`（string）・`path`（string）・`plan`（string か null）・`reason`（string か null）・`result_file`（string）・`session`（string か null）・`sha`（string）・`state`（string）・`subject`（string）・`text`（—）・`words`（array of string）
 
 ## `ndf worktree`
 

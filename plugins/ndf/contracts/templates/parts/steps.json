@@ -3,7 +3,8 @@
   "steps": {
     "test": {
       "id": "test",
-      "run": ["ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "{{test_command}}"]
+      "run": ["ndf", "route", "test", "--result", "{state_dir}/test.json", "--", "{{test_command}}"],
+      "verifies": ["fix", "ci-fix", "fix-base"]
     },
     "test-repeat": {
       "id": "test-repeat",
@@ -41,7 +42,8 @@
       "probe": ["sh", "-c", "test \"$(git ls-remote -- \"$1\" \"refs/heads/$0\" | cut -f1)\" = \"$(git rev-parse HEAD)\"", "{{branch}}", "{{remote}}"],
       "exit_cause": {"1": "push_rejected"},
       "on_cause": {"push_rejected": "retry"},
-      "retry": {"push_rejected": {"attempts": 1, "interval": 30}}
+      "retry": {"push_rejected": {"attempts": 1, "interval": 30}},
+      "verifies": ["fix-push"]
     },
     "pr": {
       "id": "pr",
@@ -80,7 +82,8 @@
         "set -o pipefail; pr=$(@pr_command) && [ -n \"$pr\" ] || exit 1; out=$2; shift 2; ndf ci watch --pr \"$pr\" \"$@\" | tee \"$out\"",
         "ci", "@pr_arg", "{state_dir}/ci.json", "--budget", "{{ci_budget}}", "--required={{required}}", "--test={{tests}}"
       ],
-      "on_cause": {"test_failed": "repeat-check", "base_conflict": "base-sync"}
+      "on_cause": {"test_failed": "repeat-check", "base_conflict": "base-sync"},
+      "verifies": ["fix", "ci-fix", "fix-base"]
     },
     "repeat-check": {
       "id": "repeat-check",
@@ -96,7 +99,8 @@
       "id": "ci-local",
       "run": ["ndf", "route", "test", "--failed-from", "{state_dir}/ci.json", "--result", "{state_dir}/ci-local.json"],
       "on_cause": {"test_failed": "repeat-check"},
-      "next": "push"
+      "next": "push",
+      "verifies": ["fix", "ci-fix", "fix-base"]
     },
     "base-sync": {
       "id": "base-sync",

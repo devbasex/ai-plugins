@@ -32,15 +32,14 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
-from ndf import contracts, identity
+from ndf import contracts
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
-from ndf.contracts import facts, internal, limits, result, worker_paths
+from ndf.contracts import facts, internal, result, worker_paths
 from ndf.contracts.worker_kinds import (
     PRODUCT_VERSION,
     VALUES_FILE,
@@ -56,24 +55,33 @@ from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, issue_values, merge_pending, model, plan_runs, rebuild_values, refactor_values, stages, units_invoke
+from ndf.progress import (
+    definition,
+    issue_values,
+    merge_pending,
+    model,
+    plan_runs,
+    rebuild_values,
+    refactor_values,
+    skill_invoke,
+    stages,
+    units_invoke,
+)
 from ndf.progress.command import PROJECT_FILE, FactUnknown, ndf_settings, unreviewed_range
-from ndf.progress.plan_runs import StageResult, StageRun
+from ndf.progress.input_errors import KindInputsMissing, StageInputError, StageInputInvalid, StageInputMissing, TemplateValuesMissing  # noqa: F401  呼び手は invoke の名前で受ける
+from ndf.progress.plan_runs import StageResult, StageRun, bad_report, finished, value_errors  # noqa: F401  呼び手は invoke の名前で受ける
 from ndf.testing import scoped, weight
 
 # 作業種別と、工程の定義の call → 作業種別（plan はサブコマンド `ndf plan` の名前）
 PLAN = plan_cli.TOOL
 SKILL = "skill"
 SCRIPT = "script"
-LISTEN = "listen"
+LISTEN = plan_runs.LISTEN
 CALLS = {"ndf.plan": PLAN, "ndf.skill": SKILL, "ndf.script": SCRIPT, definition.LISTEN_CALL: LISTEN}
 # 作業種別 → 呼ぶものの名前を持つ with のキー（listen は作業を呼ばないので無い）
 NAME_ARG = {PLAN: "plan", SKILL: "skill", SCRIPT: "argv"}
 # script の作業へ入力を渡す環境変数
 INPUT_ENV = "NDF_STAGE_INPUT"
-# skill の作業の上限（Skill 1 本を回す起動は実装の工程と同じ桁）
-SKILL_LIMIT = "monitor.phase.implement"
-SKILL_SYSTEM = "工程の作業を 1 つ行い、最後に結果 JSON（統一 JSON レポート）だけを回答する。"
 ACTOR = model.WORKFLOW_ACTOR
 # 承認の回答の語（表 answers の行）。プランの承認ゲートの続きが無い承認は、プランが終わったとみなす
 APPROVED = str(facts.row(result.ANSWERS, "approved")["id"])
@@ -85,81 +93,8 @@ IMPL_PLAN_PREFIX = "impl-"
 PR_STEP = "pr"
 
 
-class StageInputError(Exception):
-    """工程の入力を文脈から渡せない。`kind` は停止理由の語、`items` は結果 JSON の項目。"""
-
-    kind = "invalid"
-
-    @property
-    def items(self) -> list[dict[str, str]]:
-        return []
-
-
-class StageInputMissing(StageInputError):
-    """工程の入力のキーがスプリントの文脈に無い。`keys` は足りないキー。"""
-
-    kind = "input_missing"
-
-    def __init__(self, keys: Sequence[str]) -> None:
-        super().__init__(f"工程の入力のキーが文脈に無い: {', '.join(keys)}")
-        self.keys = tuple(keys)
-
-    @property
-    def items(self) -> list[dict[str, str]]:
-        return [{"key": k} for k in self.keys]
-
-
-class StageInputInvalid(StageInputError):
-    """工程の入力の値が文脈のスキーマの形に合わない。`errors` は誤りの一覧。"""
-
-    kind = "invalid"
-
-    def __init__(self, errors: Sequence[str]) -> None:
-        super().__init__(f"工程の入力の形が合わない: {'; '.join(errors)}")
-        self.errors = tuple(errors)
-
-    @property
-    def items(self) -> list[dict[str, str]]:
-        return [{"error": e} for e in self.errors]
-
-
-class TemplateValuesMissing(route.RouteError):
-    """テンプレートの差し込みの値がどの出所からも決まらない。`missing` は足りない差し込みの名前 → 出所、`details` は名前 →
-    行へ足すキー（#4337 の決定 7。`rebuild` の既定を決められない理由・設定のキー・値の形）。"""
-
-    def __init__(self, template_name: str, missing: Mapping[str, str], details: Optional[Mapping[str, Mapping[str, str]]] = None) -> None:
-        listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
-        super().__init__(f"テンプレート {template_name} の差し込みの値が無い: {listed}")
-        self.missing = dict(missing)
-        given = details if details is not None else {}
-        self.details = {n: dict(given[n]) for n in self.missing if n in given}
-
-    @property
-    def items(self) -> list[dict[str, str]]:
-        return [
-            {"key": n, "source": s, **self.details[n]} if n in self.details else {"key": n, "source": s} for n, s in self.missing.items()
-        ]
-
-
-class KindInputsMissing(route.RouteError):
-    """プランの作業（`{{worker}}` の後ろの名前）が読む入力か作業場所が決まらない。`missing` は名前 → 出所。"""
-
-    def __init__(self, template_name: str, missing: Mapping[str, str]) -> None:
-        listed = ", ".join(f"{n}（{s}）" for n, s in missing.items())
-        super().__init__(f"テンプレート {template_name} の作業の入力が無い: {listed}")
-        self.missing = dict(missing)
-
-    @property
-    def items(self) -> list[dict[str, str]]:
-        return [{"key": n, "source": s} for n, s in self.missing.items()]
-
-
 # 外部のコマンドを打つ関数（argv・作業ディレクトリ・環境変数 → 終了した子プロセス）。テストが差し替える
 Runner = Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
-
-
-# Skill を回す `claude -p` を打つ関数（argv・質問・上限の秒・作業ディレクトリ → 回答）。テストが差し替える
-SkillCaller = Callable[[Sequence[str], str, float, Optional[Path]], claude.ClaudeReply]
 
 
 def stage_inputs(environ: Mapping[str, str]) -> Optional[dict[str, Any]]:
@@ -181,11 +116,6 @@ def run_command(argv: list[str], cwd: Path, env: dict[str, str]) -> subprocess.C
 
 
 # --- 引数と値の形 --------------------------------------------------------------------------
-
-
-def value_errors(values: Mapping[str, Any]) -> list[str]:
-    """文脈のキーと値の組を、スプリントの文脈のスキーマで確かめた誤り（3364-7）。"""
-    return [f"文脈の値: {e}" for e in contracts.schema_errors(dict(values), definition.CONTEXT)]
 
 
 def resolve_inputs(stage: stages.StageDef, context: Mapping[str, Any]) -> dict[str, Any]:
@@ -232,29 +162,6 @@ def _named(kind: str, args: Mapping[str, Any]) -> str:
     if not isinstance(value, str) or not value:
         raise model.Refused(f"作業種別 {kind} の with.{key} が無い")
     return value
-
-
-# --- 作業の結果 ----------------------------------------------------------------------------
-
-
-def bad_report(run: StageRun, detail: str) -> StageResult:
-    out = result.stopped(_tool(run), "bad_report", f"作業 {run.kind} {run.name} が結果 JSON を返さない: {detail}")
-    return StageResult(out, {})
-
-
-def _tool(run: StageRun) -> str:
-    return __package__.rpartition(".")[2] if run.kind == LISTEN else run.kind
-
-
-def finished(run: StageRun, report: dict[str, Any]) -> StageResult:
-    """結果 JSON から、定義したキーだけの出力を取る。設定に無いキーは捨てて `warnings` に載せる。"""
-    given = report["outputs"] if isinstance(report.get("outputs"), dict) else {}
-    kept, dropped = stages.keep_declared(run.outputs, given)
-    warnings = tuple(f"工程の定義の outputs に無いキーを捨てた: {k}" for k in dropped)
-    errs = value_errors(kept)
-    if errs:
-        return bad_report(run, "; ".join(errs))
-    return StageResult(report, kept, warnings)
 
 
 # --- 種類ごとの呼び出し ---------------------------------------------------------------------
@@ -908,33 +815,6 @@ def _call_script(run: StageRun, cwd: Path, runner: Runner) -> StageResult:
     return _from_process(run, runner(script_argv(run.args["argv"]), cwd, env))
 
 
-def skill_prompt(run: StageRun) -> str:
-    """Skill を回す質問。入力の値は文脈の形を通した JSON だけを渡す。"""
-    prompt = f"/{identity.load().prefix}{run.name}\n\n入力（JSON）: {json.dumps(run.inputs, ensure_ascii=False)}"
-    return prompt if run.notes is None else f"{prompt}\n\n変更要求の指摘:\n{run.notes}"
-
-
-def _skill_cause(failure: Optional[claude.Failure]) -> str:
-    """`claude -p` が回答を返せなかった理由 → 停止理由。理由の無い失敗は打ち直せば直りうる。"""
-    if failure is None:
-        return "transient"
-    return str(facts.value(claude.FAILURES, failure, "skill_cause"))
-
-
-def _call_skill(run: StageRun, cwd: Path, call_claude: SkillCaller) -> StageResult:
-    schema = contracts.load_json(contracts.schema_path("result"))
-    call = claude.ClaudeCall(system=SKILL_SYSTEM, permission=claude.Permission.FULL, json_schema=schema)
-    argv, notice = claude.claude_launch(call, cwd=cwd)
-    reply = call_claude(argv, skill_prompt(run), limits.seconds(SKILL_LIMIT), cwd)
-    if not reply.ok:
-        kind = _skill_cause(reply.failure)
-        got = StageResult(result.stopped(SKILL, kind, f"Skill {run.name} を回せない: {reply.error}"), {})
-    else:
-        report = result.received(reply.answer)
-        got = finished(run, report) if report is not None else bad_report(run, "回答が結果 JSON の形に合わない")
-    return got if notice is None else replace(got, warnings=(*got.warnings, notice))
-
-
 def invoke(
     run: StageRun,
     cwd: Path,
@@ -942,7 +822,7 @@ def invoke(
     answer: Optional[str] = None,
     runner: Runner = run_command,
     *,
-    call_claude: SkillCaller = claude.call_claude,
+    call_claude: skill_invoke.SkillCaller = claude.call_claude,
 ) -> StageResult:
     """作業を種類ごとに呼ぶ。`work_dir` はプランの実行の保存先、`answer` はプランの承認ゲートの回答。
 
@@ -963,7 +843,7 @@ def invoke(
         return StageResult(result.stopped(run.kind, "precondition", f"作業場所 {location} が無い"), {})
     if run.kind == SCRIPT:
         return _call_script(run, location, runner)
-    return _call_skill(run, location, call_claude)
+    return skill_invoke.call_skill(run, location, call_claude)
 
 
 def _units_stage(run: StageRun, cwd: Path, work_dir: Path, runner: Runner) -> Optional[StageResult]:

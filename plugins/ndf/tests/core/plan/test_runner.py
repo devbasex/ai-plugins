@@ -474,3 +474,8 @@ def _next_refuses_an_actor_of_the_wrong_shape(capsys):
 def test_answer_record_scenes(request, scene, values):
     """承認ゲートの回答の記録と提示の識別子の場面（#4409 の決定 7）。"""
     scenes.play(request, scene, values)
+
+
+def test_step_env_names_the_plan_run_the_step_and_its_nth_run():
+    assert runner.plan_step_env("run-1", "s", 3) == {"NDF_PLAN_RUN_ID": "run-1", "NDF_STEP_ID": "s", "NDF_STEP_ATTEMPT": "3"}
+    assert runner.plan_step_env(None, "s", 1) == {"NDF_STEP_ID": "s", "NDF_STEP_ATTEMPT": "1"}

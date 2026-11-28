@@ -202,7 +202,7 @@ jobs:
           cat "$RUNNER_TEMP"/ok-tools/ok-tools-*.txt | PYTHONPATH=src uv run --frozen --project . python -c '
           import sys
           from ndf import cli
-          missing = sorted(set(cli.COMMANDS) - {line.strip() for line in sys.stdin if line.strip()})
+          missing = sorted(cli.RESULT_COMMANDS - {line.strip() for line in sys.stdin if line.strip()})
           if missing:
               sys.exit("ok の出力が確かめられない副命令: " + ", ".join(missing))
           '

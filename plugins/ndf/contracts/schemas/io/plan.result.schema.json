@@ -29,6 +29,20 @@
           "type": "integer",
           "description": "流したステップの数（next）"
         },
+        "models": {
+          "type": "object",
+          "description": "ステップの id ごとの、worker の起動の指定した値と実際のモデル（next の終わった回。起動の値を持つステップがあるときだけ）",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "name": {"type": "string", "description": "作業の名前"},
+              "requested_model": {"type": "string", "description": "指定したモデル（指定しなければ無い）"},
+              "effort": {"type": "string", "description": "指定した effort（指定しなければ無い）"},
+              "model": {"type": "string", "description": "実際のモデル（分かれば）"}
+            }
+          }
+        },
         "plans": {
           "type": "integer",
           "description": "プランの数（wait・queue・check）"
