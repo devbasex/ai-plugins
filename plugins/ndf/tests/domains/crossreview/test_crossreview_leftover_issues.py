@@ -160,10 +160,10 @@ def test_identity_folds_spaces_and_case_and_reads_the_whole_text() -> None:
     assert leftover_decide.identity(7, "alpha betb") != same != leftover_decide.identity(8, "alpha beta")
 
 
-def test_issue_parts_ends_with_the_mark_and_omits_empty_sections() -> None:
-    title, body = leftover_decide.issue_parts("あ" * 100, "", "", [PR_URL], "abc")
+def test_issue_parts_omits_empty_sections() -> None:
+    title, body = leftover_decide.issue_parts("あ" * 100, "", "", [PR_URL])
     assert title == "あ" * leftover_decide.TITLE_CHARS
-    assert PR_URL in body and body.rstrip().endswith("cross-review-leftover abc -->")
+    assert PR_URL in body and leftover_decide.issue_mark("abc").endswith("cross-review-leftover abc -->")
     assert "起きること" not in body and "場所" not in body
 
 
@@ -173,7 +173,8 @@ def _listed(body: str, **other: Any) -> Listed:
 
 def test_issue_3780_matches_finding_needs_the_mark_and_the_url_outside_quotes() -> None:
     text = "値を落とす\n\n```\n閉じていないコード"
-    _, body = leftover_decide.issue_parts(text, "消える", "a.py:5", [PR_URL], "abc")
+    _, body = leftover_decide.issue_parts(text, "消える", "a.py:5", [PR_URL])
+    body = f"{body.rstrip()}\n\n{leftover_decide.issue_mark('abc')}\n"
     assert leftover_decide.matches_finding(_listed(body), "abc", 7)
     assert not leftover_decide.matches_finding(_listed(body), "abc", 70)
     mark = body.rstrip().splitlines()[-1]
@@ -264,10 +265,13 @@ def test_the_comments_are_read_only_up_to_the_record() -> None:
 def test_the_marks_survive_an_account_named_like_them() -> None:
     github = FakeGitHub()
     for _ in range(2):
-        run = Run(github)
+        run = Run(github, _row(text="<!-- ndf: の形の引用で値を落とす"))
         run.port.publisher = publish.Publisher(github, frozenset({"ndf"}))
         assert run.go() == [] and run.row[Filed.URL]
     assert github.created() == 1
+    # 伏せないのは NDF が足した目印だけで、指摘の本文の同じ形は伏せる
+    made = github.issues[0]
+    assert "<!-- ndf:" not in made["title"] and made["body"].count("<!-- ndf:") == 1
 
 
 def test_recorded_issues_are_read_together() -> None:

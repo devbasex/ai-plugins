@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, NamedTuple, Optional
 
@@ -156,7 +156,8 @@ def identity(origin_pr: int, text: str) -> str:
     return hashlib.sha256(f"{origin_pr}\n{normalized(text)}".encode()).hexdigest()[:12]
 
 
-def _issue_mark(ident: str) -> str:
+def issue_mark(ident: str) -> str:
+    """起票する Issue の本文の最後に置く目印の行。"""
     return f"<!-- {_ENTRY}:cross-review-leftover {ident} -->"
 
 
@@ -174,14 +175,13 @@ def _fenced(part: str) -> str:
     return part
 
 
-def issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str], ident: str) -> tuple[str, str]:
-    """起票の題と本文。`text`・`impact`・`place` は全文に伏せ字を当てた後の値で、ここでは切り出すだけで伏せない
+def issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str]) -> tuple[str, str]:
+    """起票の題と、目印（`issue_mark`）を除く本文。`text`・`impact`・`place` は全文に伏せ字を当てた後の値で、ここでは切り出すだけで伏せない
     （伏せる前に切り出すと、途中で切れた秘密が秘密の形に当たらず公開される）。"""
     title = " ".join(text.split())[:TITLE_CHARS]
     parts = [_fenced(text.strip())]
     parts += [f"## {head}\n\n{_fenced(value.strip())}" for head, value in (("起きること", impact), ("場所", place)) if value.strip()]
     parts.append("## Pull Request\n\n" + "\n".join(f"- {url}" for url in pr_urls))
-    parts.append(_issue_mark(ident))
     return title, "\n\n".join(parts) + "\n"
 
 
@@ -211,20 +211,21 @@ def matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool:
     """検索か一覧で読んだ Issue がこの指摘を扱うものか。目印が最後の行で、引用とコードブロックの外に元の PR の URL がある。
     目印を含むだけの Issue は使わない。指摘の本文は比べない（伏せ字の結果は実行する環境で変わる。本文は目印の識別値が表す）。
     URL は伏せ字が変えない末尾の `/pull/<番号>` で見る。"""
-    if listed.is_pull or _final_line(listed.body) != _issue_mark(ident):
+    if listed.is_pull or _final_line(listed.body) != issue_mark(ident):
         return False
     return re.search(rf"/pull/{int(origin_pr)}(?!\d)", _prose(listed.body)) is not None
 
 
 def names_finding(listed: Listed, ident: str) -> bool:
     """起票の記録にある URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。"""
-    return not listed.is_pull and _issue_mark(ident) in listed.body
+    return not listed.is_pull and issue_mark(ident) in listed.body
 
 
-def record_body(entries: Mapping[str, Mapping[str, Any]]) -> str:
-    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at` と Issue の `url`）。"""
-    payload = json.dumps({k: dict(v) for k, v in entries.items()}, sort_keys=True)
-    note = "cross-review が起票を試みた指摘の記録（同じ指摘を 2 件起票しないために読む。書き換えない）。"
+def record_body(entries: Mapping[str, Mapping[str, Any]], redact: Callable[[str], str] = str) -> str:
+    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at` と Issue の `url`）。`redact`（伏せ字）は中身にだけ当て、
+    目印は当てた後に付ける（伏せると読み戻せない）。"""
+    payload = redact(json.dumps({k: dict(v) for k, v in entries.items()}, sort_keys=True))
+    note = redact("cross-review が起票を試みた指摘の記録（同じ指摘を 2 件起票しないために読む。書き換えない）。")
     return f"{RECORD_MARK}\n{note}\n\n{_ENTRIES_MARK}{payload} -->"
 
 

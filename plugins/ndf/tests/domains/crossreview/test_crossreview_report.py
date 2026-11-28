@@ -11,7 +11,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import publish
-from ndf.adapters.github import GitHubError
+from ndf.adapters.github import GitHubError, Viewer
 from ndf.contracts import result
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview import journal, report_decide, store, threads, verify_decide
@@ -251,21 +251,17 @@ class _ThreadsHub(_RestHub):
         nodes = [node(1, opening, "ndf-bot"), node(2, opening, "maintainer"), node(3, "人の指摘", "alice")]
         return {"pullRequest": {"reviewThreads": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes}}}
 
-    def graphql(self, query, variables):
-        if query == threads.VIEWER:
-            self.viewer_reads = getattr(self, "viewer_reads", 0) + 1
-            return {"viewer": {"login": "ndf-bot"}}
-        return super().graphql(query, variables)
+    def viewer(self):
+        return Viewer("ndf-bot", 1)
 
 
 def test_github_port_marks_only_threads_written_by_the_viewer() -> None:
     """PR 3944 の r1-3: cross-review の書式のスレッドは、最初のコメントの書き手が今の実行の認証の login（viewer）と同じときだけ
-    信頼する。書き込みの権限を持つ別の人が同じ書式で書いたものも信頼しない。viewer は 1 回だけ読む。"""
+    信頼する。書き込みの権限を持つ別の人が同じ書式で書いたものも信頼しない。"""
     hub = _ThreadsHub()
     port = threads.GitHubPort(hub, _Publisher(), 7, _Refused)
     assert [(t.comment, t.trusted) for t in port.open_threads()] == [(1, True), (2, False), (3, False)]
     port.open_threads()
-    assert hub.viewer_reads == 1
 
 
 def test_rewound_pr_opens_threads_only_for_open_findings() -> None:

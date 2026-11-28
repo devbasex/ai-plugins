@@ -78,7 +78,7 @@ class Port(Protocol):
 
     def issues(self, urls: Sequence[str]) -> dict[str, Optional[Listed]]: ...
 
-    def create(self, title: str, body: str) -> str: ...
+    def create(self, title: str, body: str, mark: str) -> str: ...
 
 
 def primary_of(main: Optional[Path]) -> tuple[Optional[str], Optional[str]]:
@@ -309,7 +309,7 @@ class _Filing:
 
     def write(self) -> str:
         """起票の記録を書き、GitHub が記録した更新時刻を返す。"""
-        body = leftover_decide.record_body(self.entries)
+        body = leftover_decide.record_body(self.entries, lambda text: self.port.redact(text)[0])
         if self.record_id is None:
             self.record_id, at = self.port.post(self.ref.origin_pr, body)
         else:
@@ -335,9 +335,9 @@ class _Filing:
 
     def create(self, idents: Sequence[str], at: str) -> None:
         for ident in idents:
-            title, body = leftover_decide.issue_parts(*self.texts[ident], self.urls, ident)
+            title, body = leftover_decide.issue_parts(*self.texts[ident], self.urls)
             try:
-                url = self.port.create(title, body)
+                url = self.port.create(title, body, leftover_decide.issue_mark(ident))
             except Exception as exc:  # noqa: BLE001 ネットワーク: 指摘ごとに失敗を残し、ほかの候補を続ける
                 self.fail(ident, _reason(exc))
                 if _refused(exc):
@@ -457,8 +457,8 @@ def _listed_node(node: Mapping[str, Any]) -> Listed:
 
 
 class GitHubIssues:
-    """GitHub の API で起票を読み書きする `Port`。書く本文は `publish.Publisher` の検査を通し、書き込みは二次レート制限なら
-    待って打ち直す（`threads.patient`）。"""
+    """GitHub の API で起票を読み書きする `Port`。Issue は `publish.Publisher` の検査を通し、記録のコメントは呼び手が
+    中身を検査した本文を書く。書き込みは二次レート制限なら待って打ち直す（`threads.patient`）。"""
 
     def __init__(
         self,
@@ -512,8 +512,7 @@ class GitHubIssues:
         return _comment(self.hub.rest("GET", f"/repos/{self.hub.repo}/issues/comments/{int(comment_id)}"))
 
     def _send(self, method: str, path: str, body: str) -> tuple[int, str]:
-        (safe,) = self.redact(body)
-        made = self._write(lambda: self.hub.rest(method, f"/repos/{self.hub.repo}/{path}", {"body": safe}))
+        made = self._write(lambda: self.hub.rest(method, f"/repos/{self.hub.repo}/{path}", {"body": body}))
         return int(made["id"]), str(made["updated_at"])
 
     def post(self, pr: int, body: str) -> tuple[int, str]:
@@ -553,5 +552,5 @@ class GitHubIssues:
         read = self.hub.nodes(numbers.values(), "issue", ISSUE_FIELDS) if numbers else {}
         return {u: _listed_node(read[numbers[u]]) if u in numbers and read[numbers[u]] else None for u in urls}
 
-    def create(self, title: str, body: str) -> str:
-        return str(self._write(lambda: self.publisher.create_issue(title, body)).url)
+    def create(self, title: str, body: str, mark: str) -> str:
+        return str(self._write(lambda: self.publisher.create_issue(title, body, mark=mark)).url)
