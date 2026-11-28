@@ -1,7 +1,7 @@
 """工程「実装」を実装計画のレビューの単位ごとに流す処理（docs/specifications/ndf-implement-stage-review-units.md）。
 
 ここにあるのは、開始前の確かめ（`prepare`）、打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、
-単位を順に流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR）である。
+単位を流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR。流す順と並列は `units_flow`）である。
 開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた単位のファイルか実装計画の単位の見出しがあるかで
 経路を決める。分け方の承認が要るスプリントは常に単位の経路にする。単位の経路なら、手元をリモートに揃え、並びを読んで `units.json` に書く。
 単位のファイルがあるか承認が要れば、承認の記録と照らし、単位のファイルを読んで確かめてから、確かめたコミットをリモートへ送る
@@ -31,7 +31,7 @@ from ndf import contracts, identity
 from ndf.adapters import github, github_pulls
 from ndf.adapters.git import HEADS, Git, mask_urls
 from ndf.cli import ndf_command
-from ndf.contracts import facts, result, worker_paths
+from ndf.contracts import facts, named_cap, result, worker_paths
 from ndf.core import branch_strategy, json_pointer, route
 from ndf.core.issue_docs import plan_issues
 from ndf.core.plan import files as plan_files
@@ -39,7 +39,7 @@ from ndf.core.plan import inputs_decide, units_files
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup, unit_key
-from ndf.progress import issue_values, plan_runs, refactor_values
+from ndf.progress import issue_values, plan_runs, refactor_values, units_flow
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
 from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
 from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
@@ -112,11 +112,13 @@ class Resume(NamedTuple):
 class Ports(NamedTuple):
     """単位を流す処理が外へ出す呼び出し（`invoke` が渡し、テストが差し替える）。
 
-    `call_plan` は呼び出しを保存先でプランとして流し、`command` は argv を作業ディレクトリと環境で打つ。
+    `call_plan` は呼び出しを保存先でプランとして流し、`command` は argv を作業ディレクトリと環境で打つ。`failure` は
+    単位を流す間の例外を停止の結果 JSON にする（分けられない例外は None）。`call_plan` だけが並列に呼ばれる。
     """
 
     call_plan: Callable[[StageRun, Path], StageResult]
     command: Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
+    failure: Callable[[Exception], Optional[dict[str, Any]]] = lambda exc: None
 
 
 class Context(NamedTuple):
@@ -518,7 +520,7 @@ def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
     マージだけを打ち直すのは、マージが CI の待ち（マージキューの待ちを含む）か基盤の待ちで止まった回である。HEAD が変わった単位を
     手元のテストから流し直すのは、テストより後のステップで止まった回で、作業・受け入れ条件・テスト・修正で止まった回は含めない。
     """
-    merge_only = {"ci_pending", "infra_wait"}
+    merge_only = set(units_flow.WAIT_KINDS)
     before_test = {"work", "acceptance", "test", "test-repeat", "fix"}
     if not state.ran:
         return Resume("run", False, None)
@@ -539,59 +541,55 @@ def resume_of(state: RoundState, head: str, local_tests: bool) -> Resume:
 
 
 def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optional[StageResult]:
-    """単位を表の順に流し、すべてマージしたらスプリントの PR を開く。これまでの経路なら None。
+    """単位を依存の順に並列で流し、すべてマージしたらスプリントの PR を開く。これまでの経路なら None。
 
     並びは `units.json` から読み、無ければ `prepare` で作る。マージ済みの単位は開始時に 1 回読んだ一覧で飛ばす（`already_merged`）。
-    単位が止まれば後の単位を始めず、止まった単位の名前・課題・PR の番号・理由を結果に持たせる（受け入れ条件 5）。
-    スプリントの作業場所は、スプリントの PR を開く直前に最後の単位の PR のマージコミットまで進める。前の実行でマージされた単位
-    （マージキューの待ちで止まった後にマージされたもの、マージの後の取得に失敗したもの）も、打ち直しで同じように進む。
+    止まった単位に依存する単位は始めず、止まった単位の名前・課題・PR の番号・理由を結果に持たせる（受け入れ条件 5）。同時に流す
+    本数の上限は `named_cap` が読む値である。担当タスクの本文を読むコミットを持たない並び（実装計画の表）は、順に 1 つずつ流す。
+    スプリントの作業場所は、スプリントの PR を開く直前に最後にマージした単位のマージコミットまで進める。前の実行でマージされた
+    単位（マージキューの待ちで止まった後にマージされたもの、マージの後の取得に失敗したもの）も、打ち直しで同じように進む。
     """
     held = plan_files.read_json(work_dir / UNITS_FILE)
     found = _held_lineup(held) if held is not None else prepare(run, work_dir, cwd)
     if found is None:
         return None
     ctx = _unit_context(run, work_dir, cwd, found)
-    # 単位の名前は課題をまたいで重なりうるので、ブランチは単位ごとに求める（`lineup` は代表の課題と名前の組で重複を見る）
-    pairs = [(u, unit_branch(ctx.branch, u)) for u in found.units]
-    hub = github.GitHub(ctx.repo, github.client())
-    merged = github_pulls.merged_pulls(hub, [b for _, b in pairs], ctx.branch)
-    items: list[dict[str, Any]] = []
-    landed: Optional[github_pulls.MergedPull] = None
-    for unit, branch in pairs:
-        if branch in merged:
-            landed = merged[branch]
-            items.append(_unit_item(unit, landed.number, "already_merged"))
-            continue
-        try:
-            item, landed = _one_unit(ctx, unit, branch, ports)
-        except UnitsStopped as exc:
-            return _unit_stopped(ctx, items, unit, branch, exc)
-        items.append(item)
-    last = pairs[-1][1] if pairs else None
-    return _after_units(ctx, items, ports, lambda: _last_unit_pull(hub, ctx, last, landed))
-
-
-def _last_unit_pull(
-    hub: github.GitHub, ctx: Context, branch: Optional[str], landed: Optional[github_pulls.MergedPull]
-) -> Optional[github_pulls.MergedPull]:
-    """最後の単位の PR（マージコミットを持つ）。単位が無ければ None。
-
-    開始時の一覧かマージの応答がマージコミットを持てば、それを使う。持たないときだけ GitHub へ読み直す。読み直しの失敗は、
-    打ち直せば通りうるもの（不達・5xx・上限）を transient、ほかを precondition にし、待つ秒を持たせたまま単位の停止にする。
-    """
-    if branch is None or landed is None:
-        return None
-    if landed.merge_sha:
-        return landed
     try:
-        found = github_pulls.merged_pulls(hub, [branch], ctx.branch)
-    except github.GitHubError as exc:
-        kind = "transient" if exc.passing else "precondition"
-        detail = f"単位のブランチ {branch} の、{ctx.branch} へマージ済みの PR を GitHub から読めない: {exc}"
-        raise UnitsStopped(kind, detail, retry_after=exc.retry_after) from exc
-    if branch not in found:
-        raise UnitsStopped("precondition", f"単位のブランチ {branch} の、{ctx.branch} へマージ済みの PR を GitHub から読めない")
-    return found[branch]
+        limit = named_cap.read(os.environ, identity.load().state_dir).value
+    except named_cap.NamedCapError as exc:
+        raise UnitsStopped("invalid", f"同時に流す単位の本数の上限を読めない: {exc}") from None
+    # 単位の名前は課題をまたいで重なりうるので、ブランチは単位ごとに求める（`lineup` は代表の課題と名前の組で重複を見る）
+    branches = {units_flow.key_of(u): unit_branch(ctx.branch, u) for u in found.units}
+    hub = github.GitHub(ctx.repo, github.client())
+    merged = github_pulls.merged_pulls(hub, list(branches.values()), ctx.branch)
+    done = {k: merged[b] for k, b in branches.items() if b in merged}
+
+    def failed(unit: Unit, exc: Exception) -> UnitsStopped:
+        if isinstance(exc, UnitsStopped):
+            return exc
+        report = ports.failure(exc)
+        if report is None:
+            raise exc
+        return _unit_stop_of(report, "単位を流せない")
+
+    order = units_flow.Order(found.units, frozenset(done), chained=not found.source)
+    ops = units_flow.Ops(lambda u: _start_unit(ctx, u, branches[units_flow.key_of(u)], ports), failed)
+    flowed = units_flow.flow(order, ops, limit)
+    items = dict(flowed.items)
+    for unit in found.units:
+        key = units_flow.key_of(unit)
+        if key in done:
+            items[key] = units_flow.unit_item(unit, done[key].number, "already_merged")
+    if flowed.failures:
+
+        def pr_of(unit: Unit) -> Optional[int]:
+            return _pr_number(round_state(ctx.work_dir / UNITS_DIR / branches[units_flow.key_of(unit)]).round_dir)
+
+        return units_flow.stopped_stage(found.units, flowed, items, pr_of, {"unit_ci": ctx.unit_ci})
+    ordered = [items[units_flow.key_of(u)] for u in found.units]
+    landed = [(branches[k], pull) for k, pull in done.items()]
+    landed += [(branches[k], pull) for k, pull in zip(flowed.items, flowed.pulls)]
+    return _after_units(ctx, ordered, ports, lambda: units_flow.merged_pulls_of(hub, ctx.branch, landed))
 
 
 def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
@@ -644,33 +642,38 @@ def _review_command(project: Mapping[str, Any], base: str) -> tuple[str, ...]:
     return tuple(route.review_command("impl", base))
 
 
-def _unit_item(unit: Unit, pr: Optional[int], status: str) -> dict[str, Any]:
-    return {"kind": "unit", "name": unit.name, "issue": unit.issue, "pr": pr, "status": status}
-
-
-def _one_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> tuple[dict[str, Any], github_pulls.MergedPull]:
-    """単位 1 つを、作業場所の用意 → 打ち直しの判定 → スプリントブランチの HEAD のマージ → `impl` → マージの順に流す。
-
-    結果の項目と、マージした PR（マージの応答にマージコミットが無ければ `merge_sha` は空）を返す。
+def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_flow.Started:
+    """単位 1 つの、作業場所の用意 → 打ち直しの判定 → スプリントブランチの HEAD のマージまでを行い、`impl` の呼び出しと、
+    その後のマージを返す。
 
     マージだけを打ち直す判定はスプリントブランチをマージする前の HEAD で行う（マージするとレビューした HEAD と合わなくなる）。
     """
     worktree = unit_worktree(ctx, branch, ports)
     state = round_state(ctx.work_dir / UNITS_DIR / branch)
     g = Git(worktree)
+    call = None
     round_dir = state.round_dir
     if resume_of(state, g.rev_parse("HEAD"), ctx.local_tests).action != "merge":
         include_sprint(ctx, worktree)
         resume = resume_of(state, g.rev_parse("HEAD"), ctx.local_tests)
         round_dir = _next_round(state) if resume.new_round else state.round_dir
-        got = ports.call_plan(unit_run(ctx, unit, worktree, round_dir, resume.start), round_dir)
-        _write_record(round_dir, STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
-        if got.status != result.OK:
-            raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
-    report = merge_unit(ctx, branch, worktree, round_dir, ports)
-    number = _pr_number(round_dir)
-    assert number is not None, "merge_unit は PR の番号が無ければマージせずに止まる"
-    return _unit_item(unit, number, "merged"), github_pulls.MergedPull(number, _merge_sha(report))
+        planned = unit_run(ctx, unit, worktree, round_dir, resume.start)
+
+        def call() -> StageResult:
+            return ports.call_plan(planned, round_dir)
+
+    def land(got: Optional[StageResult]) -> tuple[dict[str, Any], github_pulls.MergedPull]:
+        """マージした PR（マージの応答にマージコミットが無ければ `merge_sha` は空）を返す。"""
+        if got is not None:
+            _write_record(round_dir, STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
+            if got.status != result.OK:
+                raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
+        report = merge_unit(ctx, branch, worktree, round_dir, ports)
+        number = _pr_number(round_dir)
+        assert number is not None, "merge_unit は PR の番号が無ければマージせずに止まる"
+        return units_flow.unit_item(unit, number, "merged"), github_pulls.MergedPull(number, _merge_sha(report))
+
+    return units_flow.Started(call, land)
 
 
 def _merge_sha(report: Mapping[str, Any]) -> str:
@@ -705,24 +708,8 @@ def _unit_stop_of(report: Mapping[str, Any], what: str, note: str = "") -> Units
     return UnitsStopped(kind, f"{what}: {detail}{note}", retry_after=float(wait) if isinstance(wait, (int, float)) else None)
 
 
-def _unit_stopped(ctx: Context, items: list[dict[str, Any]], unit: Unit, branch: str, exc: UnitsStopped) -> StageResult:
-    """単位で止まった結果。工程のステートマシンは `cause` だけを残すので、単位の名前と理由は説明の文に書く。"""
-    pr = _pr_number(round_state(ctx.work_dir / UNITS_DIR / branch).round_dir)
-    where = f"単位 {unit.name}（課題 #{unit.issue}{f'、PR #{pr}' if pr is not None else ''}）"
-    row = {**_unit_item(unit, pr, "stopped"), "reason": exc.detail}
-    report = result.stopped(
-        plan_runner.TOOL,
-        exc.kind,
-        f"{where}で止まった: {exc.detail}",
-        retry_after=exc.retry_after,
-        items=[*items, row],
-        metrics={"unit_ci": ctx.unit_ci},
-    )
-    return StageResult(report, {})
-
-
 def _after_units(
-    ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Callable[[], Optional[github_pulls.MergedPull]]
+    ctx: Context, items: list[dict[str, Any]], ports: Ports, landed: Callable[[], Sequence[github_pulls.MergedPull]]
 ) -> StageResult:
     """すべての単位がマージ済みになった後に、スプリントの PR を開いた結果。開けなければ止まった単位を持たない `stopped`。
 
@@ -918,8 +905,8 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     return report
 
 
-def sprint_pr(ctx: Context, ports: Ports, landed: Optional[github_pulls.MergedPull]) -> StageResult:
-    """スプリントの作業場所を最後の単位のマージコミット（`landed`）まで進め、リモートのスプリントブランチの HEAD と同じことを
+def sprint_pr(ctx: Context, ports: Ports, landed: Sequence[github_pulls.MergedPull]) -> StageResult:
+    """スプリントの作業場所を最後にマージした単位のマージコミット（`landed` のうち最も先のもの）まで進め、リモートのスプリントブランチの HEAD と同じことを
     確かめてから、テンプレート `pr` を push のステップなしで流す。
 
     進めるのは、自分でマージした単位の結果までである。リモートの HEAD がそれと違えば、それ以上は進めず、push もせずに止める。
@@ -979,22 +966,25 @@ def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
     )
 
 
-def _catch_up_to(g: Git, ctx: Context, landed: Optional[github_pulls.MergedPull]) -> str:
-    """スプリントの作業場所が単位のマージコミットの祖先なら、そこまで fast-forward で進め、進めた後の HEAD を返す。
+def _catch_up_to(g: Git, ctx: Context, landed: Sequence[github_pulls.MergedPull]) -> str:
+    """スプリントの作業場所を、単位のマージコミットのうち手元の HEAD から最も先のものまで fast-forward で進め、進めた後の
+    HEAD を返す。並列に流すとマージの順は並びと違いうるので、祖先の関係で選ぶ。
 
-    マージコミットを手元で読めないか、手元がその祖先でなければ進めない（違いは呼び手が利用者に知らせる）。進める直前に、
+    手元で読めるマージコミットが無いか、手元がその祖先でなければ進めない（違いは呼び手が利用者に知らせる）。進める直前に、
     作業場所が今もスプリントブランチにいることを確かめる（別のブランチをスプリントのマージ結果まで進めない）。
     """
     head = g.rev_parse("HEAD")
-    if landed is None:
-        return head
-    sha = landed.merge_sha
-    if not sha or sha == head or g.commit_or_none(sha) is None or not g.is_ancestor(head, sha):
+    target, number = head, 0
+    for pull in landed:
+        sha = pull.merge_sha
+        if sha and sha != target and g.commit_or_none(sha) is not None and g.is_ancestor(target, sha):
+            target, number = sha, pull.number
+    if target == head:
         return head
     _check_sprint_branch(g, ctx)
-    moved = g.merge_ff(sha)
+    moved = g.merge_ff(target)
     if moved.returncode != 0:
         raise UnitsStopped(
-            "precondition", f"スプリントの作業場所を PR #{landed.number} のマージ結果へ進められない: {mask_urls(moved.stderr.strip())}"
+            "precondition", f"スプリントの作業場所を PR #{number} のマージ結果へ進められない: {mask_urls(moved.stderr.strip())}"
         )
     return g.rev_parse("HEAD")
