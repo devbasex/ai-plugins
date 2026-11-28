@@ -283,12 +283,20 @@ def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post, *, re
 
 
 def _note_posting(conn: Any, v: run.View, q: Question, a: Answer, seen: Target) -> Optional[int]:
-    """本番へ反映される承認は、証跡を投稿する前に事象へ記録する（`approval_decide.stage_revocations` が読む）。
-    追記した事象の番号を返し、ほかの回答は何も書かずに None。呼び手は証跡を投稿する前にトランザクションを確定する。"""
+    """証跡を投稿する回答は、投稿する前に事象へ記録する。本番へ反映される承認は取り消す対象
+    （`approval_decide.stage_revocations`）を、却下と変更要求は先の承認を数えないこと（`approval_decide.counted_approval`）を
+    残す。投稿の後の確定に失敗しても残る。追記した事象の番号を返し、ほかの回答は何も書かずに None。呼び手は証跡を投稿する
+    前にトランザクションを確定する。"""
     target = seen.binding()
-    if target is None or a.value != run.APPROVED or not seen.production:
+    if target is None or a.value not in _TRAIL_ANSWERS:
         return None
-    payload = {"target": list(target), "record": presented_id(replace(q, target=seen))}
+    record = presented_id(replace(q, target=seen))
+    if _TRAIL_ANSWERS[a.value] == approval_words.REJECTED:
+        payload: dict[str, Any] = {"rejecting": q.gate, "record": record}
+    elif seen.production:
+        payload = {"target": list(target), "record": record}
+    else:
+        return None
     draft = model.EventDraft(APPROVAL_POSTING, run.CONDUCTOR, q.stage, payload=payload, rev=v.rev)
     return store.append_events(conn, v.machine_id, [draft], v.events[-1].seq)[-1]
 
@@ -347,8 +355,8 @@ def _begin_answer(
 ) -> tuple[_Checked, Optional[str], int, Optional[tuple[list[int], Optional[str]]]]:
     """回答の 1 つ目のトランザクション。確かめを通った回答、証跡の担い手、回答を書くときに期待する事象の番号、書いた結果を返す。
 
-    証跡を投稿しない回答（担い手が None）はここで書く。投稿する回答は書かず（結果は None）、本番へ反映される承認なら
-    投稿前の記録だけを追記する。"""
+    証跡を投稿しない回答（担い手が None）はここで書く。投稿する回答は書かず（結果は None）、投稿前の記録だけを追記する
+    （`_note_posting`）。"""
     got, by = _check_answer(conn, v, a, observe, root, text)
     last = v.events[-1].seq if v.events else 0
     if by is None:

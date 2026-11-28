@@ -69,9 +69,14 @@ def latest_answer(rows: Sequence[model.Event], gate: Optional[str], after: int) 
 
 
 def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:
-    """対象を読まずに決まる承認の候補。境界より後の最新の回答が、数える承認でなければ None。"""
+    """対象を読まずに決まる承認の候補。境界より後の最新の回答が、数える承認でなければ None。
+
+    その回答の後に却下か変更要求の投稿を試みた記録があれば None。PR に却下が載っていて回答の確定だけが失敗した可能性がある。"""
     found = latest_answer(rows, gate, approval_boundary(rows, gate_step))
     if found is None:
+        return None
+    posting = (event_payload(ev) for ev in rows if ev.seq > found.seq and ev.draft.kind == APPROVAL_POSTING)
+    if any("rejecting" in held and held["rejecting"] == gate for held in posting):
         return None
     p = event_payload(found)
     return None if p.get("answer") != invoke.APPROVED or closes_only(p) or model.mvv_answer_void(p, gate) else found
@@ -165,7 +170,9 @@ def _unrecorded(rows: Sequence[model.Event]) -> list[tuple[merge_approval.MergeT
     answered = (event_payload(ev) for ev in rows if ev.draft.kind == ANSWERED)
     recorded = {_record_of(p) for p in answered if p.get("answer") == invoke.APPROVED}
     posted = (event_payload(ev) for ev in rows if ev.seq > cut and ev.draft.kind == APPROVAL_POSTING)
-    return [(merge_approval.MergeTarget(*p["target"]), p["record"]) for p in posted if p["record"] not in recorded]
+    # 却下と変更要求の投稿前の記録（`rejecting`）は、取り消す承認ではない
+    approvals = (p for p in posted if "rejecting" not in p)
+    return [(merge_approval.MergeTarget(*p["target"]), p["record"]) for p in approvals if p["record"] not in recorded]
 
 
 def stage_revocations(v: View, stage: str) -> list[merge_approval.Revocation]:

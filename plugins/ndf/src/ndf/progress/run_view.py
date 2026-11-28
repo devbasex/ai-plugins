@@ -35,7 +35,7 @@ STEP_EVENT = _event_kind("step_recorded")
 ANSWERED = _event_kind("answered")
 FAILED = _event_kind("failed")
 FINISHED = _event_kind("finished")
-# 本番へ反映される承認の証跡を PR へ投稿する前の記録（回答の確定に失敗しても、取り消す承認を指せる）
+# 証跡を PR へ投稿する前の記録（回答の確定に失敗しても、承認は取り消す対象を指せ、却下は先の承認を数えない）
 APPROVAL_POSTING = _event_kind("approval_posting")
 # 工程を開き直す事象。これより前の結果・出力・承認は、記録に残るが今の判断に使わない
 REOPENED = stages.REOPENED_EVENT

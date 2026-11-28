@@ -199,7 +199,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 - `committed_reopen(v, *, trigger, later, reason) -> list[Event]`（`progress/reopening.py`）は、送り直しの判定に使う開き直しの事象を返す
 - `stage_revocations(v, stage)`（`progress/approval_decide.py`）は、工程に記録した承認に、投稿前の記録（事象 `approval_posting`）に残る、その工程の未確定の承認を加える。資料を出し直す前の記録も調べる。承認の境界より前の記録は、境界を書くときに取り消してあるので加えない。`reread`・`_append_hand_finish`・`_send_back`・`_reopen_unbound`・`consume_held` が使い、`plan_reopen` も同じ規則で未確定の承認を加える
 - `last_seq(conn, machine_id)`（`progress/store.py`）は、最後の事象の番号を返す。`_append_hand_finish` が排他を取った後の確かめに使う
-- `approval_lock_after_answer(store, machine_id, sleep)`（`progress/store.py`）は、`approval_lock` が空くのを間隔を空けて待って取り、上限を越えれば断る。`_append_hand_finish`（回答待ちを書くとき）と `prior_approval`（先の承認でステップを済ませるとき）が使う
+- `approval_lock_after_answer(store, machine_id, sleep)`（`progress/store.py`）は、`approval_lock` が空くのを間隔を空けて待って取り、待ったかを返す。上限を越えれば断る。`_append_hand_finish`（回答待ちを書くとき）と `prior_approval`（先の承認でステップを済ませるとき）が使う
 - `Drive.write_if_unchanged(v, *drafts)`（`progress/run.py`）は、追記が読み直す記録の最後の事象の番号が `v` と同じときだけ書く。`prior_approval` が使う
 - `approval_lock(store, machine_id)`（`progress/store.py`）は、承認を書く操作と取り消す操作が共有する排他である。`answer`・`_cmd_retry`・`_send_back`・`_reopen_unbound`・`reread`・`consume_held`（質問し直すとき）が使う。`_append_hand_finish` と `prior_approval` は `approval_lock_after_answer` で取る
 - `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は開き直さない。ただし、開き直す工程がリリースしないで終えて無効にした工程（`disabled` の `cause: no_release` と工程名が一致する）には、`later` の値によらず `enabled` を足す
@@ -309,7 +309,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `finish` と承認の回答 | 同上 | 承認は作業の排他を取らない | 追記の前に読み直し、番号の条件で追記する |
 | 回答と開き直し | PR の証跡と工程の事象 | 両方が `store.approval_lock` を取り、取れなければ断る | 断られた側は何も書かず、打ち直す |
 | 回答と、回答待ちを書く `finish` | 同上 | `finish` は作業の排他を持ったまま `store.approval_lock` が空くのを待つ。承認の回答は作業の排他を取らないので、待つ間に確定できる | 待つ間に事象が増えていれば、取り消さずに読み直して決め直す。上限を越えたら何も書かずに断る |
-| 回答と、先の承認でゲートを済ませる `next` | 同上 | `next` は作業の排他を持ったまま `store.approval_lock` が空くのを待つ | 待つ間に事象が増えていれば、ゲートを済ませずに次の手を決め直す。上限を越えたら何も書かずに断る |
+| 回答と、先の承認でゲートを済ませる `next` | 同上 | `next` は作業の排他を持ったまま `store.approval_lock` が空くのを待つ | 待った場合と事象が増えた場合は、ゲートを済ませずに次の手を決め直す。上限を越えたら何も書かずに断る |
 
 ### 既存の部品の再利用
 
@@ -387,7 +387,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool \| None = None) -> bool` | 真（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直し）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない。指定しない `ndf ci answer` は、今と同じく識別子が同じ行があれば書かない |
 
 - `answer`
-  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション。証跡を投稿する回答は、確かめと回答の追記を 2 つのトランザクションに分け、投稿をその間で行う。本番へ反映される承認は、1 つ目で投稿前の記録を確定する）、`gate-rejections`、進み具合の表
+  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション。証跡を投稿する回答は、確かめと回答の追記を 2 つのトランザクションに分け、投稿をその間で行う。1 つ目で投稿前の記録（`approval_posting`）を確定する。本番へ反映されない承認は記録しない）、`gate-rejections`、進み具合の表
 - 開き直しを起こす回答は、却下の証跡の後に `revoke_approvals` を呼ぶ
 
 ### 異常系の処理
@@ -396,7 +396,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- | --- | --- | --- |
 | `answer` | 同じキーで質問・回答・回答者が違う | 使い回し | `_same` | 止める | `refused` | — |
 | `answer` | 作業が流れている（変更要求・却下） | 排他 | `work_stopped` | 止める | `refused` | 何も書かない |
-| `answer` | 証跡を書けない | 権限・GitHub | `post` | 止める | `refused` | 回答は記録しない。本番へ反映される承認では、投稿の前に確定した事象 `approval_posting` は残す。GitHub が投稿を受け付けた後に応答を受け取れなくても、取り消す承認を指せるようにするためである。打ち直せる |
+| `answer` | 証跡を書けない | 権限・GitHub | `post` | 止める | `refused` | 回答は記録しない。投稿の前に確定した事象 `approval_posting` は残す。GitHub が投稿を受け付けた後に応答を受け取れなくても、承認なら取り消す対象を指せ、却下と変更要求なら前の承認でゲートを通さないためである。打ち直せる |
 | `answer` | リクエストのファイルを消せない | 権限・ファイル | `requests.withdraw` | 止める | `refused`。パスを示す | DB へ書かない。打ち直すと残りを消す |
 | `answer` | 追記の直前に事象が増えた | 競合 | `store.Conflict` | 呼び出し元へ返す | `stopped`（`transient`） | 打ち直すと証跡を再利用する |
 | `answer` | 表の更新の失敗 | GitHub | `sync_records` | 既定値で続ける | `warnings` に `ndf progress resync` | 回答は記録済み |

@@ -129,7 +129,7 @@ def prior_approval(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
 
     手で終えた回答待ちは、回答を `consume_held` が読むので、ここでは先の承認を使わない。
     待ちの状態は回答も受けるので、ステップを済ませる書き込みは回答と共有する排他の中で行う。書いている回答があれば終わるまで
-    待つ。事象が増えていれば何も書かずに None を返し、呼び手が最新の記録から次の手を決め直す。"""
+    待つ。待ったか、事象が増えていれば、何も書かずに None を返し、呼び手が最新の記録と対象から次の手を決め直す。"""
     assert m.stage is not None
     if m.step is None or m.progress is None or not invoke.is_listen(m.step) or m.progress.held_finish is not None:
         return d.report(v, m)
@@ -137,8 +137,11 @@ def prior_approval(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     if found is None:
         return d.report(v, m)
     # 回答は証跡を投稿してから DB へ確定する。その間にステップを済ませると、PR の却下が DB に残らない
-    with store.approval_lock_after_answer(d.st, v.machine_id, d.env.sleep):
-        d.write_if_unchanged(v, _passed(v, m, found))
+    with store.approval_lock_after_answer(d.st, v.machine_id, d.env.sleep) as waited:
+        if waited:
+            d.env.forget()  # 待つ間に PR の head やマージ先が変わりうる（DB の事象は増えない）
+        else:
+            d.write_if_unchanged(v, _passed(v, m, found))
     return None
 
 

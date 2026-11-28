@@ -266,9 +266,9 @@ def test_the_flow_uses_an_earlier_approval_without_asking_again(repo, st, env, c
     assert "design" in env.calls and "design-merge" in env.calls and "design-reading" not in env.calls
 
 
-@pytest.mark.parametrize("reissued", [False, True])
-def test_the_flow_waits_for_an_answer_before_passing_the_gate(repo, st, env, capsys, reissued):
-    """先の承認で承認ゲートを済ませる前に、書いている回答を待つ。待つ間に事象が増えていれば決め直す。"""
+@pytest.mark.parametrize("meanwhile", ["nothing", "reissued", "moved", "rejection_not_recorded"])
+def test_the_flow_waits_for_an_answer_before_passing_the_gate(repo, st, env, capsys, meanwhile):
+    """先の承認で承認ゲートを済ませる前に書いている回答を待ち、待った後の記録と対象で決め直す。"""
     tid = _approved_in_the_flow(st, capsys, repo, env)
     finishing.main(["retry", tid, DESIGN, "--reason", "やり直す"])
     run._write(st, tid, run.model.EventDraft("started", "workflow", DESIGN, payload={"inputs": {}}, rev=1))
@@ -279,20 +279,29 @@ def test_the_flow_waits_for_an_answer_before_passing_the_gate(repo, st, env, cap
     writing.__enter__()
     waits: list[float] = []
 
+    def fail(row) -> bool:
+        raise model.Refused("確定に失敗")
+
     def sleep(seconds: float) -> None:
         waits.append(seconds)
-        if reissued:  # 待つ間の追記（質問の出し直し）で、先の承認は数えなくなる
-            v = run.read(st, tid)
+        writing.__exit__(None, None, None)
+        v = run.read(st, tid)
+        if meanwhile == "reissued":  # 質問の出し直しで、先の承認は数えなくなる
             m = run.decide(v)
             run._write(st, tid, answering._no_report_draft(v, DESIGN, m.step.id, "waiting", m.progress.generation, "出し直し"))
-        writing.__exit__(None, None, None)
+        elif meanwhile == "moved":  # PR の変化は DB の事象を増やさない
+            env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, head=merge_hub.OTHER)
+        elif meanwhile == "rejection_not_recorded":  # 却下を投稿した後に、回答の確定が失敗する
+            a = gate.Answer(gate.waiting(v).id, "rejected", "却下", "human:reviewer", "k-reject")
+            with pytest.raises(model.Refused, match="確定に失敗"):
+                gate.answer(st, tid, a, answering.github_observe(repo, st.root, reader=env.reader), fail)
 
     env.env = replace(env.env, sleep=sleep)
 
     out = _next(st, tid, repo, env)
 
     assert len(waits) == 1, out
-    assert _state(st, tid, DESIGN) == ("running" if reissued else "finished"), out
+    assert _state(st, tid, DESIGN) == ("finished" if meanwhile == "nothing" else "running"), out
 
 
 def test_a_stage_without_a_gate_finishes_and_goes_on_as_before(repo, st, env, capsys):

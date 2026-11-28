@@ -686,11 +686,12 @@ def approval_lock(store: Store, machine_id: str) -> Iterator[None]:
 
 
 @contextmanager
-def approval_lock_after_answer(store: Store, machine_id: str, sleep: Callable[[float], None]) -> Iterator[None]:
+def approval_lock_after_answer(store: Store, machine_id: str, sleep: Callable[[float], None]) -> Iterator[bool]:
     """`approval_lock` を、書いている回答が終わるまで間隔を空けて取り直す。待ちの上限を越えれば `model.Refused`。
 
-    待つ間に事象が増えうるので、呼び手は排他を取った後に最新の事象で決め直す。"""
+    待ったら真を渡す。待つ間に事象も PR も変わりうるので、呼び手は排他を取った後に決め直す。"""
     deadline = time.monotonic() + limits.value(APPROVAL_WAIT, "seconds")
+    waited = False
     with ExitStack() as stack:
         while True:
             try:
@@ -700,4 +701,5 @@ def approval_lock_after_answer(store: Store, machine_id: str, sleep: Callable[[f
                 if time.monotonic() >= deadline:
                     raise
                 sleep(limits.value(APPROVAL_WAIT, "interval"))
-        yield
+                waited = True
+        yield waited
