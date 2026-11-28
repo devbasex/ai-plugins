@@ -6,12 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from ndf.adapters import git
 from ndf.core.converge import participants
-from ndf.domains.crossreview import scope_decide, store
+from ndf.domains.crossreview import changes, round_scope, scope_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv
 
-from ._repos import Repos, commit, count_git, run_cli, sh
+from ._repos import BRANCH, Repos, commit, count_git, run_cli, sh
+from .test_crossreview_run import Recording, _run
 
 A, B = "issues/d.md#セクション A", "issues/d.md#セクション B"
 # ラウンドの記録の比較基点（`--base` と HEAD の merge-base の SHA。PR 3944 の r2-1）。状態ファイルを書く前に本物の SHA へ置き換える
@@ -23,9 +25,44 @@ def _with_merge_base(data, sha: str):
     （`review-scope` も今回の相手役で決める。PR 3944 の r3-4）。"""
     if isinstance(data, dict) and isinstance(data.get("rounds"), list):
         seats = list(participants.assign())
-        rounds = [{"reviewers": seats, **r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in data["rounds"]]
+        rounds = [{"reviewers": seats, **r} if isinstance(r, dict) else r for r in data["rounds"]]
+        rounds = [{**r, "base": sha} if isinstance(r, dict) and r.get("base") == MB else r for r in rounds]
         return {**data, "rounds": rounds}
     return data
+
+
+def test_issue_3780_1_a_round_before_the_pr_was_remade_is_not_an_origin() -> None:
+    """巻き直しは状態の今の番号で見分けるので、PR を読めなくても前の PR のラウンドを使わない。"""
+    record = {"round": 1, "head": "h1", scope_decide.PR_NUMBER: 7}
+    state = {"pr": 7, "current_pr": 9, "rounds": [record]}
+    now = scope_decide.Basis(number=scope_decide.current_number(state))
+    assert scope_decide.origin_record(state, now) is None and scope_decide.read_by_all_head(state, now) is None
+    del state["current_pr"]
+    same = scope_decide.Basis(number=scope_decide.current_number(state))
+    assert scope_decide.origin_record(state, same) == record
+
+
+@pytest.mark.parametrize(
+    ("recorded", "used"),
+    [({scope_decide.PR: "o/r#7"}, False), ({scope_decide.PR: "o/r#9"}, True), ({}, False)],
+    ids=["before", "after", "unknown"],
+)
+def test_issue_3780_1_a_legacy_round_of_a_remade_pr_is_judged_by_the_pr_it_read(recorded: dict, used: bool) -> None:
+    record = {"round": 1, "head": "h1", **recorded}
+    state = {"pr": 7, "current_pr": 9, "rounds": [record]}
+    now = scope_decide.Basis(number=scope_decide.current_number(state), rewound=scope_decide.is_rewound(state))
+    assert (scope_decide.origin_record(state, now) is not None) is used
+
+
+@pytest.mark.parametrize(
+    ("recorded", "optional", "used"),
+    [({scope_decide.PR: "fork/r#7"}, True, False), ({}, True, True), ({}, False, False)],
+    ids=["other-repo", "unrecorded", "unrecorded-checked"],
+)
+def test_issue_3780_1_confirmed_pr_identities_are_always_compared(recorded: dict, optional: bool, used: bool) -> None:
+    state = {"rounds": [{"round": 1, "head": "h1", **recorded}]}
+    now = scope_decide.Basis(pr="o/r#7", pr_optional=optional)
+    assert (scope_decide.read_by_all_head(state, now) is not None) is used
 
 
 def test_sections_skip_headings_inside_code_blocks() -> None:
@@ -92,7 +129,8 @@ def scope_run(repos: Repos, tmp_path: Path, capsys: pytest.CaptureFixture[str]):
             data = _with_merge_base(data, sha)
             if isinstance(data, dict) and isinstance(data.get("rounds"), list):
                 data["rounds"] = [
-                    {**r, "head": heads.get(r.get("head"), r.get("head"))} if isinstance(r, dict) else r for r in data["rounds"]
+                    {k: heads.get(v, v) if k in ("head", "base") else v for k, v in r.items()} if isinstance(r, dict) else r
+                    for r in data["rounds"]
                 ]
             store.write_object(path, data)
         return run_cli(
@@ -126,12 +164,19 @@ def test_scope_without_a_state_file_is_round_one_full(scope_run) -> None:
             "round 2 の範囲は since（詳細レビューを通らないセクション 0 件）",
             _scope(scope_decide.SINCE, "abc", []),
         ),
-        # 前のラウンドの比較基点（merge-base の SHA）が違う（記録が無い）なら PR の全差分が変わり得るので全差分（PR 3944 の r1-10）
+        # #3780: 比較基点が違っても、実装の PR は前の head からの差分を見る
         (
-            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "origin/develop"}]},
+            {"pr": 8, "rounds": [{"round": 1, "head": "def", "base": "def"}]},
+            "round 2 の範囲は since（詳細レビューを通らないセクション 0 件）",
+            _scope(scope_decide.SINCE, "def", []),
+        ),
+        # 比較基点のコミットが手元に無く、読んでいない変更を探せなければ全差分
+        (
+            {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "0" * 40}]},
             "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
             _scope(scope_decide.FULL, None, []),
         ),
+        # 比較基点の記録が無ければ起点にしない
         (
             {"pr": 8, "rounds": [{"round": 1, "head": "abc"}]},
             "round 2 の範囲は full（詳細レビューを通らないセクション 0 件）",
@@ -154,6 +199,28 @@ def test_scope_reads_rounds_of_the_state_file(scope_run, data: dict, summary: st
     assert (code, got["summary"], got["items"]) == (0, summary, [item])
 
 
+def test_scope_of_an_implementation_pr_says_why_it_could_not_compare_the_bases(scope_run) -> None:
+    """#3780: 比較基点が変わって読んでいない変更を探せないときは、理由を注意に載せて全差分を返す。"""
+    code, got = scope_run("check", {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": "0" * 40}]})
+    assert (code, got["items"][0]["scope"]) == (0, scope_decide.FULL)
+    [warning] = got["warnings"]
+    assert "全差分" in warning
+
+
+def test_scope_of_a_design_pr_keeps_the_full_diff_when_the_base_changed(scope_run) -> None:
+    """#3780: 設計の PR の起点の条件は変えない（比較基点が違えば全差分）。"""
+    rounds = [{"round": 1, "head": "def", "base": "def"}]
+    got = scope_run("design", {"pr": 8, "rounds": rounds, store.REVIEWED: _SECTIONS})[1]
+    assert got["items"] == [_scope(scope_decide.FULL, None, [])]
+
+
+def test_scope_of_an_implementation_pr_does_not_read_the_mvv(scope_run, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3780: 実装の PR の範囲は MVV で変わらないので、`review-scope` は MVV を読まない。"""
+    monkeypatch.setattr(mvv, "identity_at", lambda *a: pytest.fail("範囲を変えない MVV を読んだ"))
+    got = scope_run("check", {"pr": 8, "rounds": [{"round": 1, "head": "abc", "base": MB}]})[1]
+    assert got["items"][0]["scope"] == scope_decide.SINCE and "warnings" not in got
+
+
 def test_scope_of_a_design_pr_treats_a_broken_reviewed_list_as_empty(scope_run) -> None:
     """reviewed_sections が並びでなければ、どのセクションも詳細レビューを通っていない扱いで全差分を見る。"""
     code, got = scope_run("design", {"pr": 8, "rounds": [{"round": 1, "head": "abc"}], store.REVIEWED: "x"})
@@ -170,8 +237,6 @@ def test_scope_of_a_design_pr_narrows_to_the_last_head_once_every_section_was_re
 
 def test_scope_that_is_full_does_not_ask_git_for_the_last_head(scope_run, monkeypatch: pytest.MonkeyPatch) -> None:
     """#4285: 詳細レビューを通らないセクションが残る設計の PR は、前の head によらず全差分なので、祖先かを git に尋ねない。"""
-    from ndf.adapters import git
-
     asked: list = []
     original = git.Git.is_ancestor
     monkeypatch.setattr(git.Git, "is_ancestor", lambda self, *a: asked.append(a) or original(self, *a))
@@ -218,6 +283,56 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
 
 
 APPROVED = "approved:11:aaa:ccc"
+
+
+def test_converged_run_is_reused_only_for_the_same_unit_and_pr(
+    wt: Path, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, hub
+) -> None:
+    """#3780 の現状固定: 同じ head の打ち直しは、単位の指示と読んだ PR が同じなら前回の収束を返し、どちらかが変われば相手役を
+    起動し直す。比較基点と相手役の変更は `test_crossreview_prior.py`、重点の変更は `test_crossreview_run.py` が確かめる。"""
+    head = sh(wt, "rev-parse", "HEAD").strip()
+    read = {"ident": "o/r#41"}
+    monkeypatch.setattr(hub.port, "read_pr", lambda: threads.ReadPr(read["ident"], BRANCH, head, "o/r"))
+    unit = tmp_path / "unit.md"
+    unit.write_text("単位 u1\n", encoding="utf-8")
+    monkeypatch.setenv("NDF_UNIT_FILE", str(unit))
+
+    def launched() -> set[str]:
+        fake = Recording(tmp_path / "st", {})
+        code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-pr-out", str(tmp_path / "reviewed-pr"))
+        assert (code, got["status"]) == (0, "ok")
+        return {agent for agent, _, _ in fake.prompts}
+
+    both = {"codex", "kiro"}
+    assert launched() == both
+    assert launched() == set()
+    unit.write_text("単位 u2\n", encoding="utf-8")
+    assert launched() == both
+    read["ident"] = "o/r#42"
+    assert launched() == both
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"base": "origin/develop"},
+        {"reviewers": ["codex"]},
+        {"focus": ["前の重点"]},
+        {"unit": "前の単位"},
+        {scope_decide.MVV: {"id": APPROVED}},
+    ],
+)
+def test_design_pr_reads_the_full_diff_again_when_the_conditions_changed(scope_run, changed: dict) -> None:
+    """#3780 の現状固定: 設計の PR は、全セクションが詳細レビューを通っていても、前のラウンドの条件が違えば全差分を見る。"""
+    row = {"round": 1, "head": "abc", "base": MB, **changed}
+    got = scope_run("design", {"pr": 8, "rounds": [row], store.REVIEWED: _SECTIONS})[1]["items"][0]
+    assert (got["scope"], got["base"]) == (scope_decide.FULL, None)
+
+
+@pytest.mark.parametrize("every_section", [True, False])
+def test_round_one_is_the_full_diff_even_with_a_previous_head(every_section: bool) -> None:
+    """#3780 の受け入れ条件 4: 1 ラウンド目は、起点にできる head があっても差分の全体を見る。"""
+    assert scope_decide.review_scope(every_section, 1, "abc1234", [A], {A}) == scope_decide.Scope(scope_decide.FULL, None, ())
 
 
 def _read_with(mvv: object) -> dict:
@@ -314,9 +429,6 @@ def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
 ) -> None:
     """部分クローンで、変わった文書を手元のオブジェクトだけで読めなければ、取得せずに全差分を返し、理由を注意に載せる。
     範囲を変えない MVV は読まない。"""
-    from ndf.adapters import git
-    from ndf.domains.crossreview import changes
-
     wt = repos.add_worktree(tmp_path / "pr8")
     commit(wt, "a.txt", "x", "文書でない")
     state = tmp_path / "state"
@@ -340,9 +452,6 @@ def test_scope_is_full_when_the_sections_need_objects_that_are_not_local(
 
 def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
     """変わったセクションは改名を調べずに読み（調べると部分クローンで前の本文の取得が要る）、改名前と消えたパスを除く。"""
-    from ndf.adapters import git
-    from ndf.domains.crossreview import changes
-
     calls: list[list[str]] = []
 
     def runner(args: list[str], cwd: Path | None) -> git.Completed:
@@ -356,9 +465,6 @@ def test_changed_sections_do_not_look_for_renames(tmp_path: Path) -> None:
 
 def test_committed_text_skipped_by_git_is_an_error_unless_the_file_is_empty(tmp_path: Path, monkeypatch) -> None:
     """手元に無い blob を git grep が飛ばしたら、本文の無い文書とみなさずに止める。空のファイルは行が無くてよい。"""
-    from ndf.adapters import git
-    from ndf.domains.crossreview import changes
-
     empty = mvv.blob_id(b"", 40)
     trees = {"empty.md": empty, "a.md": "a" * 40}
     monkeypatch.setattr(git.Git, "run_bytes", lambda self, *args, **kw: b"")
@@ -376,9 +482,6 @@ def test_committed_text_skipped_by_git_is_an_error_unless_the_file_is_empty(tmp_
 def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
     """PR 3944 の r6-1: PR が足した Markdown のシンボリックリンクはたどらず（worktree の外のファイルの見出しを相手役へ
     渡さない）、通常のファイルはコミットの blob と同じ本文を読む。作業場所で書き換えた本文でなくコミットの本文を読む。"""
-    from ndf.adapters import git
-    from ndf.domains.crossreview import changes
-
     outside = tmp_path / "outside.md"
     outside.write_text("# 利用者の秘密の見出し\n", encoding="utf-8")
     wt = repos.add_worktree(tmp_path / "pr8")
@@ -394,9 +497,6 @@ def test_linked_markdown_is_not_followed(repos: Repos, tmp_path: Path) -> None:
 def test_markdown_bodies_cost_at_most_one_git_call(repos: Repos, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """PR 3944 の r7-4: 改行を CRLF で取り出した Markdown は作業場所のファイルから読み（git を起動しない）、作業場所と
     違う Markdown は何件あってもコミットの本文を 1 回の git の起動で読む。"""
-    from ndf.adapters import git
-    from ndf.domains.crossreview import changes
-
     wt = repos.add_worktree(tmp_path / "pr8")
     for name in ("a.md", "b.md", "c.md", "empty.md"):
         (wt / name).write_text("" if name == "empty.md" else f"# {name}\n\n## セクション {name}\n", encoding="utf-8")
@@ -466,3 +566,336 @@ def test_issue_3955_filled_seats_and_previous_seats() -> None:
     assert scope_decide.read_by_all_head(state, scope_decide.Basis(reviewers=("codex", "claude"))) == "h1"
     swapped = {**state["rounds"][0], "reviewers": ["kiro", "claude"], "filled": [{"seat": "claude", "for": "codex", "reason": "r"}]}
     assert scope_decide.read_by_all_head({"rounds": [swapped]}, scope_decide.Basis(reviewers=("codex", "claude"), stand_in=True)) is None
+
+
+# --- 起点と、新しく PR の変更になったファイル（#3780 の Task 4）---------------------------------------
+
+
+def _record(**changed: object) -> dict:
+    return {"round": 1, "head": "h1", "base": "b1", "reviewers": ["codex", "kiro"], "verdict": "changes_required", **changed}
+
+
+NOW = scope_decide.Basis("b2", ("codex", "kiro"), ("今の重点",), APPROVED, unit="u2", pr="o/r#1")
+
+
+def test_origin_record_ignores_the_conditions_that_only_matter_for_reuse() -> None:
+    """#3780: 比較基点・重点・単位の指示・MVV・根拠の確認が違っても、差分の起点には前のラウンドを使う。"""
+    row = _record(focus=["前の重点"], unit="u1", pr="o/r#1", mvv={"id": "approved:10:a:c"})
+    assert scope_decide.origin_record({"rounds": [row]}, NOW) == row
+    after = {"rounds": [row, _record(head="h2", verdict=fin.INCOMPLETE_REVIEWERS)]}
+    assert scope_decide.origin_record(after, NOW) == row
+
+
+@pytest.mark.parametrize(
+    "rounds",
+    [
+        [],
+        ["x"],
+        [_record(pr="o/r#1", reviewers=["codex"])],
+        [_record(pr="o/r#2")],
+        [_record()],
+        [_record(pr="o/r#1", head="")],
+        [_record(pr="o/r#1", verdict=fin.INCOMPLETE_REVIEWERS)],
+    ],
+)
+def test_origin_record_is_none_when_something_was_never_read(rounds: list) -> None:
+    """#3780: 全員が読んだラウンドが無い・読んでいない相手役がいる・読んだ PR が違うときは起点が無い。"""
+    assert scope_decide.origin_record({"rounds": rounds}, NOW) is None
+
+
+def _head(cwd: Path) -> str:
+    return sh(cwd, "rev-parse", "HEAD").strip()
+
+
+def test_origin_needs_an_ancestor_head_and_line_origin_does_not_ask_who_read(wt: Path) -> None:
+    base = _head(wt)
+    first = commit(wt, "a.txt", "1\n", "一")
+    head = commit(wt, "a.txt", "2\n", "二")
+    g = git.Git.offline(wt)
+    row = _record(head=first, base=base, reviewers=["codex"])
+    both = scope_decide.Basis(reviewers=("codex", "kiro"))
+    assert round_scope.read_origin(g, {"rounds": [row]}, scope_decide.Basis(reviewers=("codex",)), head) == changes.Range(base, first)
+    assert round_scope.read_origin(g, {"rounds": [row]}, both, head) is None
+    assert round_scope.line_origin(g, {"rounds": [row]}, head) == changes.Range(base, first)
+    sh(wt, "reset", "-q", "--hard", base)
+    other = commit(wt, "b.txt", "x\n", "巻き直し")
+    for gone in (row, _record(head="0" * 40, base=base), {k: v for k, v in row.items() if k != "base"}):
+        assert round_scope.read_origin(g, {"rounds": [gone]}, scope_decide.Basis(), other) is None
+        assert round_scope.line_origin(g, {"rounds": [gone]}, other) is None
+
+
+def _write(wt: Path, files: dict[str, str | bytes | None], message: str) -> str:
+    """ファイルをまとめて書いて（None は消す）コミットする。"""
+    for name, text in files.items():
+        path = wt / name
+        if text is None:
+            path.unlink()
+        else:
+            path.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
+    sh(wt, "add", "-A")
+    sh(wt, "commit", "-q", "--allow-empty", "-m", message)
+    return _head(wt)
+
+
+def _lines(*changed: tuple[int, str]) -> str:
+    """30 行の文書。`(番号, 本文)` の行だけを置き換える。"""
+    rows = [f"line {n}" for n in range(1, 31)]
+    for n, text in changed:
+        rows[n - 1] = text
+    return "".join(f"{r}\n" for r in rows)
+
+
+def _start(wt: Path, files: dict) -> str:
+    """比較先の始まりのコミットを作る（ブランチ `target` がここを指し、PR は今の HEAD で進む）。"""
+    base = _write(wt, files, "比較先")
+    sh(wt, "branch", "-f", "target", base)
+    return base
+
+
+def _move_base(wt: Path, files: dict) -> str:
+    """比較先のブランチを進める（PR のブランチは動かさない）。"""
+    pr = sh(wt, "symbolic-ref", "--short", "HEAD").strip()
+    sh(wt, "checkout", "-q", "target")
+    moved = _write(wt, files, "比較先が進む")
+    sh(wt, "checkout", "-q", pr)
+    return moved
+
+
+def _merge_target(wt: Path) -> None:
+    sh(wt, "merge", "-q", "--no-edit", "target")
+
+
+def _new(wt: Path, previous: changes.Range, base: str) -> tuple[str, ...] | None:
+    return changes.new_in_pr(git.Git.offline(wt), previous, changes.Range(base, _head(wt)), {})
+
+
+def test_clean_merge_of_the_base_adds_no_new_files(wt: Path) -> None:
+    """#3780: 競合の無いベースブランチのマージでは、足して渡すファイルは無い（前に変えた箇所の行がずれても）。"""
+    base = _start(wt, {"a.txt": _lines(), "gone.txt": "a\nb\n", "old.txt": _lines(), "blob.bin": b"\0one"})
+    head = _write(
+        wt,
+        {
+            "a.txt": _lines((20, "pr が変えた")).replace("line 25\n", ""),
+            "gone.txt": None,
+            "old.txt": None,
+            "new.txt": _lines(),
+            "blob.bin": b"\0two",
+            "added.bin": b"\0new",
+            "empty.txt": "",
+        },
+        "PR",
+    )
+    moved = _move_base(wt, {"a.txt": "top 1\ntop 2\n" + _lines(), "other.txt": "x\n"})
+    _merge_target(wt)
+    assert _new(wt, changes.Range(base, head), moved) == ()
+
+
+def test_fixes_in_the_same_round_as_a_base_merge_are_not_new(wt: Path) -> None:
+    """#3780: 今回渡す差分で読む直し（消した箇所への追加・隣の行の書き換え）は、新しい変更に数えない。"""
+    base = _start(wt, {"a.txt": _lines()})
+    head = _write(wt, {"a.txt": _lines((11, "pr が変えた 11")).replace("line 20\n", "")}, "PR")
+    moved = _move_base(wt, {"other.txt": "x\n"})
+    _merge_target(wt)
+    fixed = _lines((10, "直し 10"), (11, "pr が変えた 11"), (20, "同じ場所へ足した"))
+    _write(wt, {"a.txt": "上に足した\n" + fixed}, "直し")
+    assert _new(wt, changes.Range(base, head), moved) == ()
+
+
+def test_files_that_became_pr_changes_by_switching_the_base(wt: Path) -> None:
+    """#3780: 比較先を変えて PR の変更になった内容（行・実行権限・バイナリ）のあるファイルを返し、既読のファイルは返さない。"""
+    older = _write(wt, {"a.txt": _lines(), "run.sh": "echo\n", "blob.bin": b"\0one", "read.txt": "1\n"}, "古い比較先")
+    _write(wt, {"a.txt": _lines((3, "比較先が足した")), "blob.bin": b"\0two"}, "比較先の変更")
+    sh(wt, "update-index", "--chmod=+x", "run.sh")
+    sh(wt, "commit", "-q", "-m", "実行権限")
+    base = _head(wt)
+    sh(wt, "update-index", "--chmod=+x", "run.sh")
+    head = commit(wt, "read.txt", "2\n", "PR")
+    assert _new(wt, changes.Range(base, head), older) == ("a.txt", "blob.bin", "run.sh")
+
+
+def test_the_same_text_added_elsewhere_in_the_file_is_new(wt: Path) -> None:
+    """#3780: 読んだ行と同じ文でも、別の位置の追加は新しい変更である（本文だけを比べない）。"""
+    older = _write(wt, {"a.txt": _lines()}, "古い比較先")
+    base = _write(wt, {"a.txt": _lines((5, "line 5\n    log()"))}, "比較先が足した")
+    head = _write(wt, {"a.txt": _lines((5, "line 5\n    log()"), (25, "line 25\n    log()"))}, "PR")
+    assert _new(wt, changes.Range(base, head), older) == ("a.txt",)
+
+
+def test_conflict_resolved_back_to_the_previous_head_is_new(wt: Path) -> None:
+    """#3780: ベースのマージの競合を前の head の内容に戻したファイルは、前の head からの差分に出ないので返す。"""
+    base = _start(wt, {"a.txt": _lines()})
+    head = _write(wt, {"a.txt": _lines((10, "pr"))}, "PR")
+    moved = _move_base(wt, {"a.txt": _lines((10, "base"))})
+    sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
+    assert (wt / "a.txt").read_text(encoding="utf-8") == _lines((10, "pr"))
+    assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
+
+
+def test_a_mode_only_fix_does_not_count_a_binary_as_read(wt: Path) -> None:
+    """#3780: 今回渡す差分が権限だけを変えるバイナリは中身が渡らないので、読んだ blob と違えば返す。"""
+    base = _start(wt, {"blob.bin": b"\0one"})
+    head = _write(wt, {"blob.bin": b"\0pr"}, "PR")
+    moved = _move_base(wt, {"blob.bin": b"\0base"})
+    sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
+    sh(wt, "update-index", "--chmod=+x", "blob.bin")
+    sh(wt, "commit", "-q", "-m", "実行権限")
+    assert _new(wt, changes.Range(base, head), moved) == ("blob.bin",)
+
+
+@pytest.mark.parametrize("replaced", [None, "pr"], ids=["removed", "replaced"])
+def test_a_read_removal_stays_read_when_a_line_is_put_in_its_place(wt: Path, replaced: str | None) -> None:
+    """#3780: ベースの別の行が変わっても、読んだ削除の跡へ足した行や、読んだ置き換えの書き直しは新しい変更に数えない。"""
+    base = _start(wt, {"a.txt": _lines()})
+    first = _lines().replace("line 20\n", "") if replaced is None else _lines((20, replaced))
+    head = _write(wt, {"a.txt": first}, "PR")
+    moved = _move_base(wt, {"a.txt": _lines((2, "base"))})
+    _merge_target(wt)
+    _write(wt, {"a.txt": _lines((2, "base"), (20, "直し"))}, "直し")
+    assert _new(wt, changes.Range(base, head), moved) == ()
+
+
+def test_a_removal_added_by_the_base_next_to_a_read_one_is_new(wt: Path) -> None:
+    """#3780: ベースが同じ文の行を増やし、読んだ削除と同じ箇所の削除が読んだ件数を超えれば返す。"""
+    base = _start(wt, {"a.txt": _lines()})
+    head = _write(wt, {"a.txt": _lines().replace("line 20\n", "")}, "PR")
+    moved = _move_base(wt, {"a.txt": _lines((20, "line 20\nline 20"))})
+    sh(wt, "merge", "-q", "--no-edit", "-X", "ours", "target")
+    _write(wt, {"a.txt": _lines((20, "同じ場所へ足した"))}, "直し")
+    assert _new(wt, changes.Range(base, head), moved) == ("a.txt",)
+
+
+def _hunks(body: str) -> tuple[changes.Hunk, ...]:
+    return tuple(changes._file_blocks(f"diff --git a/a.txt b/a.txt\n{body}")[0][1])
+
+
+def _delta(body: str) -> changes._Delta:
+    entry = changes._Entry("M", "a.txt", "a.txt", ("100644", "100644"), ("1", "2"))
+    return changes._Delta({"a.txt": entry}, frozenset(), {"a.txt": _hunks(body)})
+
+
+# (既読の差分, 今回渡す差分, 今の PR の差分, 未読があるか)
+_REMOVALS = {
+    # ベースが `X` を今回消す `A` の後ろへ移した。移す前の位置で読んだ `X` の削除には当てない
+    "moved-by-the-base": (
+        "@@ -1,4 +1,3 @@\n P\n-X\n A\n Z\n",
+        "@@ -1,3 +1,3 @@\n P\n-A\n+R\n Z\n",
+        "@@ -1,4 +1,3 @@\n P\n-A\n-X\n+R\n Z\n",
+        True,
+    ),
+    # 今回の差分は `R1` の前の `A` を消し、今の PR の差分は `R2` の前の `A` を消す
+    "same-text-at-another-position": (
+        "",
+        "@@ -1,3 +1,4 @@\n P\n-A\n+R1\n+R2\n Z\n",
+        "@@ -1,5 +1,4 @@\n P\n R1\n-A\n R2\n Z\n",
+        True,
+    ),
+    "same-position": (
+        "",
+        "@@ -1,3 +1,4 @@\n P\n-A\n+R1\n+R2\n Z\n",
+        "@@ -1,3 +1,4 @@\n P\n-A\n+R1\n+R2\n Z\n",
+        False,
+    ),
+    # 読んだのは改行のある `x` の削除で、今の PR の差分は改行の無い `x` を消す
+    "newline-at-the-end": (
+        "@@ -1 +1 @@\n-x\n+y\n",
+        "",
+        "@@ -1 +1 @@\n-x\n\\ No newline at end of file\n+y\n",
+        True,
+    ),
+    # 種別の変更（通常のファイル → シンボリックリンク）は、削除と追加が同じ位置の別の hunk になる
+    "type-change": (
+        "",
+        "@@ -1,2 +0,0 @@\n-P\n-Q\n@@ -0,0 +1 @@\n+t\n\\ No newline at end of file\n",
+        "@@ -1,2 +0,0 @@\n-P\n-Q\n@@ -0,0 +1 @@\n+t\n\\ No newline at end of file\n",
+        False,
+    ),
+}
+
+
+def _binary(before: str, after: str) -> changes._Delta:
+    entry = changes._Entry("M", "a.bin", "a.bin", ("100644", "100644"), (before, after))
+    return changes._Delta({"a.bin": entry}, frozenset({"a.bin"}), {})
+
+
+@pytest.mark.parametrize(
+    ("seen", "since", "now", "unread"),
+    [
+        (("B", "A"), ("A", "C"), ("B", "C"), False),
+        (("X", "A"), ("A", "C"), ("A", "C"), False),
+        # ベースも同じバイナリを変え、今の PR の変更前の blob はどの差分にも無い
+        (("X", "A"), ("A", "C"), ("B", "C"), True),
+    ],
+    ids=["read-before", "passed-before", "before-changed-by-the-base"],
+)
+def test_a_binary_is_read_only_when_both_of_its_blobs_were_given(seen: tuple, since: tuple, now: tuple, unread: bool) -> None:
+    """#3780: バイナリは、今の PR の変更前後の blob ID が読んだ差分か今回渡す差分にあるときだけ読んだとみなす。"""
+    kinds = frozenset({_binary(*now).entries["a.bin"].kind})
+    assert changes._has_unread("a.bin", kinds, _binary(*now), _binary(*seen), _binary(*since)) is unread
+
+
+@pytest.mark.parametrize(("seen", "since", "now", "unread"), list(_REMOVALS.values()), ids=list(_REMOVALS))
+def test_a_removal_is_matched_in_order_and_at_the_position_of_the_current_fix(seen: str, since: str, now: str, unread: bool) -> None:
+    """#3780: 消した行は範囲の中の順序で照らし、今回渡す差分の削除には今の head の位置も合わせる（差分を入力にして確かめる）。"""
+    assert changes._has_unread_lines("a.txt", _delta(now), _delta(seen), _delta(since)) is unread
+
+
+def test_a_commit_that_is_not_local_gives_none_or_a_git_error(wt: Path) -> None:
+    """比べるコミットが無ければ、`new_in_pr` は None を返し（呼び手は全差分にする）、`since_diff` は例外を返す。"""
+    head = _head(wt)
+    previous, current = changes.Range("0" * 40, head), changes.Range(head, head)
+    assert changes.new_in_pr(git.Git.offline(wt), previous, current, {}) is None
+    with pytest.raises(git.GitError):
+        changes.since_diff(git.Git.offline(wt), previous, current, (), {})
+
+
+def test_since_diff_is_limited_to_pr_files_and_appends_the_new_ones(wt: Path) -> None:
+    """#3780: 前の head からの差分は PR が変えるファイルだけにし、新しく PR の変更になったファイルは今の PR の差分も続ける。"""
+    base = _start(wt, {"a[1].txt": _lines(), "old.txt": _lines()})
+    head = _write(wt, {"a[1].txt": _lines((10, "pr")), "old.txt": None, "名前.txt": _lines()}, "PR")
+    moved = _move_base(wt, {"other.txt": "マージしただけ\n"})
+    _merge_target(wt)
+    _write(wt, {"a[1].txt": _lines((10, "直し"))}, "直し")
+    previous, current = changes.Range(base, head), changes.Range(moved, _head(wt))
+    g = git.Git.offline(wt)
+    plain = changes.since_diff(g, previous, current, (), {})
+    assert "+直し" in plain and "other.txt" not in plain and "名前.txt" not in plain
+    added = changes.since_diff(g, previous, current, ("名前.txt",), {})
+    assert added.startswith(plain)
+    assert "rename from old.txt" in added[len(plain) :] and "a[1].txt" not in added[len(plain) :]
+
+
+def test_the_listing_read_by_new_in_pr_is_not_read_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3780: 同じ `listed` を渡した `since_diff` は、`new_in_pr` が読んだ一覧を読み直さない（git の応答を差し替える）。"""
+    listed_spans: list[str] = []
+
+    def run_bytes(self: git.Git, *args: str, **kw: object) -> bytes:
+        if "--raw" in args:
+            listed_spans.append(args[-1])
+        return b""
+
+    monkeypatch.setattr(git.Git, "run_bytes", run_bytes)
+    previous, current = changes.Range("b1", "h1"), changes.Range("b2", "h2")
+    listed: changes.Listings = {}
+    assert changes.new_in_pr(git.Git(), previous, current, listed) == ()
+    assert changes.since_diff(git.Git(), previous, current, (), listed) == ""
+    assert listed_spans == ["b1...h1", "b2...h2", "h1..h2"]
+
+
+def test_since_diff_of_the_same_base_reads_no_listing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#3780: 比較基点が同じなら、変わったファイルの一覧を読まずに前の head からの差分を作る（git の応答を差し替える）。"""
+    calls: list[tuple[str, ...]] = []
+
+    def run_bytes(self: git.Git, *args: str, **kw: object) -> bytes:
+        calls.append(args)
+        return b""
+
+    monkeypatch.setattr(git.Git, "run_bytes", run_bytes)
+    assert changes.since_diff(git.Git(), changes.Range("b", "h1"), changes.Range("b", "h2"), (), {}) == ""
+    assert len(calls) == 1 and "--raw" not in calls[0] and "h1...h2" in calls[0]
+
+
+def test_since_diff_without_pr_files_is_empty(wt: Path) -> None:
+    """絞るファイルが無いときに、パスの指定の無い `git diff`（全差分）を打たない。"""
+    base = _head(wt)
+    moved = commit(wt, "other.txt", "x\n", "比較先")
+    assert changes.since_diff(git.Git.offline(wt), changes.Range(base, base), changes.Range(moved, moved), (), {}) == ""

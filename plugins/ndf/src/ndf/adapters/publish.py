@@ -374,8 +374,11 @@ class Publisher:
         seen[self.hub.repo] = PUBLIC if self.exposed() else self.visibility()
         return qualified_ref(origin, source_repo, self.hub.repo, seen)
 
-    def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> Published:
+    def create_issue(self, title: str, body: str, labels: Sequence[str] = (), mark: str = "") -> Published:
+        """`mark` は呼び手が生成した目印の行で、検査した本文の最後に足す（伏せると読み戻せない。入力の文を渡さない）。"""
         (safe_title, safe_body), dropped = self.guarded(title, body)
+        if mark:
+            safe_body = f"{safe_body.rstrip()}\n\n{mark}\n"
         made = self.hub.rest("POST", f"/repos/{self.hub.repo}/issues", {"title": safe_title, "body": safe_body, "labels": list(labels)})
         return Published(int(made["number"]), str(made["html_url"]), dropped)
 

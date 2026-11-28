@@ -6,7 +6,8 @@
 - 場所: 相手役が返した `path`・`line`（#3941）があればそこに付ける。無ければ指摘の `section`（`<パス>#<シンボル>`）のパスに、
   本文の先頭の `<名前>:<行>` が同じファイルを指せばその行に付ける。行の分からない指摘はファイルに付ける（`subject_type: file`）。
   場所が分からない・PR の差分に無いファイルの指摘はスレッドにしない（中身は記録のコメントの「指摘」の表に載る）
-- 行の分かる指摘は、付けるコミット（指摘のラウンドの head）ごとに 1 つのレビューでまとめて書く（#4016 の決定 4）。
+- 行の分かる指摘は、付けるコミット（指摘のラウンドの head。位置を置き換えた指摘は `placed_round` の head）
+  ごとに 1 つのレビューでまとめて書く（#4016 の決定 4）。
   レビューが行の位置で断られた組だけを 1 件ずつの書き込みへ落とす（決定 5）
 - この実行で閉じた（直した・見送った）指摘は、閉じた理由を最初のコメントへ入れて返信を省く（決定 6）。前の実行の
   スレッドを持つ指摘が閉じたときだけ返信する。閉じた指摘のスレッドは 1 件ずつ resolve する（決定 9）
@@ -14,6 +15,7 @@
   書かずに状態ファイルの記録を PR から戻す（保存の前に落ちた打ち直しで二重に書かない。不変条件 I4）
 - 未解決の指摘: スレッドを開いたまま残す（次の実行が `prior_decide.carried` で引き継ぐ）
 - 収束の妨げにならない重さ（`minor`・`nit`）の指摘はスレッドにしない（記録のコメントの表にだけ載る。#3941）
+- 線引きで直さずに残した指摘（`parked`）はスレッドにしない（#3780）
 - 書く操作が GitHub の二次レート制限に当たったら待って打ち直す（`patient`）。書き込みの間隔と、内容を作る書き込みを
   数えるウィンドウの上限はマシン全体の `WriteGate`（`github.write-spacing`・`github.content-window.minute`・
   `github.content-window.hour`）が持つ
@@ -30,7 +32,7 @@ from typing import Any, NamedTuple, Optional, Protocol, TypeVar
 
 from ndf.adapters.github_pulls import target_of
 from ndf.contracts import limits
-from ndf.domains.crossreview import criteria_decide, journal, prior_decide, report_decide, store, throttle_decide
+from ndf.domains.crossreview import criteria_decide, journal, leftover_decide, prior_decide, report_decide, store, throttle_decide
 from ndf.domains.crossreview import finish_decide as fin
 
 T = TypeVar("T")
@@ -39,8 +41,8 @@ T = TypeVar("T")
 THREADS = report_decide.THREADS
 # 指摘の発生の値（`journal` が書く）
 OCCURRENCE = journal.OCCURRENCE
-# 本文の先頭の `<名前>:<行>`
-_LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
+# 指摘が指すファイルのパスと行（線引きも同じ読み方で投稿の位置を確かめる）
+location = leftover_decide.location
 # 最初のコメントと返信の本文に置く発生の値の行
 OCCURRENCE_LINE = "<!-- ndf-occurrence: {value} -->"
 _OCCURRENCE = re.compile(r"<!-- ndf-occurrence: (\S+) -->")
@@ -113,30 +115,16 @@ class Reader(Protocol):
     def open_threads(self) -> list[prior_decide.Thread]: ...
 
 
-def location(finding: Mapping[str, Any]) -> tuple[Optional[str], Optional[int]]:
-    """指摘が指すファイルのパスと行（分からなければ None）。相手役が返した `path`・`line` を先に使う。"""
-    given = finding.get("path")
-    if isinstance(given, str) and given.strip():
-        line = finding.get("line")
-        return given.strip(), line if type(line) is int and line > 0 else None
-    section = finding.get("section")
-    path = section.split("#", 1)[0] if isinstance(section, str) and section else None
-    if not path:
-        return None, None
-    text = finding.get("text")
-    found = _LOCATION.match(text) if isinstance(text, str) else None
-    if found is None:
-        return path, None
-    named = found.group(1)
-    same = named == path or path.endswith("/" + named)
-    return path, int(found.group(2)) if same else None
-
-
 def _round_head(rounds: Sequence[Mapping[str, Any]], round_no: Any) -> Optional[str]:
     for r in rounds:
         if r.get("round") == round_no and isinstance(r.get("head"), str):
             return str(r["head"])
     return None
+
+
+def _placed_head(rounds: Sequence[Mapping[str, Any]], finding: Mapping[str, Any]) -> Optional[str]:
+    """指摘の `path`・`line` の基準のコミット（位置を置き換えた指摘は置き換えたラウンド、ほかは指摘のラウンドの head）。"""
+    return _round_head(rounds, finding.get(journal.PLACED_ROUND) or finding.get("round"))
 
 
 def _fix_commit(rounds: Sequence[Mapping[str, Any]], finding: Mapping[str, Any]) -> Optional[str]:
@@ -235,12 +223,14 @@ def refreshed(finding: Mapping[str, Any], mark: Mapping[str, Any], thread: prior
 
 def _wanted(finding: Any, done: Mapping[str, Any], settled: set[str]) -> bool:
     """この実行でスレッドを扱う指摘か。最初のコメントの id を持つ指摘は扱い、無い指摘は収束の妨げになる重さで、
-    巻き直しの前に閉じていないものだけ扱う（PR 3944 の r5-3）。"""
+    線引きで直さずに残しておらず（#3780）、巻き直しの前に閉じていないものだけ扱う（PR 3944 の r5-3）。"""
     if not isinstance(finding, Mapping) or not isinstance(finding.get("id"), str):
         return False
     if _has_comment(done.get(finding["id"])):
         return True
-    return criteria_decide.blocking(criteria_decide.severity_of(finding.get("severity"))) and finding["id"] not in settled
+    if finding.get(journal.PARKED) or finding["id"] in settled:
+        return False
+    return criteria_decide.blocking(criteria_decide.severity_of(finding.get("severity")))
 
 
 def _has_comment(mark: Any) -> bool:
@@ -306,7 +296,7 @@ class _Sync:
             if _has_comment(self.done.get(finding["id"])):
                 continue
             path, line = location(finding)
-            commit = _round_head(self.rounds, finding.get("round"))
+            commit = _placed_head(self.rounds, finding)
             if path is None or commit is None or path not in changed:
                 # 場所が分からない・差分に無い指摘はスレッドにしない。中身は記録のコメントの「指摘」の表に載る
                 self.done.pop(finding["id"], None)
@@ -332,7 +322,7 @@ class _Sync:
     def single(self, finding: Mapping[str, Any]) -> bool:
         """1 件をスレッドにする（行 → ファイルの付け直しは口が行う）。作れたら真。"""
         path, line = location(finding)
-        commit = _round_head(self.rounds, finding.get("round"))
+        commit = _placed_head(self.rounds, finding)
         closed = closing(finding, self.rounds)
         try:
             made = self.port.open_thread(str(path), line, str(commit), opening(finding, closed))
@@ -452,10 +442,9 @@ class GitHubPort:
     ):
         """`errors` は GitHub が断ったときの例外の型（`github.GitHubError`）。`sleep` はテストが差し替える。
         `block`（`WriteGate.block`）へ二次レート制限の打ち直しの待ちを毎回知らせ、ほかのプロセスの書き込みも止める（#4016）。
-        信頼できる書き手は、今の実行の認証の login（GraphQL の `viewer`。1 回だけ読む）と同じ書き手だけである。"""
+        信頼できる書き手は、今の実行の認証の login（`GitHub.viewer`。起票と読み取りを共有する）と同じ書き手だけである。"""
         self.hub, self.publisher, self.pr, self.errors = hub, publisher, int(pr), errors
         self.sleep, self.block = sleep, block
-        self._me: Optional[str] = None
         self._pr_head: Optional[str] = None
         self._files: Optional[frozenset[str]] = None
         self._threads: Optional[dict[int, tuple[str, bool]]] = None
@@ -639,9 +628,7 @@ class GitHubPort:
         """書き手が今の実行の認証の login と同じか（cross-review 自身が書いたもの）。PR にコメントできるほかの人が同じ書式で
         書いた本文を、修正担当へ渡さない（PR 3944 の r1-3）。"""
         login = _text(author.get("login")) if isinstance(author, Mapping) else ""
-        if self._me is None:
-            self._me = _text(self.hub.graphql(VIEWER, {})["viewer"]["login"])
-        return bool(login) and login == self._me
+        return bool(login) and login == self.hub.viewer().login
 
     def _thread_of(self, comment_id: int) -> tuple[str, bool]:
         if self._threads is None or comment_id not in self._threads:
@@ -740,6 +727,4 @@ def path_unresolved(status: int, reasons: Sequence[str]) -> bool:
     return _unprocessable(status, reasons, (_PATH_UNRESOLVED,))
 
 
-# 今の実行の認証の login
-VIEWER = "query{viewer{login}}"
 RESOLVE = "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}"

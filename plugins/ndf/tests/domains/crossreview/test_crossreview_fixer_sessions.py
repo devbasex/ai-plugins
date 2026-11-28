@@ -62,7 +62,8 @@ def test_issue_4013_fixer_without_saved_sessions_never_keeps_a_conversation(
         set(f)
         # 直した指摘は直した時刻を持つ（見送りの記録との前後を照らす。#3959）
         == {"by", "id", "key", "outcome", "reason", "round", "section", "text", "severity", "impact", "raised_severity", "occurrence"}
-        | {REVIEW_FIXED_AT}
+        # 重い指摘は判定役の確認の結果を持つ（#4363）
+        | {REVIEW_FIXED_AT, "check"}
         for f in state["findings"]
     )
     # 相手役の引数は質問のほかは participants が組んだとおり（受け入れ条件 5）

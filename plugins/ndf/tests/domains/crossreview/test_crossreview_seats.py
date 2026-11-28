@@ -16,6 +16,7 @@ from ndf.domains.crossreview import cli, drive, seats
 from ndf.domains.crossreview import finish_decide as fin
 
 from ._repos import BRANCH, run_cli
+from ._judge import is_judge
 from .test_crossreview_run import FAIL, FAILED_WITH_FINDINGS, NO_FINDINGS, PR, Fake, _state, seat_of
 
 # 相手役に codex と kiro を名指す起動（`test_crossreview_run._run` と同じ）
@@ -89,7 +90,7 @@ class _Denied(Fake):
 
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
         status = super().__call__(spec)
-        if spec.agent == "claude" and "--restricted" in spec.argv:
+        if spec.agent == "claude" and "--restricted" in spec.argv and not is_judge(spec):
             found = re.search(r"差分は (\S+?)（", spec.argv[-1])
             assert found is not None
             body = json.loads(spec.paths.out.read_text(encoding="utf-8"))

@@ -1,0 +1,7 @@
+{
+  "summary": "cross-review の設計の PR のラウンドの上限の既定（--max-rounds を省いたとき）",
+  "count": 3,
+  "read_by": [
+    "ndf.domains.crossreview.settings"
+  ]
+}

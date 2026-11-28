@@ -49,20 +49,22 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/crossreview/carry.py` | 新設 | 起動の始めに PR を読み、前の実行の指摘を引き継ぐ | `journal`・`prior_decide`・`threads`・`store` | モジュール、`Prior`、`CarryRun`（Protocol） | 変更（移動）: `reader`・`read_prior`・`read_reviews`・`carry`・`restate`・`detach_revived`・`_settle_resolved`・`_merge_tracked` |
-| `plugins/ndf/src/ndf/domains/crossreview/reviewing.py` | 新設 | 相手役へ渡す資料と指示を組み、席を起動する | `seats`・`criteria_decide`・`prior_decide`・`changes`・`scope_decide` | モジュール、`Prepared`、`Reviewed`、`ReviewingRun`（Protocol） | 変更（移動）: `write_diff`・`remarks`・`remarks_file`・`review_prompt`・`review_round`・`_fill_seats`・`_prompt_diffs`・`_full_diff` |
+| `plugins/ndf/src/ndf/domains/crossreview/reviewing.py` | 新設 | 相手役へ渡す資料と指示を組み、席を起動する | `seats`・`criteria_decide`・`prior_decide`・`changes`・`scope_decide` | モジュール、`Prepared`、`Reviewed`、`FilledRead`、`ReviewingRun`（Protocol） | 変更（移動）: `write_diff`・`remarks`・`remarks_file`・`review_prompt`・`review_round`・`_fill_seats`・`_prompt_diffs`・`_full_diff` |
 | `plugins/ndf/src/ndf/domains/crossreview/verify_decide.py` | 新設 | 確かめる指摘を選び、指示を組み、回答を読み、下げるかを決める | `criteria_decide` | モジュール、`Verdict`、`Answers` | 新設: `select`・`instruction`・`read`・`lowers` |
 | `plugins/ndf/src/ndf/domains/crossreview/verify.py` | 新設 | 読むだけの claude を 1 回起動して回答を返す | `verify_decide`・`participants` | モジュール、`VerifyRun`（Protocol） | 新設: `ask` |
 | `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 変更 | 指摘の種類の一覧と、相手役への `protect` の指示を持つ | `contracts` | モジュール | 新設: `protect_kinds`・`track_kinds`・`protect_of`・`document_line` / 変更: `reviewer_block`・`downgraded` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 行に `protect` と `check` を書き、下げる・戻すを決める | `criteria_decide`・`verify_decide` | `FindingJournal`、`Checked` | 新設: `apply_checks` / 変更: `enter`・`_raised`・`_raised_again`・`_revive` |
-| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘を入れた直後に判定役を呼ぶ | `carry`・`reviewing`・`verify` | `_Run` | 新設: `_confirm` / 変更: `_round` |
-| `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 下げた行の元の重要度と理由を表に出す | `criteria_decide` | モジュール | 変更: `_finding_rows` |
+| `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 指摘を入れた直後に判定役を呼ぶ | `carry`・`reviewing`・`verify` | `_Run` | 新設: `_confirm_heavy` / 変更: `_round` |
+| `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 下げた行の元の重要度と定型の理由を表に出す | `criteria_decide` | モジュール | 変更: `_finding_rows` |
 | `plugins/ndf/contracts/data/review-criteria.json` | 変更 | 判定役への指示の文と、指摘の種類の一覧を持つ | 無し | データ | — |
+| `plugins/ndf/contracts/data/writing-criteria.md` | 変更 | 文書の種類ごとの読み手の表を、小見出しで切り出せる形にする | 無し | データ | — |
+| `plugins/ndf/src/ndf/contracts/writing.py` | 変更 | 基準の本文から、判定役へ渡すセクションを取り出す | `contracts` | モジュール | 新設: `readers_section`・`supplement_rules` / 変更: `types_section` |
 | `plugins/ndf/contracts/limits/cross-review.remark-chars.json` | 変更 | 読み手のモジュールを `reviewing` にする | 無し | データ | — |
 | `plugins/ndf/contracts/limits/cross-review.remarks-total.json` | 変更 | 同上 | 無し | データ | — |
 | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` | 変更 | 「指摘の基準」に確認の決まりを足す | 無し | 文書 | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_verify.py` | 新設 | 判定役の判断・起動・適用を確かめる | 上の各モジュール | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_journal.py` | 変更 | `protect`・下げた行の出し直しを確かめる | `journal` | テスト | — |
-| `plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` | 変更 | 表の元の重要度と理由を確かめる | `report_decide` | テスト | — |
+| `plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` | 変更 | 表の元の重要度と定型の理由を確かめる | `report_decide` | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_criteria.py` | 変更 | 移した関数の参照名と、`protect` の指示 | — | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_citations.py` | 変更 | 移した関数の参照名 | — | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_documents.py` | 変更 | 移した定数の参照名 | — | テスト | — |
@@ -85,7 +87,7 @@ plugins/ndf/
 | `carry` | `carry.py` | 変更 | `carry(run: CarryRun, prior: Prior) -> bool` | 前の実行が残した指摘を引き継ぎ、状態が変わったかを返す（保存は呼び手がする） |
 | `restate` | `carry.py` | 変更 | `restate(run: CarryRun) -> bool` | 前の MVV で決めた判定を外し、外したかを返す |
 | `detach_revived` | `carry.py` | 変更 | `detach_revived(run: CarryRun) -> None` | 出し直された指摘から古いスレッドの記録を外す |
-| `review_round` | `reviewing.py` | 変更 | `review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], launch: Launcher) -> Reviewed` | 席を並べて起動し、起動し直しと席の埋めまで行う |
+| `review_round` | `reviewing.py` | 変更 | `review_round(run: ReviewingRun, round_no: int, prep: Prepared, remarks: Optional[Path], launch: Launcher, held: Optional[Reviewed] = None) -> Reviewed` | 席を並べて起動し、起動し直しと席の埋めまで行う。判定待ちで残った結果 `held` があれば、結果の無い席だけを起動する |
 | `write_diff` | `reviewing.py` | 変更 | `write_diff(run: ReviewingRun, round_no: int, suffix: str, base: str, head: str) -> Path` | `base...head` の差分をラウンドのファイルへ書く |
 
 `reader`・`read_prior`・`read_reviews`・`remarks`・`remarks_file`・`review_prompt` はシグネチャも責務も変えないので、地図に名前だけを置く。相手役の出力の形の文（`FINDINGS_SHAPE`）と定数 `REMARK_CHARS`・`REMARKS_TOTAL`・`RETRY_SUFFIX`・`REMARKS_SUFFIX` は `reviewing.py` へ、`RESOLVED_ELSEWHERE` は `carry.py` へ移す。
@@ -107,7 +109,7 @@ plugins/ndf/
 | `protect_kinds` | `criteria_decide.py` | 新設 | `protect_kinds() -> tuple[str, ...]` | 保護の種類 5 つを表から返す |
 | `track_kinds` | `criteria_decide.py` | 新設 | `track_kinds() -> tuple[str, ...]` | 指摘の種類の全部（保護の種類と `delivered`・`approval`）を返す |
 | `protect_of` | `criteria_decide.py` | 新設 | `protect_of(value: object) -> tuple[str, ...]` | 値が文字列の並びなら、保護の種類だけを表の順で重ねずに返し、ほかは空を返す |
-| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool) -> list[str]` | 文書を含む PR なら、判定役の指示に基準 6 の 1 行を返す。基準 6 は指摘の基準の 6 番（この PR で変わった Markdown の、想定した読み手に通じない文）で、番号と文は `contracts/data/review-criteria.json` の `document` にある。今は相手役と修正担当の指示に `criteria_decide.document_block` が足している |
+| `document_line` | `criteria_decide.py` | 新設 | `document_line(documents: bool, rows: Sequence[Mapping[str, Any]]) -> list[str]` | 文書を含む PR で、渡す指摘に文書の指摘がありうる（`path` が Markdown か、`path` が無い）ときは、判定役の指示に足す行として、基準 6 の 1 行と、「文書の種類ごとの読み手」のセクション（`writing.readers_section`）と、「エンジニア向けの補足」の適用条件と、補足を除き読み手を変えない規則の 2 つの段落（`writing.supplement_rules`）と、「4 つの型と 2 つの区分」のセクション（`writing.types_section`）を返す。ほかは空を返す。この渡し方にした理由は下の「文書の基準の渡し方」にある。基準 6 は指摘の基準の 6 番（この PR で変わった Markdown の、想定した読み手に通じない文）で、番号と文は `contracts/data/review-criteria.json` の `document` にある。今は相手役と修正担当の指示に `criteria_decide.document_block` が足している |
 | `reviewer_block` | `criteria_decide.py` | 変更 | `reviewer_block(focus: Sequence[str], mvv: Optional[Snapshot] = None) -> list[str]` | 相手役へ `protect` の書き方の行を足す |
 | `downgraded` | `criteria_decide.py` | 変更 | `downgraded(row: Mapping[str, Any]) -> bool` | 判定役の確認で下げた行（`check.lowered`）を「入れるときに下げた行」に数えない |
 
@@ -129,7 +131,86 @@ plugins/ndf/
 | `protect_kinds` | `criteria_decide._table` | `grep -rn "def .*protect\|\"protect\"" --include=*.py src/ndf` | 保護の種類を返す関数は無い。表の読み口 `_table` を使う |
 | `track_kinds` | 同上 | 同上 | `_table` を使って作る |
 | `protect_of` | `journal._located`（位置の形の検査） | 同上 | 形の検査の書き方をそろえる。対象の値が違うので別の関数にする |
-| `document_line` | `criteria_decide.document_block` | `criteria_decide.py` を読んだ | `document_block` は文書の基準の全文を足すので、判定役には 1 行だけを返す関数を置く。文は同じ表の `document` から取る |
+| `document_line` | `criteria_decide.document_block` | `criteria_decide.py` を読んだ | `document_block` は文書の基準の全文を足すので、判定役には基準 6 の 1 行と、読み手の表、補足の扱いの 2 つの段落、型のセクションだけを返す関数を置く。1 行の文は同じ表の `document` から取り、本文は `writing.readers_section`・`writing.supplement_rules`・`writing.types_section` から取る |
+
+### 文書の基準の渡し方
+
+判定役には、文書の指摘がありうるときだけ、文書の種類ごとの読み手のセクション、補足の扱いの 2 つの段落（下の「読み手の規則を渡す範囲」）、型のセクションを指示に埋め込んで渡す。読み手の表も渡すのは、4 つの型が想定した読み手を前提に文を判定する表だからである。文書の種類ごとの読み手と、文書自身が決めた読み手を優先する規則を知らないと、判定役はエンジニアに通じるかだけで判断し、要求仕様書などの指摘を誤って下げうる。
+
+渡し方は、次の 3 つの方式を比べた。
+
+- 直接渡す: 文書を含む PR では、いつも埋め込む
+- 遅延読み込み: 指示には基準のファイルの場所だけを書き、文書の指摘を確かめるときに読ませる
+- 条件で渡す（採用）: 渡す指摘に文書の指摘がありうるときだけ埋め込む。指摘の場所は起動の前に分かる
+
+2026-11-27 に、判定役と同じ引数の `claude -p`（claude 2.1.332、claude-sonnet-5-5）を、各条件 5 回ずつ打った。対象は 6 行ほどのコードと文書の見本で、指摘は「コードの 1 件」と「コードと文書の 2 件」の 2 組である。値は平均で、入力の token はキャッシュの読み書きを含む。
+
+| 指摘 | 方式 | 入力の token | Tool の呼び出し | 秒 |
+| --- | --- | --- | --- | --- |
+| コードだけ | 直接渡す | 17,577 | 4.8 | 10.6 |
+| コードだけ | 遅延読み込み | 15,414 | 4.8 | 10.4 |
+| コードだけ | 条件で渡す | 14,779 | 4.6 | 10.6 |
+| 文書を含む | 直接渡す（条件で渡すも同じ指示） | 18,000 | 5.0 | 12.1 |
+| 文書を含む | 遅延読み込み | 25,745 | 6.0 | 12.6 |
+
+遅延読み込みは、文書の指摘があると Tool の呼び出しが 1 回増え、読んだ基準の全文がその後の入力にも載る。条件で渡す方式は、どちらの組でも入力の token が最も小さい。秒の差は小さく、方式を分ける理由にしていない。見本が小さいので、token と秒の絶対値は実際の PR の値ではない。
+
+入力が増えるのは、Markdown を含む PR で、判定役へ渡す指摘に `path` が Markdown のものか `path` の無いものがあるときである。このときは、指摘の内容がコードについてでも、上の読み手の表、2 つの段落、型のセクションを渡す。渡す指摘のすべてに Markdown でないファイルの `path` があれば、入力は増えない。
+
+#### 読み手の規則を渡す範囲
+
+判定役へ渡す読み手の規則は、「文書の種類ごとの読み手」のセクションと、「読み手が複数いる文書」のセクションから取り出す 2 つの段落である。前者は、読み手の表、指示書や文書自身が決めた読み手を表より優先する規則、読み手が複数いるときは知識が最も少ない人に合わせる規則を持つ。2 つの段落は、「エンジニア向けの補足」の適用条件と、「補足を除き、1 つの文書の中で想定する読み手を途中で変えない」という規則である。承認資料の書き分けなど、同じセクションのほかの規則は渡さない。
+
+2 つの段落を渡す理由は、次のとおりである。
+
+- **適用条件**: 補足をエンジニアに向けて書けるのは、ほかの読み手が読まなくても判断できるときだけである。この条件が無いと、判定役は「見出しの下にある」という理由だけで指摘を退けられる。非エンジニアの判断に必要な完了条件が補足に置かれていても、直されずに残る
+- **読み手を変えない規則**: この規則が無いと、判定役は本文の途中の「ここからは開発者向け」のような指定を、文書自身が決めた読み手として扱い、指摘を退けうる。非エンジニアに通じない完了条件が、直されずに残る
+
+2026-11-27 に、同じ起動の引数・claude・モデルで、次の 4 つの案を、2 件の指摘について各 5 回打った。
+
+| 案 | 型のセクションに足す読み手の規則（字数） |
+| --- | --- |
+| 型だけ | 無し |
+| 必要な箇所 | 読み手の表、優先の規則、読み手が複数いるときの規則（1,159 字） |
+| 補足の規則も | 必要な箇所に、「エンジニア向けの補足」の書き方と、補足を除き読み手を変えない規則を足す（1,372 字） |
+| 全体 | 読み手の決め方の章の全部（1,601 字） |
+
+対象は 4 行ほどのコードと、読み手を明記していない要求仕様書の見本である。指摘はどちらも「エンジニアの用語だけの 1 文が、非エンジニアに通じない」という major で、文の置き場所が違う。本文の文への指摘は成り立つと答えるのが正しい。「エンジニア向けの補足」の見出しの下の文への指摘は、退けるのが正しい。
+
+判定役のやり取りの回数（`num_turns`）は回ごとに変わり、指示は毎回の入力に載る。そこで入力の token は、`num_turns` が 3 の回どうしで比べた。値はキャッシュの読み書きを含む。
+
+| 案 | 本文: 成り立つと答えた回数 | 補足: 退けた回数 | 入力の token（本文 / 補足） |
+| --- | --- | --- | --- |
+| 型だけ | 5 / 5 | 4 / 5（残り 1 回は判断できない） | 11,594 / 11,705 |
+| 必要な箇所 | 5 / 5 | 5 / 5 | 13,702 / 13,813 |
+| 補足の規則も | 5 / 5 | 5 / 5 | 14,090 / 14,201 |
+| 全体 | 5 / 5 | 5 / 5 | 14,502 / 14,613 |
+
+この測定では、補足の規則を渡さない「必要な箇所」でも、判定役は 5 回とも補足への指摘を退けた。回答の理由は、見出しから文書自身がその箇所の読み手をエンジニアと決めている、という趣旨だった。ただし、見出しだけを根拠にする判定は、上の条件を確かめていない。そのため、条件を持つ段落は渡す。補足の外で読み手を切り替える場合は、この測定の対象にしていないので、下で別に測った。
+
+型だけの案との判定の差は、補足の指摘の 1 回だけで、読み手の表が効いたとは言えない。それでも表を渡すのは、読み手の表と規則の中身による。見本は小さく、表の読み手によって判定が分かれる指摘は測っていない。
+
+基準の本文には、読み手の表のセクションを行の並びに頼らず取り出せるように小見出しを置き、読み手が複数いるときの規則を表の前の段落へ移した。
+
+条件の渡し方は、2026-11-27 に同じ claude とモデルで、要求仕様書の 3 つの見本を各 5 回打って比べた。指摘はどれも、補足の中の 1 文が非エンジニアに通じないという major である。数字は正しく判定した回数である。
+
+| 見本 | 正しい判定 | 条件なし | セクション全体 | 適用条件の段落だけ |
+| --- | --- | --- | --- | --- |
+| 完了条件の章に補足しか無い | 成り立つ | 5 / 5 | 5 / 5 | 5 / 5 |
+| 本文が「次の補足の条件」を完了条件にする | 成り立つ | 5 / 5 | 5 / 5 | 5 / 5 |
+| 本文だけで完了条件が分かり、補足は実装の詳細 | 退ける | 5 / 5 | 5 / 5 | 5 / 5 |
+| 入力の token（`num_turns` が 3 の回） | — | 約 13,300 | 約 13,900 | 約 13,600 |
+
+条件なしの指示でも誤判定は再現しなかったので、この測定は条件の効果を示していない。段落だけの案では、退けた回答と成り立つと答えた回答の一部が、「ほかの読み手は読まなくても判断できる」という条件を理由に挙げた。セクション全体を渡したときと同じ判定と理由を、少ない入力で保てるので、セクション全体は渡さず段落を選んで取り出す。
+
+読み手を変えない規則の段落を足した指示（採用）は、同じ日に同じ claude とモデルで各 5 回打った。上の 3 つの見本に、要求仕様書の完了条件の本文が「ここからは開発者向けに書く」と読み手を切り替える見本を足した。正しい判定は「成り立つ」である。
+
+| 見本 | 段落を足す前 | 足した後 |
+| --- | --- | --- |
+| 本文の途中で読み手を切り替える | 5 / 5 | 5 / 5 |
+| 上の表の 3 つの見本 | 上の表のとおり | 各 5 / 5 |
+
+足す前の指示でも誤判定は再現しなかった。足す前の回答の一部は、途中の 1 文は読み手を決め直す指定ではない、という判定役自身の解釈を理由にしていた。解釈に任せないために、規則を渡す。指示は 51 字長くなった。入力の token は、`num_turns` が 3 の回で約 13,600〜13,700 である。
 
 ### 単体テストの観点
 
@@ -148,11 +229,12 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `select` | `verify_decide.py` | 新設 | `select(rows: Sequence[Mapping[str, Any]], use_tracks: bool = False) -> list[Mapping[str, Any]]` | 呼び手が渡す指摘（このラウンドで新しく出たか戻った critical・major）のうち、判定役へ渡すものを返す |
-| `instruction` | `verify_decide.py` | 新設 | `instruction(rows: Sequence[Mapping[str, Any]], diff: Path, worktree: Path, criteria: Sequence[str]) -> str` | 判定役への指示を組む。誰が書いた指摘か（`by`）は載せない |
+| `instruction` | `verify_decide.py` | 新設 | `instruction(listed: Path, diffs: Sequence[Path], worktree: Path, criteria: Sequence[str]) -> str` | 判定役への指示を組む。指摘の文は載せず、指摘の一覧のファイル `listed` のパスを書く |
+| `listing` | `verify_decide.py` | 新設 | `listing(rows: Sequence[Mapping[str, Any]]) -> str` | 指摘の一覧のファイルの中身（指摘 1 件が JSON の 1 行）を組む。誰が書いた指摘か（`by`）は載せない |
 | `read` | `verify_decide.py` | 新設 | `read(found: Optional[Sequence[Mapping[str, Any]]], ids: Sequence[str]) -> Answers` | 回答の並びを指摘ごとの `Verdict` にし、読めない分を注意にする |
 | `lowers` | `verify_decide.py` | 新設 | `lowers(row: Mapping[str, Any], verdict: Verdict) -> bool` | 成り立たないと答えた指摘を minor へ下げてよいかを返す |
 
-重要度とラウンドで指摘を絞るのは呼び手（下の `drive._confirm`）で、`select` は指摘の持つ印だけを見る。
+重要度とラウンドで指摘を絞るのは呼び手（下の `drive._confirm_heavy`）で、`select` は指摘の持つ印だけを見る。
 
 `mvv` か `protect` のどちらか一方でも持つ指摘は、回答がどうであっても下げない。それでも渡す場合があるのは、回答の指摘の種類（`tracks`）を後の処理が使うためである。その指摘だけのために判定役を起動すると費用に見合わないので、起動するのは次のどちらかの場合に限る。
 
@@ -161,7 +243,7 @@ plugins/ndf/
 
 - `read`
   - 事前条件: `found` は出力の最後の `{"verdicts": [...]}` の要素（見つからなければ None）
-  - 事後条件: `Answers.verdicts` は有効な回答と `holds` が null の回答だけを持つ。不正な回答・知らない番号・回答の無い番号は `Answers.warnings` に番号を載せる
+  - 事後条件: `Answers.verdicts` は、有効な回答、`holds` が null の回答、保護の種類を示した不正な回答（`invalid` が真）を持つ。渡した番号に有効な回答がなければ、その番号を `Answers.warnings` に載せる。`warnings` は公開の記録に載るので、渡していない番号への回答は番号を写さず、件数だけを載せる
 
 ### 処理の手順
 
@@ -170,10 +252,7 @@ plugins/ndf/
 | `select` | 指摘が `redline` を持つか、NDF の指摘である | 渡さない |
 | `select` | 上に当たらず、`mvv` も `protect` も持たない（ここで「普通の指摘」と呼ぶ） | 渡す |
 | `select` | 上に当たらず、`mvv` か `protect` を持つ | `use_tracks` が真か、同じ呼び出しに普通の指摘が 1 件でもあれば渡す。どちらでもなければ渡さない |
-| `read` | `holds` が真で `condition`・`path`・`result` がすべて空でない | 有効 |
-| `read` | `holds` が偽で `reason` が空でない | 有効 |
-| `read` | `holds` が null | `Verdict(holds=None)`。`tracks` を残し、理由を注意にする |
-| `read` | 上のどれでもない | 不正。`verdicts` に入れず注意にする |
+| `read` | 回答が有効か、判断できないか、不正か | 設計文書の「[回答の形](./issue-4363-design.md#回答の形)」の表で分ける。有効な回答と判断できない回答は `Verdict` にして `verdicts` に入れる（判断できない回答は `holds=None` とし、`tracks` を残して注意にする）。不正な回答は注意にする。そのうち `tracks` に保護の種類があるものは、`holds=None`・`invalid=True` とし、保護の種類だけを持つ `Verdict` にして `verdicts` に入れる。ほかの不正な回答は入れない。注意には判定役が書いた文を写さない（設計文書の同じ節） |
 | `lowers`（順 1） | `holds` が偽でない（示せた・null） | 下げない |
 | `lowers`（順 2） | 指摘が `redline`・`mvv`・`protect` のどれかを持つか、NDF の指摘である | 下げない |
 | `lowers`（順 3） | 回答の `tracks` に保護の種類があるか、7 つの種類に無い文字列がある | 下げない |
@@ -185,7 +264,7 @@ plugins/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `Verdict(id, holds, condition, path, result, reason, tracks, unknown)` | 型 | `verify_decide.py` | `unknown` は `tracks` に種類の表に無い文字列があったか。`tracks` は表にある値だけ |
+| `Verdict(id, holds, condition, path, result, reason, tracks, unknown, invalid)` | 型 | `verify_decide.py` | `unknown` は `tracks` に種類の表に無い文字列があったか。`tracks` は表にある値だけ。`invalid` は不正な回答から保護の種類だけを残したもの |
 | `Answers(verdicts, warnings)` | 型 | `verify_decide.py` | `verdicts` は番号から `Verdict` |
 
 ### 既存の部品の再利用
@@ -193,7 +272,7 @@ plugins/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `select` | `journal.FindingJournal.handable` | `grep -rn "verdicts\|def confirm\b" --include=*.py src/ndf` | 判定役への振り分けは無い。`handable` は修正担当向けで条件が違う |
-| `instruction` | `criteria_decide.criteria_lines`・`reviewer_block` | `criteria_decide.py` を読んだ | 基準の行は `criteria_lines` を呼び手が渡して使う。指示の骨組みは新しく書く |
+| `instruction` | `criteria_decide.criteria_lines`・`reviewer_block` | `criteria_decide.py` を読んだ | 基準の行は呼び手の `verify.ask` が `criteria_lines` と `document_line` で組んで渡す。指示の骨組みは新しく書く |
 | `read` | `participants.listed_of(text, "verdicts")` | `grep -rn "def listed_of" src/ndf` | 出力の最後の JSON を取り出すのは `listed_of` を `verify.ask` で使う。回答の意味の検査だけを新しく書く |
 | `lowers` | `criteria_decide.effective_severity` | `criteria_decide.py` を読んだ | 登録のときの下げと、確認の後の下げは条件が違うので別の関数にする（設計文書の決定 2 の表の 2 段階） |
 
@@ -202,7 +281,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `select` | 新しい major を渡す | MVV の指摘と `protect` の指摘だけなら `use_tracks` が偽で空、真で渡る。ほかの指摘が 1 件あれば一緒に渡る | `redline` と NDF の行は常に渡らない |
-| `instruction` | 番号・本文・重要度・1 文・場所・差分のパスを含む | 1 文や場所の無い行 | 指摘の `by` の値が指示に現れない |
+| `listing`・`instruction` | 一覧が番号・本文・重要度・1 文・場所を持ち、指示が一覧と差分のパスを含む | 1 文や場所の無い行 | 指摘の本文と 1 文が指示に現れない。`by` の値が一覧にも指示にも現れない |
 | `read` | 有効な 2 件を読む | `holds` が null で `tracks` を持つ | `found` が None・知らない番号・回答の欠け・3 つの文の欠け・理由の無い偽・`holds` が文字列 |
 | `lowers` | 成り立たない普通の指摘は真 | `tracks` が `delivered`・`approval` だけなら真 | 保護の種類・知らない値・行の `protect`・`mvv`・`redline`・NDF は偽 |
 
@@ -214,20 +293,29 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `ask` | `verify.py` | 新設 | `ask(run: VerifyRun, round_no: int, rows: Sequence[Mapping[str, Any]], diff: Path, launch: Launcher) -> verify_decide.Answers` | 読むだけの claude を 1 回起動し、回答を `Answers` にして返す。失敗は空の回答と注意にする |
+| `ask` | `verify.py` | 新設 | `ask(run: VerifyRun, round_no: int, rows: Sequence[Mapping[str, Any]], diffs: Mapping[str, Sequence[Path]], launch: Launcher) -> verify_decide.Answers` | 読むだけの claude を 1 回起動し、回答を `Answers` にして返す。失敗は空の回答と注意にする |
 
 - `ask`
-  - 事前条件: `rows` は空でない。`run.input_dir`（この実行の資料のディレクトリ）に `diff` がある
+  - 事前条件: `rows` は空でない。`diffs` は指摘の番号ごとに、その指摘を確かめる差分のファイル（1 つか 2 つ）を持ち、呼び手（`_confirm_heavy`）が決める。どのファイルも `run.input_dir`（この実行の資料のディレクトリ）にある
+  - 渡す資料: 起動の間だけの一時ディレクトリ（`tempfile.TemporaryDirectory`）の中の資料のディレクトリ `in` に、差分・MVV の本文と共通原則の写し・指摘の一覧を置く。写し・一覧・指示に埋める基準の行には、どれも `run_log.redact` の伏せ字を掛ける。判定役へ渡す前の伏せ字は一部の形式だけで、秘密を守る境界ではない。レビュー担当には差分を伏せ字なしで渡し、レビュー担当と修正担当は作業場所を直接読める。判定役の作業場所を分けても、AI のサービスへ渡る情報は減らない。利用者の承認（2026-11-28）。元の差分は変えず、判定役に読ませない。伏せた結果で確かめられない指摘は、起きないと示せないので下がらない
   - 事後条件: 例外で駆動を止めない。起動し直さない
-  - 副作用: claude を 1 回起動する（`participants.read_only_launch`。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ）。出力は状態の保存先の `round<n>-verify.*` に書く。過程の行と注意を `run.note` で足す
+  - 指示の組み立て: `ask` は次の順で、指摘の一覧のファイル（資料のディレクトリ `in` の `round<n>-verify-findings.jsonl`。中身は、指摘の秘密を `run_log.redact` で伏せてから `verify_decide.listing` で組む。`diffs` の差分が合わせて 2 つ以上なら、各行にキー `diffs` でその指摘の差分のパスを足す）を書き、`verify_decide.instruction` の `criteria` に渡す行を作る。`rows` は `_confirm_heavy` が `verify_decide.select` から受け取った指摘で、`run.documents` は PR の差分に Markdown のファイルがあるかである。この手順のために、`VerifyRun` は `run.cfg`・`run.snapshot`・`run.documents` を持つ
+    1. 承認済みの MVV があれば（`criteria_decide.approved(run.snapshot)`）、MVV の本文（`path`）と共通原則（`principles_path`）を `in` へ写す。元のファイルは利用者の状態の保存先にあり、判定役は読めないためである。読める場所は増やさない
+    2. `criteria_decide.criteria_lines(run.cfg.settings.focus, snapshot)` を呼ぶ。`snapshot` は、承認済みの MVV があれば `run.snapshot._replace(path=<本文の写し>, principles_path=<共通原則の写し>)`、無ければ `run.snapshot` である
+    3. 2 の戻り値の後に `criteria_decide.document_line(run.documents, rows)` の戻り値を加え、`instruction` に渡す
+  - 副作用: claude を 1 回起動する（`participants.traced_launch`。出力は stream-json。Tool は `participants.READ_TOOLS`、読める場所は worktree と資料のディレクトリ `in`）。出力は、起動の間だけの一時ディレクトリ（`tempfile.TemporaryDirectory`。権限 0700。`verify.ask` の中で閉じる）の `out` の `round<n>-verify.*` に書く。起動の後は、成功でも失敗でも、出力のファイルを、状態の保存先の起動ごとに違う名前 `round<n>-verify-<接尾辞>.*` の新しいファイル（権限 0600。`open` の `x` モードの排他作成）に書く。前からあるファイルやシンボリックリンクは開かず、置き換えない。判定役の監視中に割り込まれた場合（Ctrl+C など）も同じである。この場合は、起動と監視を受け持つ `agents` が、判定役のプロセスグループを停止してから割り込みを呼び元へ伝える。判定役は別セッションで動いていて端末の割り込みが届かず、停止しないと、監視の時間上限が効かないまま動き続けるためである。停止を待つ間にもう一度割り込まれた場合は、猶予を打ち切って SIGKILL を送ってから伝える。記録の片付けと、残った一時ディレクトリの回収は持たない（「[設計との食い違い](#設計との食い違い)」）。過程と注意に載せるのはエラーの種別と資料の種類・ファイル名までで、絶対パスを含む詳細は実行者だけが読める `.detail.log` に書く。起動と監視を受け持つ層が監視中に出す早期の警告も、判定役の起動（`Launch.private`）では種類だけを知らせ、標準エラーの行は載せない。行は実行者だけが読める標準エラーのログに残る。指摘の一覧は、権限 0700 の資料のディレクトリ `in` に書き、起動の後に消える。過程の行と注意を `run.note` で足す。`launch` の返す状態が `done` でないときは、過程には状態だけを載せ、状態の詳細（標準エラーの原文を含みうる）は出力と同じディレクトリの `round<n>-verify.detail.log` に書き、ほかの出力と一緒に保存する。標準エラーのログは子プロセスが書いたまま変えない。起動を試みて保存できた出力の名前は、回答が無くても `Answers.record` で返し（1 つも保存できなければ空）、`drive` はラウンドの記録の `judge_output` に残す。`judge_output` は回答の有無を表さず、有効な回答があった指摘には `findings[].check` が記録される。どのラウンドの `judge_output` にも無い出力は、保存の前に中断した起動の分か、起動の前の失敗の詳細である。判定役を起動するラウンドでは、`drive` が起動の直前に、相手役の結果（`reviewing.pending`）を状態ファイルの `pending_review` へ保存し、ラウンドを記録するときに外す。結果の無い席がある場合は、その席の名前も保存する。打ち直しは保存した指摘を残し、`reviewing.review_round` がその席だけを起動する。成功した席の指摘を失わず、同じ差分を読み直す費用も払わないためである。このラウンドで claude に埋めた席を起動し直すときは、初回と同じく全差分を渡す。打ち直しは `reviewing.kept` が、ラウンドの番号・head・範囲・詳細レビューを求めるセクション・足すべき内容（`--findings`）の ID と本文・`Basis`・席の数が合うときだけ使う。`handed`・`unread`・`full_seats` のどれかが無い前のバージョンの記録は、合わないとして相手役の起動からやり直す。`history` だけが無い記録は使う。`history` は振動の判定に使う前の 2 ラウンドの指摘のキーで、打ち直しは `run.history` に戻す。照合は `scope_decide.same_review` で行い、根拠の記述を確かめ終えたか（`mvv_checked`）は見ない
 
 ### 異常系の処理
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ask` | 起動が終わらない | 利用上限・無進捗・監視の上限・起動の拒否 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
-| `ask` | 差分を読めない | claude の `permission_denials` に差分のファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` に差分のファイル名（絶対パスは過程にだけ） | 同上 |
+| `ask` | 資料か出力のファイルを用意できない | 差分か MVV の写し元が無い・指摘の一覧を書けない・一時ディレクトリを作れない | 起動の前の `OSError` | 起動せず、既定値で続ける | `warnings` に 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
+| `ask` | 起動が成功しない | 利用上限・無進捗・監視の上限・起動の拒否・非ゼロの終了 | `launch` の返す状態が `done` でない | 既定値で続ける（どの指摘も下げない） | `warnings` に状態を 1 行。終了コードは変えない | 次のラウンドで新しく出た指摘だけがまた確かめられる |
+| `ask` | 差分・指摘の一覧・MVV の本文と共通原則の写しのどれかを読めない | claude の `permission_denials` にそのファイルがある | `participants.denied_reads` | 既定値で続ける | `warnings` と過程にはファイル名だけ。絶対パスは実行者だけが読める `.detail.log` | 同上 |
+| `ask` | 差分と指摘の一覧を読んだ記録が無い | 判定役が資料を読まずに回答した | `participants.read_files`（stream-json の `Read` の結果の行の範囲を合わせ、最後の行まで届いたファイル） | 成り立たないとした回答を採らない（起きるとした回答と指摘の種類は残す）。保存する出力には結果の行と Tool の呼び出しだけを残す | 否定の回答があれば `warnings` に 1 行 | 同上 |
 | `ask` | 回答が読めない | 出力が無い・JSON でない・`verdicts` の配列が無い | `participants.claude_answer` と `listed_of` | 既定値で続ける | `warnings` に 1 行 | 同上 |
+| `ask` | 出力の外側を確かめられない | 外側が JSON でない・文字列の `result` が無い・`permission_denials` が辞書だけの並びでない | `ClaudeAnswer.verified` が偽 | 成り立たないとした回答を採らない（起きるとした回答と指摘の種類は残す） | 否定の回答があれば `warnings` に 1 行 | 同上 |
+| `ask` | 出力の記録を状態の保存先に書けない | 保存先に書けない・同じ名前のファイル・リンク・ディレクトリがある | 起動の後の `OSError` | 回答の扱いは変えない | 過程に記録の名前とエラーの種別の 1 行。終了コードは変えない | その記録は残らない |
 
 ### ログと記録の出力
 
@@ -245,7 +333,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `ask` | 偽の起動が回答を返すと `Answers` になる。起動の引数が読むだけの Tool と読める場所の限定を持つ | `verdicts` が空の配列 | 起動の失敗・差分の読み取り拒否・JSON の無い出力で、`verdicts` が空で注意が 1 件。起動は 1 回だけ |
+| `ask` | 偽の起動が回答を返すと `Answers` になる。起動の引数が読むだけの Tool と読める場所の限定を持つ。承認済みの MVV があれば、指示の基準 5 が資料のディレクトリの写しを指す。差分・写し・一覧・指示の認証情報は伏せる | `verdicts` が空の配列 | 起動の失敗・差分の読み取り拒否・JSON の無い出力で、`verdicts` が空で注意が 1 件。起動は 1 回だけ |
 
 ## ジャーナル（journal）
 
@@ -255,7 +343,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `enter` | `journal.py` | 変更 | `enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None) -> frozenset[str]` | 今の登録に加え、このラウンドで新しく出たか戻った行の番号を `self.fresh` に残す |
+| `enter` | `journal.py` | 変更 | `enter(self, round_no: int, raised: Sequence[dict[str, Any]], items: Sequence[str] = (), mvv: Optional[str] = None) -> frozenset[str]` | 今の登録に加え、このラウンドで新しく出たか戻った行のうち、判定役へ渡す候補の番号を `self.fresh` に残す。戻った行は `impact` を今回の値に置き換え、今回の `impact` が無ければ候補にしない。そのラウンドに行と内容（本文・`impact`・パス・行・見出し）の違う重い報告か、`protect` の報告がある行も候補にしない |
 | `apply_checks` | `journal.py` | 新設 | `apply_checks(self, asked: Sequence[str], verdicts: Mapping[str, verify_decide.Verdict]) -> Checked` | 確認の結果を行に書き、下げる行を下げる |
 | `_raised_again` | `journal.py` | 変更 | シグネチャは変えない | 出し直しの `protect` を足し、下げた行の重要度の扱いを分ける |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 戻った行から `check` を外す（`protect` は残す） |
@@ -264,13 +352,13 @@ plugins/ndf/
 
 - `apply_checks`
   - 事前条件: `asked` は `verify_decide.select` が返した行の番号
-  - 事後条件: 有効な回答（`holds` が真か偽）を持つ行は `check` を持つ。`holds` が null か回答の無い行は `check` を持たず、重要度が変わらない。`verdicts` にある回答（有効な回答と `holds` が null の回答）の `tracks` のうち保護の種類は、行の `protect` に足される。不正な回答は `verdicts` に入らないので、その `tracks` は使わない。下げた行は `severity` が minor、`check.lowered` が真で、`raised_severity` のキーを持つ
+  - 事後条件: 有効な回答（`holds` が真か偽）を持つ行は `check` を持つ。`holds` が null か回答の無い行は `check` を持たず、重要度が変わらない。`verdicts` にある回答の `tracks` のうち保護の種類は、行の `protect` に足される。不正な回答が示した保護の種類も足される。下げた行は `severity` が minor、`check.lowered` が真で、`raised_severity` のキーを持つ
 
 ### 処理の手順
 
 下げた行（`check.lowered` が真）が出し直された場合、`_raised_again` は次のとおり扱う。下げていない行の扱いは今のまま変えない。
 
-下げた行には、設計の不変条件 I1（判定役の確認で下げた指摘は minor のままで、出し直されても戻らない。後から保護の種類、MVV の項目、必ず人の承認が要る操作のどれかが示された場合は例外）がある。次の表の A と B のどちらにも当たらない出し直しは I1 のとおりで、重要度を変えず、`check.lowered` を真のままにする。
+下げた行には、設計の不変条件 I1（判定役の確認で下げた指摘は minor のままで、同じ内容の出し直しでは戻らない。後から保護の種類、MVV の項目、必ず人の承認が要る操作のどれかが示された場合と、内容の違う重い出し直しがあった場合は例外）がある。内容の違う重い出し直し（本文・`impact`・パス・見出しのどれかが行と違う critical・major。行の番号は比べない）があれば、`_unlower` が `check.lowered` を偽、`check.unlowered` を真にして、重要度を元の重要度（最低 major）へ戻す。本文と位置は変えない。次の表の A と B のどちらにも、内容の違いにも当たらない出し直しは I1 のとおりで、重要度を変えず、`check.lowered` を真のままにする。
 
 | 当たる出し直し | 扱い |
 | --- | --- |
@@ -281,6 +369,10 @@ B で `_classify` を当てた結果は次のとおりである。
 
 - MVV の項目（`Value 5` など）を挙げた: 重要度を major 以上に固定する
 - 必ず人の承認が要る操作（`P<番号>`・`C<番号>`）だけを挙げた: 行に `redline` を付けるが、`_classify` は重要度を変えない。重要度は、今回の出し直しの重要度と minor の重い方になる（今回が critical か major ならその値、minor か nit なら minor、重要度が書かれていなければ major）。minor のままでも `redline` を持つので、人の承認を待つ指摘として扱う
+
+A か B で下げた扱いを抜けた行（`check.unlowered`）が `protect` を持つ場合は、出し直しのたびに、行の重要度と固定する前の重さを元の重要度（最低 major）まで上げる。別々の相手役の出し直しを処理する順で、重さを変えないためである。
+
+下げた扱いの解除（A と B の `check.lowered` を偽にする処理）は、`enter` がラウンドのすべての出し直しを先に調べて行う（`_unlower`）。そのため、同じラウンドの A にも B にも当たらない出し直しの重要度も、処理の順によらず行に重なる。
 
 A と B の両方に当たる場合は、A の次に B を当てる。保護の種類は行に残り、重さと `redline` は B の結果になる。
 
@@ -323,8 +415,8 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `enter` | `protect` が行に残り、`fresh` に新しい行と戻った行だけが入る | 同じラウンドの 2 件の `protect` を合わせる | `protect` が文字列なら持たない |
-| `apply_checks` | 次の 4 つ。(1) 成り立たないと答えた普通の major は minor になり、`pending` に出ず、元の重要度が残る。(2) 起きると示せたと答えた指摘は重要度が変わらない。(3) 回答の `tracks` が `authz` と `user_data` の 2 つなら、指摘の `protect` に 2 つとも残り、下がらない。(4) 回答の `tracks` が `delivered` だけで成り立たないと答えた指摘は下がる | 下げる前の重要度が critical の指摘と、`raised_severity` が不明の指摘 | `holds` が null の回答と回答の無い指摘は、`check` が書かれず重要度が変わらず `unconfirmed` に入る。`mvv`・`redline`・`protect` のどれか 1 つでも持つ指摘は、成り立たないと答えても下がらない。不正な回答の `tracks` は `protect` に足されない |
-| `_raised_again` | 保護の種類も MVV の項目も無い出し直しでは、下げた行は minor のまま（I1） | `protect` 付きの出し直しで元の重要度へ戻り `check.lowered` が偽になる。`protect` と MVV の項目の両方を持つ出し直し | MVV の項目を挙げた出し直しは major 以上に固定され、承認の要る操作だけを挙げた出し直しは `redline` が付き、重要度は今回の値と minor の重い方になる |
+| `apply_checks` | 次の 4 つ。(1) 成り立たないと答えた普通の major は minor になり、`pending` に出ず、元の重要度が残る。(2) 起きると示せたと答えた指摘は重要度が変わらない。(3) 回答の `tracks` が `authz` と `user_data` の 2 つなら、指摘の `protect` に 2 つとも残り、下がらない。(4) 回答の `tracks` が `delivered` だけで成り立たないと答えた指摘は下がる | 下げる前の重要度が critical の指摘と、`raised_severity` が不明の指摘 | `holds` が null の回答と回答の無い指摘は、`check` が書かれず重要度が変わらず `unconfirmed` に入る。`mvv`・`redline`・`protect` のどれか 1 つでも持つ指摘は、成り立たないと答えても下がらない。不正な回答の `tracks` は、保護の種類だけが `protect` に足され、`check` は書かれない |
+| `_raised_again` | 保護の種類も MVV の項目も無く、本文・`impact`・パス・見出しも変えない出し直しでは、下げた行は minor のまま（I1） | `protect` 付きの出し直しで元の重要度へ戻り `check.lowered` が偽になる。`protect` と MVV の項目の両方を持つ出し直し | MVV の項目を挙げた出し直しは major 以上に固定され、承認の要る操作だけを挙げた出し直しは `redline` が付き、重要度は今回の値と minor の重い方になる |
 | `_revive` | 直した後の再発で `check` が消え、`protect` が残る。次の確認の `tracks` が空でも下がらない | 無し | 無し |
 
 ## 駆動への組み込み（drive）
@@ -335,15 +427,25 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_confirm` | `drive.py` | 新設 | `_confirm(run: _Run, round_no: int, diff: Path, launch: Launcher, use_tracks: bool = False) -> Checked` | このラウンドの新しい重い指摘を選び、判定役を呼び、ジャーナルへ適用する |
-| `_round` | `drive.py` | 変更 | シグネチャは変えない | `enter` の直後に `_confirm` を呼ぶ。呼ぶ位置は、読めなかった相手役がいるかを確かめる処理よりも、収束の判定よりも前である |
+| `_confirm_heavy` | `drive.py` | 新設 | `_confirm_heavy(run: _Run, round_no: int, diff: Path, launch: Launcher, use_tracks: bool = False, filled: Optional[reviewing.FilledRead] = None) -> Checked` | このラウンドの新しい重い指摘を選び、判定役を呼び、ジャーナルへ適用する |
+| `_round` | `drive.py` | 変更 | シグネチャは変えない | `enter` の直後に `_confirm_heavy` を呼ぶ。呼ぶ位置は、読めなかった相手役がいるかを確かめる処理よりも、収束の判定よりも前である |
 
-- `_confirm`
+- `_confirm_heavy`
   - 事前条件: 直前に `run.journal.enter` を呼んでいる
   - 事後条件: 渡す指摘が無ければ判定役を起動せず、空の `Checked` を返す
   - 副作用: `verify.ask` が claude を起動する。注意を `run.warnings` に足す
 
-`_confirm` は、`run.journal.fresh`（このラウンドで新しく出たか戻った行の番号）の行のうち、重要度が critical か major のものを `verify_decide.select` へ渡す。
+`_confirm_heavy` は、`run.journal.fresh`（このラウンドで新しく出たか戻った行のうち、判定役へ渡す候補の番号）の行のうち、重要度が critical か major のものを `verify_decide.select` へ渡す。
+
+`_round` は、`diff` にそのラウンドの差分を、`filled` に `reviewing.Reviewed.filled` を渡す。`filled` は席を補充したラウンドだけが持ち、補充した相手役が読んだ全差分、補充した相手役が出した指摘のキー、ほかの相手役が出した指摘のキーからなる。`_confirm_heavy` は、判定役へ渡す指摘ごとに差分を次の表で決め、`verify.ask` に渡す。起動は 1 回である。
+
+| 指摘を出した相手役 | 渡す差分 |
+| --- | --- |
+| 通常の相手役だけ（席を補充していないラウンドを含む） | `diff` |
+| 補充した相手役だけ | 全差分 |
+| 両方 | `diff` と全差分 |
+
+表の `diff` はラウンドの差分（`round<n>.diff`）である。ラウンドの範囲ごとにどの差分を判定役へ渡すかと、その理由は、設計書の「[判定役の指示](./issue-4363-design.md#判定役の指示)」にある。
 
 `_round` は `enter` が返したキーの集合から `Checked.lowered` を除いたものを振動の判定の履歴（`run.history`）に足す。一部の相手役が読めなかったラウンドでも、読めた分は確かめる。
 
@@ -351,21 +453,21 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `_confirm` | 回答が得られない | `verify.ask` の異常系 | `Answers.verdicts` が空 | 既定値で続ける | `verify.ask` の注意 | 今と同じ数の指摘が修正担当へ渡る |
+| `_confirm_heavy` | 回答が得られない | `verify.ask` の異常系 | `Answers.verdicts` が空 | 既定値で続ける | `verify.ask` の注意 | 今と同じ数の指摘が修正担当へ渡る |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `_confirm` | `verify.ask`・`verify_decide.select`・`journal.apply_checks` | `grep -rn "def confirm\b" --include=*.py src/ndf`（駆動の側に同名は無い） | 3 つを順に呼ぶだけの関数にする |
+| `_confirm_heavy` | `verify.ask`・`verify_decide.select`・`journal.apply_checks` | `grep -rn "def confirm\b" --include=*.py src/ndf`（駆動の側に同名は無い） | 3 つを順に呼ぶだけの関数にする |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_confirm`（`ndf cross-review run` を偽の起動で通す） | 成り立たない major だけのラウンドは、修正担当を起動せずに収束する。示せた major は修正担当へ渡る | `redline` の指摘だけ・MVV の指摘だけ・`protect` の指摘だけのラウンドは判定役を起動しない | 判定役が失敗したラウンドは今のとおり修正へ回り、警告が載る |
+| `_confirm_heavy`（`ndf cross-review run` を偽の起動で通す） | 成り立たない major だけのラウンドは、修正担当を起動せずに収束する。示せた major は修正担当へ渡る | `redline` の指摘だけ・MVV の指摘だけ・`protect` の指摘だけのラウンドは判定役を起動しない | 判定役が失敗したラウンドは今のとおり修正へ回り、警告が載る |
 
-偽の起動（テストの `Fake`）は、指示に判定役の system の文を持つ claude の起動を判定役として扱う。
+偽の起動（テストの `Fake`）は、引数（system prompt）に判定役の system の文を持つ claude の起動を判定役として扱う。
 
 ## 記録のコメント（report_decide）
 
@@ -375,16 +477,32 @@ B は I1 の例外である。MVV に反する指摘と承認の要る操作の�
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `check.lowered` の行は、重要度の欄に「minor（確認の前は <`raised_severity`>）」、理由の欄に判定役の理由を出す |
+| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `check.lowered` の行は、重要度の欄に「minor（確認の前は <`raised_severity`>）」、理由の欄に定型文「判定役の確認で成り立たないと分かった」を出す。`check` の自由記述は公開のコメントに写さない（設計文書の「[回答の形](./issue-4363-design.md#回答の形)」） |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `_finding_rows` | 下げた行の重要度の欄に元の重要度が、理由の欄に `check.reason` が現れる | 理由に表の区切り `\|` と改行がある | `check` の無い行・`lowered` が偽の行は今のとおり |
+| `_finding_rows` | 下げた行の重要度の欄に元の重要度が、理由の欄に定型文が現れる | 無し | `check` の無い行・`lowered` が偽の行は今のとおり。`check.reason` に作り物の非公開の値を入れても、コメントのどこにも出ない |
 
 ## 手順書
 
 満たす決定: 決定 1・2・3、受け入れ条件 1
 
 `skills/cross-review/docs/01-state-and-review.md` の「1 ラウンド」に判定役の確認のステップを、「指摘の基準」に重要度が決まる 2 段階（設計文書の決定 2 の表）と下げない指摘を足す。文の中身を照合するテストは書かない。
+
+## 設計との食い違い
+
+承認された詳細設計は、`_finding_rows` が下げた行の理由の欄に `check.reason` を出すと定めていた。これを、定型の理由「判定役の確認で成り立たないと分かった」だけを出す形へ変えた（「[記録のコメント（report_decide）](#記録のコメントreport_decide)」）。判定役の理由の全文は公開せず、実行したサーバーの状態ファイルの `check.reason` に残す。
+
+理由: 判定役の理由の全文は、公開前の伏せ字で防げない未公開の情報を含みうる。公開した情報は取り消せない。
+
+2026-11-27 にこのスプリントのオーガナイザー（AI）が決めた。利用者の承認ではない。
+
+承認された詳細設計は、判定役の記録を状態の保存先の `round<n>-verify.*` へ移し、同じ名前の前からあるファイルは置き換えると定めていた。これを、起動ごとに違う名前で新しく作り、置き換えない形へ変えた（「[判定役の起動（verify）](#判定役の起動verify)」）。置き換えると、作成元を確かめずにファイルを失い、前の起動の記録も残らないためである。
+
+この変更に含まないものは、保存した記録の片付けと、中断で残る一時ディレクトリの回収である。どちらも移動や削除の前に NDF が作ったと確かめる仕組みが要り、確かめが足りないと利用者のファイルを消しうる（共通原則 C4）。受け入れ条件にも承認された詳細設計にも無い。判定役の記録は診断用で、失っても判定の結果は変わらない。残った一時ディレクトリは OS の一時領域の掃除に任せる。2026-11-27 にこのスプリントのオーガナイザー（AI）の指示で直した。利用者の承認ではない。
+
+承認された詳細設計は、下げた指摘は保護の種類・MVV の項目・必ず人の承認が要る操作を挙げない限り、出し直されても `minor` のままと定めていた。これに、内容の違う重い出し直しは下げた扱いを解除する（判定役には渡し直さない）、という例外を足した。あわせて、そのラウンドに内容の違う重い報告か `protect` の報告がある指摘は、判定役へ渡さない。照合キーは本文の先頭だけで決まるので、例外が無いと、別の箇所で見つかった重い不具合が修正担当へ渡らずに収束する。レビューの途中で足した、まとめた報告を別の欄に残す仕組みと行を分ける仕組みは外した（理由は設計文書の「設計との食い違い」）。2026-11-28 にこのスプリントの conductor（AI）が決めた。利用者の確認ではない。
+
+駆動の確認の関数は `drive._confirm_heavy` と名付けた。詳細設計の初めの名前は中継の `domains/relay/hub.py` の関数と同じで、`ndf check` の `copy-dup`（同じ名前の関数の件数）が基準を超えるためである。

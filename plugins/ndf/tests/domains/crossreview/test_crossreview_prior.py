@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import re
+import types
 from pathlib import Path
 
-from ndf.domains.crossreview import cli, drive, prior_decide, report_decide, store, threads
+import pytest
+
+from ndf.core.converge import oscillation
+from ndf.domains.crossreview import carry, cli, drive, leftover, leftover_decide, prior_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.journal import FindingJournal
 
 from ._repos import BRANCH, Repos, commit, run_cli, sh
 from .test_crossreview_run import PR, Fake, Recording, _run, _state
@@ -22,6 +27,7 @@ def test_others_drop_our_own_record_and_thread_openings() -> None:
         prior_decide.Remark("review_comment", "ndf", OPENING, "a.py", 3),
         prior_decide.Remark("review_comment", "ndf", "直した（修正のコミット abc）", "a.py", 3),
         prior_decide.Remark("review", "bot", ""),
+        prior_decide.Remark("comment", "ndf", leftover_decide.RECORD_MARK + "\n起票の記録"),
     ]
     kept = prior_decide.others(remarks)
     assert [r.body for r in kept] == ["ここが遅い", "直した（修正のコミット abc）"]
@@ -131,7 +137,7 @@ def _run_with(capsys, monkeypatch, fake: Fake, wt: Path, base: str = "origin/mai
 
 def test_converged_review_runs_again_when_the_merge_base_moves(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR 3944 の r1-10・r2-1: 比較基点は `--base` の名前でなく merge-base の SHA で比べる。同じ名前でも参照先が動いて
-    merge-base が変われば、同じ head でも前回の収束を返さず全差分から読み直す。"""
+    merge-base が変われば、同じ head でも前回の収束を返さず回し直す。実装の PR の範囲は前の head からの差分である（#3780）。"""
     state_dir = tmp_path / "st"
     sh(wt, "push", "-q", "origin", "origin/main:refs/heads/stack")
     _run_with(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt, "stack")
@@ -144,7 +150,7 @@ def test_converged_review_runs_again_when_the_merge_base_moves(wt: Path, tmp_pat
     assert sorted(moved.calls) == ["codex", "kiro"]
     rounds = _state(state_dir)["rounds"]
     assert rounds[0]["base"] != rounds[1]["base"] == sh(wt, "rev-parse", "HEAD").strip()
-    assert [r["scope"] for r in rounds] == ["full", "full"]
+    assert [r["scope"] for r in rounds] == ["full", "since"]
 
 
 def test_reviewer_who_did_not_read_the_full_diff_reads_it_again(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
@@ -199,7 +205,7 @@ def test_changed_files_are_listed_once_per_round(wt: Path, tmp_path: Path, capsy
 
 
 def _record(findings: list, threads_: dict, at: str, trusted: bool = True) -> prior_decide.Remark:
-    body = report_decide.comment(PR, {"findings": findings, "threads": threads_}, None)
+    body = report_decide.comment(PR, {"findings": findings, "threads": threads_, "target_repo": "o/r"}, None)
     return prior_decide.Remark("comment", "ndf", body, at=at, trusted=trusted)
 
 
@@ -235,6 +241,33 @@ def test_record_comment_keeps_unresolved_findings_for_the_next_run() -> None:
     ]
 
 
+def test_protect_kinds_are_carried_from_the_record() -> None:
+    """#4363: 記録のコメントは保護の種類を許可した値だけで持ち、次の実行は新しい行にも既にある行にも合わせる。"""
+    finding = {**_OPEN_NO_THREAD, "protect": ["user_data", "unknown-kind"]}
+    remark = _record([finding], {}, "2026-11-20T00:00:00Z")
+    assert report_decide.open_items(remark.body)[0]["protect"] == ["user_data"]
+    carried = prior_decide.recorded([remark])[0]
+    fresh = FindingJournal()
+    fresh.carry(carried)
+    assert fresh.rows["p-r1-1"]["protect"] == ["user_data"]
+    held = FindingJournal([{**_OPEN_NO_THREAD, "key": oscillation.finding_key(_OPEN_NO_THREAD["text"]), "protect": ["secret"]}])
+    held.carry(carried)
+    assert held.rows["r1-1"]["protect"] == ["secret", "user_data"]
+    assert held.merged == ["r1-1"]
+
+
+def test_finding_whose_id_collides_with_another_text_is_carried_under_a_free_id() -> None:
+    """#4363: 別の保存先の指摘は id が重なる。本文が違えば空いている id で入れ、保護の種類を失わない。読み直しても増えない。"""
+    journal = FindingJournal()
+    first = prior_decide.Carried("p-r1-1", None, "A が止まる", "codex", "major", None, None)
+    second = first._replace(text="利用者のデータが消える", protect=("user_data",))
+    assert journal.carry([first]) == ["p-r1-1"]
+    assert journal.carry([second]) == ["p-r1-1-2"]
+    row = journal.rows["p-r1-1-2"]
+    assert (row["id"], row["text"], row["protect"]) == ("p-r1-1-2", "利用者のデータが消える", ["user_data"])
+    assert journal.carry([second]) == []
+
+
 def test_unresolved_finding_without_a_thread_is_carried_from_the_record(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """PR 3944 の r1-11: 別の保存先で始めた実行は、スレッドの無い未解決の指摘を記録のコメントから戻し、修正担当へ渡す。"""
     hub.port.existing = [_record([_OPEN_NO_THREAD], {}, "2026-11-20T00:00:00Z")]
@@ -262,6 +295,16 @@ def test_record_is_chosen_by_its_last_update() -> None:
     assert prior_decide.recorded([rewritten, other]) == ([], {})
 
 
+def test_issue_3780_a_filed_url_is_carried_from_an_older_record() -> None:
+    """後から書かれた記録のコメントに URL が無くても、古い記録の起票の URL を引き継ぐ。"""
+    url = "https://github.com/o/r/issues/100"
+    older = _record([{**_OPEN_NO_THREAD, "parked": True, "issue": url}], {}, "2026-11-20T00:00:00Z")
+    newer = _record([], {}, "2026-11-20T01:00:00Z")
+    journal = FindingJournal()
+    journal.carry(prior_decide.recorded([newer, older])[0])
+    assert [u for _, u in journal.filed] == [url] and not journal.rows
+
+
 def test_thread_resolved_by_another_run_is_not_fixed_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """PR 3944 の r2-6: 状態ファイルが追うスレッドを別の実行が resolve していたら、その指摘を修正担当へ渡し直さず、
     同じスレッドへ返信もし直さない。"""
@@ -276,7 +319,7 @@ def test_thread_resolved_by_another_run_is_not_fixed_again(wt: Path, tmp_path: P
     assert (code, got["status"]) == (0, "ok") and "claude" not in fake.calls
     assert hub.port.replies == [] and hub.port.resolved == []
     [finding] = _state(state_dir)["findings"]
-    assert (finding["outcome"], finding["reason"]) == (fin.FIXED, drive.RESOLVED_ELSEWHERE)
+    assert (finding["outcome"], finding["reason"]) == (fin.FIXED, carry.RESOLVED_ELSEWHERE)
 
 
 def test_comments_are_chosen_from_the_files_of_the_diff_handed_over(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -412,7 +455,6 @@ def test_finding_that_comes_back_after_its_thread_was_resolved_is_detached(wt: P
         "severity": "major",
         "path": "doc.md",
     }
-    from ndf.core.converge import oscillation
 
     row["key"] = oscillation.finding_key(row["text"])
     done = {"r1-1": {"comment": 77, "replied": True, "resolved": True}}
@@ -429,4 +471,99 @@ def test_finding_that_comes_back_after_its_thread_was_resolved_is_detached(wt: P
     second._fixes = 1  # 前の起動の修正のコミットと別のファイルに書く
     _run(capsys, monkeypatch, second, wt, "--max-rounds", "1")
     [finding] = _state(state_dir)["findings"]
-    assert finding["outcome"] == fin.UNRESOLVED and finding["reason"] != drive.RESOLVED_ELSEWHERE
+    assert finding["outcome"] == fin.UNRESOLVED and finding["reason"] != carry.RESOLVED_ELSEWHERE
+
+
+def test_issue_3780_2_a_left_finding_is_not_carried_and_its_issue_comes_back() -> None:
+    """別の保存先の実行は、直さずに残した指摘を未解決として引き継がず、同じ指摘が残ると起票の URL を戻す。"""
+    url = "https://github.com/o/r/issues/100"
+    left = {**_OPEN_NO_THREAD, "path": "a.py", "line": 5, "parked": True}
+    filed = {**_OPEN_NO_THREAD, "id": "r1-2", "text": "起票済みで未解決", "issue": url}
+    remark = _record([{**left, "issue": url}, filed], {}, "2026-11-20T00:00:00Z")
+    journal = FindingJournal()
+    assert journal.carry(prior_decide.recorded([remark])[0]) == ["p-r1-2"]
+    assert journal.rows["p-r1-2"]["issue"] == url
+    journal.enter(2, [{"text": left["text"], "severity": "major", "impact": "処理が止まる", "path": "a.py", "line": 5, "by": "codex"}])
+    journal.sort(leftover_decide.Touched())
+    row = journal.rows["r2-1"]
+    assert (row["parked"], row["prior_issue"]) == (True, url) and "issue" not in row
+
+
+def test_issue_3780_the_filed_urls_of_left_findings_are_kept_in_the_state() -> None:
+    """記録の本文は伏せてあるので、起票の公開が Issue の目印で照らせるように、引き継いだ URL を状態に残す。"""
+    url = "https://github.com/o/r/issues/100"
+    remark = _record([{**_OPEN_NO_THREAD, "parked": True, "issue": url}], {}, "2026-11-20T00:00:00Z")
+    run = types.SimpleNamespace(data={}, journal=FindingJournal(), warnings=[], process=[], mvv=None, mvv_items=())
+    assert carry.carry(run, carry.Prior(comments=[remark]))
+    assert run.data[leftover.CARRIED_URLS] == [url]
+    assert not carry.carry(run, carry.Prior(comments=[remark]))
+
+
+def test_issue_3780_a_carried_url_survives_a_run_without_the_finding() -> None:
+    """指摘の出ない実行の記録のコメントも、引き継いだ起票の URL を次の保存先へ渡す。"""
+    url = "https://github.com/o/r/issues/100"
+    body = report_decide.comment(PR, {"findings": [], "target_repo": "o/r", leftover.CARRIED_URLS: [url]}, None)
+    assert report_decide.open_items(body) == [{"parked": True, "issue": url}]
+    run = types.SimpleNamespace(data={}, journal=FindingJournal(), warnings=[], process=[], mvv=None, mvv_items=())
+    remark = prior_decide.Remark("comment", "ndf", body, at="2026-11-20T00:00:00Z", trusted=True)
+    assert carry.carry(run, carry.Prior(comments=[remark]))
+    assert run.data[leftover.CARRIED_URLS] == [url] and not run.journal.rows
+
+
+def test_issue_3780_the_urls_of_findings_redacted_to_the_same_text_are_all_kept() -> None:
+    urls = ["https://github.com/o/r/issues/100", "https://github.com/o/r/issues/101"]
+    rows = [{**_OPEN_NO_THREAD, "id": f"r1-{n}", "parked": True, "issue": url} for n, url in enumerate(urls, 1)]
+    remark = _record(rows, {}, "2026-11-20T00:00:00Z")
+    run = types.SimpleNamespace(data={}, journal=FindingJournal(), warnings=[], process=[], mvv=None, mvv_items=())
+    assert carry.carry(run, carry.Prior(comments=[remark]))
+    assert run.data[leftover.CARRIED_URLS] == urls
+
+
+def test_issue_3780_an_unconfirmed_url_is_published_and_restored_apart_from_a_confirmed_one() -> None:
+    url = "https://github.com/o/r/issues/100"
+    row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url}
+    parked = {**row, "parked": True}
+    [item] = report_decide.open_items(report_decide.open_block({"target_repo": "o/r", "findings": [parked]}))
+    assert item["prior_issue"] == url and "issue" not in item
+    journal = FindingJournal()
+    journal.carry(prior_decide.recorded([_record([parked], {}, "2026-11-20T00:00:00Z")])[0])
+    assert [u for _, u in journal.filed] == [url]
+    journal.carry(prior_decide.recorded([_record([row], {}, "2026-11-20T00:00:00Z")])[0])
+    [carried] = journal.rows.values()
+    assert carried["prior_issue"] == url and "issue" not in carried
+
+
+def test_issue_3780_an_unconfirmed_url_comes_back_through_a_thread() -> None:
+    url = "https://github.com/o/r/issues/100"
+    row = {**_OPEN_NO_THREAD, "prior_issue": url}
+    _, marks = prior_decide.recorded([_record([row], {"r1-1": {"comment": 77}}, "2026-11-20T00:00:00Z")])
+    thread = prior_decide.Thread(77, OPENING, False, "doc.md", None, True)
+    [carried] = prior_decide.carried([thread], set(), marks)
+    assert carried.prior_issue == url and carried.issue is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://token@github.com/o/r/issues/100", id="credentials"),
+        pytest.param("https://github.com/o/r/issues/100?token=x", id="query"),
+        pytest.param("https://github.com/other/r/issues/100", id="other-repo"),
+    ],
+)
+def test_issue_3780_only_an_issue_url_of_the_target_is_published(url: str) -> None:
+    row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url, "issue": url}
+    [item] = report_decide.open_items(report_decide.open_block({"target_repo": "o/r", "findings": [row]}))
+    assert "prior_issue" not in item and "issue" not in item
+
+
+def test_issue_3780_no_issue_url_is_published_without_a_confirmed_target() -> None:
+    url = "https://github.com/other/r/issues/100"
+    row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "parked": True, "issue": url, "prior_issue": url}
+    body = report_decide.comment(PR, {"findings": [row], leftover.CARRIED_URLS: [url]}, None)
+    assert "issues/100" not in body and "記録のみ" in body
+
+
+def test_broken_leftover_fields_in_the_record_are_ignored() -> None:
+    body = report_decide.OPEN_MARK + '[{"id": "r1-1", "text": "A", "parked": "yes", "issue": "秘密の文"}] -->'
+    [got] = prior_decide.recorded([prior_decide.Remark("comment", "ndf", report_decide.MARKER + "\n" + body, trusted=True)])[0]
+    assert (got.parked, got.issue) == (False, None)

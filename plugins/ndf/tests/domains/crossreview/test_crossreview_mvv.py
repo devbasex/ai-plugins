@@ -303,6 +303,18 @@ def test_redline_findings_wait_for_a_person(repos: Repos, wt: Path, tmp_path: Pa
     assert [line for line in body.splitlines() if "人に聞く操作" in line and report_decide.REDLINE_LABEL in line]
 
 
+def test_redline_first_raised_in_round_two_waits_for_a_person(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """#3780 の現状固定: 2 ラウンド目に初めて出た、位置の無い必ず人の承認が要る操作の major も、直さずに閉じず人の判断を待つ。"""
+    _push_base(repos, text=REDLINE_BODY)
+    held = {"text": "人に聞く操作", "severity": "major", "impact": IMPACT, "mvv": "P1"}
+    fake = Recording(tmp_path / "st", {"codex": [[{**MAJOR, "mvv": "Value 1"}], [held]], "kiro": [[], []]})
+    code, got = _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    assert (code, got["status"]) == (0, "ok")
+    assert got["summary"] == "2 ラウンドで converged。指摘 2 件（直した 1・見送った 0・未解決 0・人の承認を待つ 1）"
+    [row] = [r for r in _state(fake.state_dir)["findings"] if r["text"] == "人に聞く操作"]
+    assert (row["redline"], row["outcome"]) == (True, fin.UNRESOLVED)
+
+
 def test_new_mvv_drops_the_judgement_made_under_the_earlier_one(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """新しい MVV が承認された後の起動は、前の MVV で必ず人の承認が要る操作だった指摘の分類を外し、残りを普通の指摘として修正担当へ渡す。
     前の MVV での見送りは「出し直さない」の一覧に載せない。"""
@@ -452,13 +464,13 @@ def test_review_scope_compares_with_the_fetched_base(repos: Repos, wt: Path, tmp
 
 
 def test_review_scope_is_full_when_the_mvv_cannot_be_read(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """ベースの MVV の本文が承認された内容と違えば、前回の範囲を使わずに全差分を返し、理由を注意に載せる。"""
+    """ベースの MVV の本文が承認された内容と違えば、設計の PR は前回の範囲を使わずに全差分を返し、理由を注意に載せる。"""
     _push_base(repos)
     fake = _clean(tmp_path)
-    _run(capsys, monkeypatch, fake, wt, "--base", "main")
+    _run(capsys, monkeypatch, fake, wt, "--base", "main", "--purpose", "design")
     _push_base(repos, 12, text=BODY + "勝手に足した\n", approved=BODY)
     sh(wt, "fetch", "-q", "origin")
-    got = _scope_of(capsys, fake, wt)
+    got = _scope_of(capsys, fake, wt, "--purpose", "design")
     assert got["items"][0]["scope"] == "full"
     [warning] = got["warnings"]
     assert "全差分" in warning and "承認の記録と合わない" in warning
@@ -468,23 +480,23 @@ def test_review_scope_is_full_when_the_mvv_cannot_be_read(repos: Repos, wt: Path
 def test_review_scope_of_a_commit_base_reads_the_branch_run_recorded(
     form: str, repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch
 ) -> None:
-    """`--base` がコミットなら、`review-scope` は `run` が記録した PR のマージ先のブランチの MVV を見る。記録が無ければ、
-    渡されたコミットの MVV で代用せずに全差分を返す。"""
+    """`--base` がコミットなら、設計の PR の `review-scope` は `run` が記録した PR のマージ先のブランチの MVV を見る。記録が
+    無ければ、渡されたコミットの MVV で代用せずに全差分を返す。"""
     gathered = _gathered_in_sprint_branch(repos)
     sh(wt, "fetch", "-q", "origin")
     base = gathered if form == "full" else gathered[:10]
     fake = _clean(tmp_path)
-    _run(capsys, monkeypatch, fake, wt, "--base", base)
+    _run(capsys, monkeypatch, fake, wt, "--base", base, "--purpose", "design")
     assert _state(fake.state_dir)["rounds"][0]["mvv"] == {"id": _identity(11), "mvv_branch": "main"}
-    assert _scope_of(capsys, fake, wt, "--base", base)["items"][0]["scope"] == "since"
+    assert _scope_of(capsys, fake, wt, "--base", base, "--purpose", "design")["items"][0]["scope"] == "since"
     path = store.state_pr(fake.state_dir, PR).path
     data = store.read_object(path)
     del data["rounds"][0]["mvv"]["mvv_branch"]
     store.write_object(path, data)
-    got = _scope_of(capsys, fake, wt, "--base", base)
+    got = _scope_of(capsys, fake, wt, "--base", base, "--purpose", "design")
     assert got["items"][0]["scope"] == "full" and "ブランチ" in got["warnings"][0]
     data["rounds"][0]["mvv"]["mvv_branch"] = "main"
     store.write_object(path, data)
     _push_base(repos, 12, text=BODY + "3. **三つ目**\n")
     sh(wt, "fetch", "-q", "origin")
-    assert _scope_of(capsys, fake, wt, "--base", base)["items"][0]["scope"] == "full"
+    assert _scope_of(capsys, fake, wt, "--base", base, "--purpose", "design")["items"][0]["scope"] == "full"

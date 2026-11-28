@@ -2,7 +2,7 @@
 
 - 既存の指摘: インラインのレビューコメント・レビュー本文・PR コメントの 3 種（人と bot と前のラウンドの返信を含む）を、
   相手役へ信頼しない参考資料として渡す（今の差分で確かめた問題は既存のコメントにかかわらず報告させる）。cross-review 自身が書いた記録のコメントとスレッドの最初のコメント（どちらも
-  `report_decide.MARKER` で始まる）は除く（自分の指摘はジャーナルが持つ）
+  `report_decide.MARKER` で始まる）と起票の記録（`leftover_decide.RECORD_MARK`）は除く（自分の指摘はジャーナルが持つ）
 - 引き継ぐ指摘: 前の実行が開いたまま残した自分のスレッド（最初のコメントが `MARKER` で始まり、その書き手が対象リポジトリに
   今の実行の認証の login と同じで、resolve されていない）を、
   別の保存先で始めた実行が未解決の指摘として引き継ぐ。状態ファイルの `threads` が既に持つスレッドは引き継がない
@@ -18,7 +18,7 @@ import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
-from ndf.domains.crossreview import criteria_decide, report_decide
+from ndf.domains.crossreview import criteria_decide, leftover_decide, report_decide
 
 # スレッドの最初のコメント（`threads.opening`）の見出しと本文
 _OPENING = re.compile(
@@ -61,7 +61,9 @@ class Thread(NamedTuple):
 class Carried(NamedTuple):
     """前の実行から引き継ぐ未解決の指摘 1 件。`comment` は開いたままのスレッドの最初のコメントの id（記録のコメントから
     戻した指摘は None）。`mvv` から `unpinned_severity` までは、記録のコメントにある MVV の判定（欄の意味は `report_decide.MARKS`）。
-    `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。"""
+    `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。`protect` は記録のコメントにある
+    保護の種類（#4363）。`parked` は直さずに残した指摘、`issue` は起票した Issue の URL、
+    `prior_issue` は指す Issue をまだ確かめていない起票の URL（#3780）。"""
 
     id: str
     comment: Optional[int]
@@ -77,6 +79,10 @@ class Carried(NamedTuple):
     judged_mvv: Optional[str] = None
     unpinned_severity: Optional[str] = None
     thread: Optional[int] = None
+    protect: Sequence[str] = ()
+    parked: bool = False
+    issue: Optional[str] = None
+    prior_issue: Optional[str] = None
 
 
 # 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）
@@ -88,8 +94,8 @@ def _ours(body: str) -> bool:
 
 
 def others(remarks: Iterable[Remark]) -> list[Remark]:
-    """相手役へ渡すコメント（本文があり、cross-review 自身の記録・スレッドの最初のコメントでないもの）。"""
-    return [r for r in remarks if r.body.strip() and not _ours(r.body)]
+    """相手役へ渡すコメント（本文があり、cross-review 自身の記録・起票の記録・スレッドの最初のコメントでないもの）。"""
+    return [r for r in remarks if r.body.strip() and not _ours(r.body) and not r.body.lstrip().startswith(leftover_decide.RECORD_MARK)]
 
 
 def _one_line(text: str, chars: int) -> str:
@@ -157,7 +163,7 @@ def _opt_text(value: object) -> Optional[str]:
 
 
 def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
-    """一覧の 1 件が持つ MVV の判定（形の違う値は None）。"""
+    """一覧の 1 件が持つ MVV の判定と保護の種類（形の違う値は None、保護の種類は空）。"""
     redlines = item.get(report_decide.REDLINE_ITEMS)
     return {
         report_decide.MVV: _opt_text(item.get(report_decide.MVV)),
@@ -165,14 +171,31 @@ def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
         report_decide.REDLINE_ITEMS: [i for i in redlines if isinstance(i, str)] if isinstance(redlines, list) else None,
         report_decide.JUDGED: _opt_text(item.get(report_decide.JUDGED)),
         report_decide.UNPINNED: criteria_decide.severity_of(item.get(report_decide.UNPINNED)),
+        criteria_decide.PROTECT: criteria_decide.protect_of(item.get(criteria_decide.PROTECT)),
     }
 
 
+def _url_only(url: str) -> Carried:
+    """起票の URL だけを引き継ぐ、本文の無い残した指摘。"""
+    return Carried("", None, "", None, None, None, None, None, parked=True, issue=url)
+
+
+def _filed_urls(body: str) -> list[str]:
+    """記録のコメントの一覧の、直さずに残した指摘の起票の URL（確かめる前の URL を含む）。"""
+    keys = (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)
+    items = (i for i in report_decide.open_items(body) if i.get(leftover_decide.PARKED) is True)
+    return [url for item in items for key in keys if (url := leftover_decide.issue_url(item.get(key)))]
+
+
 def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optional[Carried]:
-    """一覧の 1 件から戻した指摘（`judged` は `_marks_of` の MVV の判定。id か本文が無ければ None）。"""
+    """一覧の 1 件から戻した指摘（`judged` は `_marks_of` の MVV の判定。id か本文が無ければ None）。起票の URL だけの項目は、
+    本文の無い残した指摘にする（行にはならず、URL だけが引き継がれる。#3780）。"""
     fid, text = _opt_text(item.get("id")), _opt_text(item.get("text"))
     if fid is None or text is None:
-        return None
+        url = leftover_decide.issue_url(item.get(leftover_decide.Filed.URL))
+        if item.get(leftover_decide.PARKED) is not True or url is None:
+            return None
+        return _url_only(url)
     thread, line = item.get("thread"), item.get("line")
     return Carried(
         fid if fid.startswith(RECORDED_PREFIX) else RECORDED_PREFIX + fid,
@@ -185,6 +208,9 @@ def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optiona
         _opt_text(item.get("section")),
         **judged,
         thread=thread if type(thread) is int else None,
+        parked=item.get(leftover_decide.PARKED) is True,
+        issue=leftover_decide.issue_url(item.get(leftover_decide.Filed.URL)),
+        prior_issue=leftover_decide.issue_url(item.get(leftover_decide.Filed.PRIOR)),
     )
 
 
@@ -193,8 +219,11 @@ def recorded(
 ) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
     未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）と NDF が機械で確かめて作ったものと、
-    スレッドのある指摘の MVV の判定（スレッドの最初のコメントの id → 判定）。同じ保存先の打ち直しは記録の
+    スレッドのある指摘の MVV の判定と保護の種類と起票の URL（スレッドの最初のコメントの id → 値）。同じ保存先の打ち直しは記録の
     コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。
+
+    起票の URL だけは、より古い信頼できる記録のコメントからも引き継ぐ。古い状態ファイルの公開や同時に走った実行が後から書くと、
+    最新のコメントに URL が無いことがある（#3780）。
 
     それが今の保存先の書いたコメント（`own` の URL）なら、状態ファイルが持つ指摘（`held` の id）は戻さない。コメントの本文は秘密や
     手元のパスを伏せてあり、状態ファイルの本文と一致しないので、本文で比べると同じ指摘が 2 件になる。"""
@@ -208,9 +237,11 @@ def recorded(
         if one is None:
             continue
         if one.thread is not None:
-            marks[one.thread] = judged
+            urls = {"issue": one.issue, "prior_issue": one.prior_issue}
+            marks[one.thread] = judged | {k: v for k, v in urls.items() if v}
             if one.by != report_decide.BY_NDF:
                 continue
         if _opt_text(item.get("id")) not in known:
             out.append(one)
+    out += [_url_only(url) for url in dict.fromkeys(u for r in mine[:-1] for u in _filed_urls(r.body))]
     return out, marks

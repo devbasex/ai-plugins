@@ -31,6 +31,8 @@ FOCUS = "focus"
 UNIT = "unit"
 # ラウンドの記録のキー（そのラウンドの起動が実際に読んだ PR。`<所有者>/<リポジトリ>#<番号>`。読めなければ書かない。#4369）
 PR = "pr"
+# ラウンドの記録のキー（そのラウンドを回したときの状態の今の PR 番号。巻き直し `state-file --current` の前後を見分ける。#3780）
+PR_NUMBER = "pr_number"
 # ラウンドの記録のキー（そのラウンドのレビューに使った MVV。#4076）と、その中身のキー。`MVV_ID` は MVV を見分ける値
 # （`mvv_decide.identity_of`）、`MVV_BRANCH` は MVV を読んだブランチ（`--base` がコミットのときに、`review-scope` が
 # GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）
@@ -148,7 +150,9 @@ class Basis(NamedTuple):
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
     MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
     欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。`unit` は今回の
-    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。#4369）。"""
+    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回確認できた PR の識別子（確認できなければ None。
+    #4369）で、`pr_optional` が真なら識別子の記録の無いラウンドも合う（読んだ PR の確認を求めない起動）。`number` は状態の
+    今の PR 番号（`current_number`）、`rewound` はその番号が巻き直し後のものか（`is_rewound`。#3780）。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
@@ -157,12 +161,50 @@ class Basis(NamedTuple):
     stand_in: bool = False
     unit: Optional[str] = None
     pr: Optional[str] = None
+    number: Optional[int] = None
+    pr_optional: bool = False
+    rewound: bool = False
 
 
-def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
+def current_number(state: Mapping[str, Any]) -> Optional[int]:
+    """状態の今の PR 番号（巻き直していなければ元の番号）。無ければ None。"""
+    for key in (store.CURRENT_KEY, store.ORIGIN_KEY):
+        if type(state.get(key)) is int:
+            return state[key]
+    return None
+
+
+def is_rewound(state: Mapping[str, Any]) -> bool:
+    """状態の今の PR 番号が、元の番号から巻き直した後のものか。"""
+    origin = state.get(store.ORIGIN_KEY)
+    return type(origin) is int and current_number(state) != origin
+
+
+def _number_of(record: Mapping[str, Any]) -> Optional[int]:
+    """ラウンドを回した PR の番号。番号の記録（`PR_NUMBER`）の無い旧形式は、読んだ PR（`PR`）の番号。どちらも無ければ None。"""
+    if PR_NUMBER in record:
+        return record[PR_NUMBER]
+    number = str(record[PR]).rpartition("#")[2] if PR in record else ""
+    return int(number) if number.isdecimal() else None
+
+
+def _same_pr(record: Mapping[str, Any], basis: Basis) -> bool:
+    """ラウンドが今回と同じ PR のものか。巻き直しは今の番号で見分ける（PR を読めなくても分かる）。巻き直し済みで番号を特定
+    できないラウンドは、同じ PR とみなさない。読んだ PR は、リポジトリ名の大文字小文字を区別せずに照らす。"""
+    if basis.number is not None:
+        number = _number_of(record)
+        if basis.rewound if number is None else number != basis.number:
+            return False
+    if basis.pr is None:
+        return True
+    return str(record[PR]).casefold() == basis.pr.casefold() if PR in record else basis.pr_optional
+
+
+def _matches(record: Mapping[str, Any], basis: Basis, checked: bool = True) -> bool:
     """ラウンドの記録が `basis` に合うか。`basis` の値があれば、比較基点（`BASE`）が違う・そのラウンドを読んだ相手役
     （`REVIEWERS`）に無い相手役がいる・重点（`FOCUS`）か単位の指示（`UNIT`）か読んだ PR（`PR`）か MVV（`MVV`）が違うときは合わない。承認済みの MVV があるのに、
-    そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。"""
+    そのラウンドの head で根拠の記述を確かめ終えていない（`finish_decide.MVV_CHECKED`）ときも合わない（#4090）。`checked` が
+    偽なら、確かめ終えたかは見ない。"""
     if basis.base is not None and record.get(BASE) != basis.base:
         return False
     if basis.reviewers is not None and not _seated_read(record, basis):
@@ -172,13 +214,19 @@ def _matches(record: Mapping[str, Any], basis: Basis) -> bool:
     # 単位の指示の無いラウンドはキーを持たず、指示の無い起動（`unit_id` は空）と合う
     if basis.unit is not None and (record[UNIT] if UNIT in record else "") != basis.unit:
         return False
-    if basis.pr is not None and (record[PR] if PR in record else None) != basis.pr:
+    if not _same_pr(record, basis):
         return False
     if basis.mvv is None:
         return True
     if _known(_mvv_record(record).get(MVV_ID)) != basis.mvv:
         return False
-    return not basis.mvv.startswith(_APPROVED) or record.get(fin.MVV_CHECKED) is True
+    return not checked or not basis.mvv.startswith(_APPROVED) or record.get(fin.MVV_CHECKED) is True
+
+
+def same_review(record: Mapping[str, Any], basis: Basis) -> bool:
+    """判定待ちで残した相手役の結果が、今回の条件 `basis` で読んだものか。根拠の記述を確かめ終えたかは見ない。head が PR に
+    届いていないと確かめ終えないが、相手役が読んだ差分と指示は変わらない（#4363）。"""
+    return _matches(record, basis, checked=False)
 
 
 def _seated_read(record: Mapping[str, Any], basis: Basis) -> bool:
@@ -189,17 +237,36 @@ def _seated_read(record: Mapping[str, Any], basis: Basis) -> bool:
     return seats <= set(store.list_of(record, REVIEWERS))
 
 
+def _last_read(state: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+    """相手役の全員が読めた最後のラウンドの記録（無ければ None）。"""
+    for r in reversed(store.list_of(state, store.ROUNDS)):
+        if isinstance(r, Mapping) and r.get("verdict") != fin.INCOMPLETE_REVIEWERS:
+            return r
+    return None
+
+
+def origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]:
+    """差分の起点にするラウンドの記録（#3780）。相手役の全員が読めた最後のラウンドで、今回の席（`basis.reviewers`）の全員が
+    読み、読んだ PR（`basis.pr`）が同じものを返し、ほかは None。比較基点・重点・単位の指示・MVV は見ない。収束を使い回す条件
+    （`read_by_all_head`）と違い、一度も読まれていない内容が残る場合だけ起点を無くす。"""
+    record = _last_read(state)
+    if record is None or not record.get("head"):
+        return None
+    if basis.reviewers is not None and not _seated_read(record, basis):
+        return None
+    return record if _same_pr(record, basis) else None
+
+
 def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Optional[str]:
     """相手役の全員が読めた最後のラウンドの head（無ければ None）。読めなかった相手役のいるラウンド
     （`finish_decide.INCOMPLETE_REVIEWERS`）の head を起点にすると、同じ head で打ち直したときに空の差分が渡り、
     読めなかった相手役が元の差分を一度も読まずに収束できるため、飛ばす（#3941）。そのラウンドの記録が `basis` に合わなければ
-    （`_matches`）None（PR の全差分を今回の相手役と重点と MVV で読み直す）。"""
-    for r in reversed(store.list_of(state, store.ROUNDS)):
-        if not isinstance(r, Mapping) or r.get("verdict") == fin.INCOMPLETE_REVIEWERS:
-            continue
-        head = r.get("head")
-        return head if _matches(r, basis) and isinstance(head, str) and head else None
-    return None
+    （`_matches`）None。収束の使い回しと設計の PR の差分の起点が使う（実装の PR の起点は `origin_record`。#3780）。"""
+    r = _last_read(state)
+    if r is None:
+        return None
+    head = r.get("head")
+    return head if _matches(r, basis) and isinstance(head, str) and head else None
 
 
 def review_scope(every_section: bool, round_no: int, prev_head: Optional[str], sections: Iterable[str], reviewed: Collection[str]) -> Scope:

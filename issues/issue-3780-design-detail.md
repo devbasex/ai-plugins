@@ -2,7 +2,7 @@
 
 [設計文書](./issue-3780-design.md) の構成要素を、ファイルと関数の粒度へ下ろした文書である。決定の理由・不変条件（I1〜I3）・起票の手順は設計文書を、受け入れ条件は [要求仕様](./issue-3780-requirements.md) を指す。
 
-[#4363 の詳細設計](./issue-4363-design-detail.md) の後に実装する。そこで作る `reviewing.py`・`carry.py`・`verify_decide.select`・`journal.apply_checks`（返りの `Checked`）・`journal.fresh`・`drive._confirm`・`criteria_decide.protect_kinds` を前提にする。
+[#4363 の詳細設計](./issue-4363-design-detail.md) の後に実装する。そこで作る `reviewing.py`・`carry.py`・`verify_decide.select`・`journal.apply_checks`（返りの `Checked`）・`journal.fresh`・`drive._confirm_heavy`・`criteria_decide.protect_kinds` を前提にする。
 
 | 語 | 意味 |
 | --- | --- |
@@ -14,8 +14,8 @@
 | 判定対象外の指摘 | 判定役（指摘を確かめる読むだけの AI）へ渡さないと決めた指摘（`verify_decide.select` が外したもの） |
 | 確認できなかった指摘 | 判定役へ渡したのに、有効な回答が無い指摘（`Checked.unconfirmed`） |
 | PR の巻き直し | Pull Request を閉じて、新しい番号で出し直すこと。状態ファイルは元の番号（`pr`）と今の番号（`current_pr`）を持つ |
-| `issue_logins` | 起票に使った GitHub の login の並び（状態ファイルに持つ）。別の login で打ち直したときに、前の login が書いた起票の記録と Issue を信用して読むために使う |
-| 起票の記録 | 起票を試みた指摘と Issue の URL を持つ、元の PR の専用のコメント |
+| `issue_account_ids` | 起票に使った GitHub のアカウント ID の並び（状態ファイルに持つ）。同じ状態の保存先を別のアカウントで打ち直したときに、前のアカウントが書いた起票の記録と Issue を信用して読むために使う |
+| 起票の記録 | 起票を試みた指摘と Issue の番号を持つ、元の PR の専用のコメント |
 
 ## 地図
 
@@ -52,16 +52,16 @@ plugins/ndf/
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/crossreview/local_scope.py` | 新設 | `review-scope` の範囲を手元の git と状態の記録から決める | `scope_decide`・`round_scope`・`changes` | モジュール、`ScopeSettings`（Protocol）、`_LocalBase` | 変更（移動）: `decide`（今の `_local_scope`）・`_local_base`・`_local_mvv`・`_local_sections` |
-| `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`kinds_of`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
-| `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`file_issues` |
+| `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`finding_kinds`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches_finding`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
+| `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`unconfirmed_target`・`file_issues` |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | 変更 | 起点の条件と、収束を使い回す条件を分ける | `store` | モジュール | 新設: `origin_record` |
-| `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `origin`・`line_origin` |
-| `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched` |
+| `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `read_origin`・`line_origin` |
+| `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched_since` |
 | `plugins/ndf/src/ndf/domains/crossreview/journal.py` | 変更 | 残す指摘に `parked` を付け、進む条件に当たれば外す | `leftover_decide` | `FindingJournal` | 新設: `sort` / 変更: `enter`・`_revive`・`_classify`・`carry`・`handable`・`findings` |
 | `plugins/ndf/src/ndf/domains/crossreview/finish_decide.py` | 変更 | `parked` の指摘を欠けから除く | `leftover_decide` | `Finding` | 変更: `_finding_gaps`・`_counts`・`as_findings` |
 | `plugins/ndf/src/ndf/domains/crossreview/report_decide.py` | 変更 | 表に残し方と URL を出し、一覧に起票済みを載せる | `leftover_decide` | モジュール | 変更: `_finding_rows`・`open_block` |
 | `plugins/ndf/src/ndf/domains/crossreview/prior_decide.py` | 変更 | 記録のコメントの `parked` と `issue` を読む（設計の「データ構造」の引き継ぎの決まり。設計の触るファイルに足した） | `report_decide` | `Carried` | 変更: `_recorded_one` |
-| `plugins/ndf/src/ndf/domains/crossreview/threads.py` | 変更 | `parked` の指摘をスレッドにせず、login を渡す | `report_decide` | `GitHubPort` | 新設: `GitHubPort.viewer` / 変更: `_wanted`・`_trusted` |
+| `plugins/ndf/src/ndf/domains/crossreview/threads.py` | 変更 | `parked` の指摘をスレッドにせず、書き手の確認に `GitHub.viewer` を使い、位置の基準のコミットにスレッドを付ける | `report_decide`・`journal` | `GitHubPort` | 新設: `_placed_head` / 変更: `_wanted`・`_trusted` |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py` | 変更 | 範囲の起点を目的で分け、線引きを当てる | `round_scope`・`changes`・`journal` | `_Run` | 新設: `_ranges`・`_sort_leftovers` / 変更: `_prepare_round`・`_round` |
 | `plugins/ndf/src/ndf/domains/crossreview/settings.py` | 変更 | 目的ごとの上限の既定を持つ | `limits` | `RunConfig` | 新設: `default_max_rounds` |
 | `plugins/ndf/src/ndf/domains/crossreview/cli.py` | 変更 | 起票を記録の公開に組み込み、結果に残し方を載せる | `leftover`・`leftover_decide`・`local_scope`・`drive` | `Hub` | 新設: `_with_leftovers` / 変更: `_github_hub`・`_post_report`・`_publish`・`_report`・`_run_config`・`_run_parser`・`cmd_scope`・`cmd_report` |
@@ -76,7 +76,8 @@ plugins/ndf/
 | `plugins/ndf/skills/cross-review/docs/01-state-and-review.md` | 変更 | 同上 | 無し | 文書 | — |
 | `plugins/ndf/skills/cross-review/docs/02-fix-and-rotation.md` | 変更 | 同上 | 無し | 文書 | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_scope.py` | 変更 | 範囲の起点と新しいファイル | — | テスト | — |
-| `plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py` | 新設 | 線引き・起票・redline の指摘 | — | テスト | — |
+| `plugins/ndf/tests/domains/crossreview/test_crossreview_leftover.py` | 新設 | 線引き・redline の指摘 | — | テスト | — |
+| `plugins/ndf/tests/domains/crossreview/test_crossreview_leftover_issues.py` | 新設 | 起票と起票の記録（GitHub の REST の偽物） | — | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_run.py` | 変更 | 通しの収束と上限の既定 | — | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_finish.py` | 変更 | 欠けと要約 | — | テスト | — |
 | `plugins/ndf/tests/domains/crossreview/test_crossreview_report.py` | 変更 | 表と一覧 | — | テスト | — |
@@ -98,7 +99,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `decide` | `local_scope.py` | 変更 | `decide(wt: Path, base: str, every_section: bool, data: Mapping[str, Any], resolved: ScopeSettings) -> tuple[scope_decide.Scope, list[str]]` | 次のラウンドの範囲と注意を、手元のオブジェクトと状態の記録から決める |
 
-実装の PR では、起点を `round_scope.origin`（下の「範囲の起点」）で選ぶ。起点と比較基点が違えば `changes.new_in_pr` を手元のオブジェクトで呼び、比べられなければ全差分にする。設計の PR は今のとおり `scope_decide.read_by_all_head` を使う。
+実装の PR では、起点を `round_scope.read_origin`（下の「範囲の起点」）で選ぶ。起点と比較基点が違えば `changes.new_in_pr` を手元のオブジェクトで呼び、比べられなければ全差分にする。設計の PR は今のとおり `scope_decide.read_by_all_head` を使う。
 
 ### 異常系の処理
 
@@ -120,13 +121,15 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と読んだ PR だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
-| `origin` | `round_scope.py` | 新設 | `origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
-| `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str) -> Optional[changes.Range]` | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
+| `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と PR（巻き直しは `Basis.number`・`Basis.rewound` と記録の `pr_number`（無ければ `pr` の番号）、読んだ PR の識別子は `Basis.pr`・`Basis.pr_optional`）だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
+| `read_origin` | `round_scope.py` | 新設 | `read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
+| `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
 
-`line_origin` が探すのは、そのラウンドを担当した相手役が全員結果を返した（`incomplete_reviewers` で終わっていない）最後のラウンドである。そのラウンドを読んだ顔ぶれが今回の相手役と同じか、読んだ PR が今回と同じかは問わない。`origin_record` に条件の無い `Basis()` を渡すと、この 2 つの照合をしない。
+`line_origin` の引数 `confirmed` には、差分の起点の head のうち、今回の `head` の祖先であることを今回の起動で確認済みのものを渡す。線引きの起点の head が `confirmed` と一致するときは、祖先関係を再確認しない。一致しないときと、`confirmed` が None のときは確認する。以前のラウンドで確認した結果は使わない。履歴が書き換えられると、そのコミットが今の `head` の祖先でなくなることがあるためである。`line_origin` は `confirmed` をそのまま `read_origin` の `confirmed` に渡す。
 
-`line_origin` を `origin` と分けるのは、設計の決定 2 が「範囲が全差分に戻ったラウンドでも、前に全員が読んだ head があれば線引きする」と定めるためである。読んでいない相手役がいて全差分になったラウンドでも、線引きの起点は残る。
+`line_origin` が探すのは、そのラウンドを担当した相手役が全員結果を返した（`incomplete_reviewers` で終わっていない）最後のラウンドである。そのラウンドを読んだ顔ぶれが今回の相手役と同じか、読んだ PR が今回と同じか、その後に巻き直したかは問わない。`origin_record` に条件の無い `Basis()` を渡すと、これらの照合をしない。
+
+`line_origin` を `read_origin` と分けるのは、設計の決定 2 が「範囲が全差分に戻ったラウンドでも、前に全員が読んだ head があれば線引きする」と定めるためである。読んでいない相手役がいて全差分になったラウンドでも、線引きの起点は残る。
 
 - `_reusable`（前回の収束をそのまま返すかの判定）と `read_by_all_head` は変えない
 
@@ -134,22 +137,22 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `origin`・`line_origin` | head が祖先でないか、コミットが手元に無い | PR の作り直し | `round_scope._reachable_from` | 既定値で続ける（None。全差分・線引きなし） | 無し | 打ち直せる |
+| `read_origin`・`line_origin` | head が祖先でないか、コミットが手元に無い | PR の作り直し | `round_scope._reachable_from` | 既定値で続ける（None。全差分・線引きなし） | 無し | 打ち直せる |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `origin_record` | `scope_decide.read_by_all_head`・`_seated_read` | `grep -rn "def .*origin\b\|def .*previous_head\|def read_by_all" --include=*.py src/ndf` | 席の照らし合わせは `_seated_read` を使う。`read_by_all_head` は収束の使い回し用の条件のまま残す |
-| `origin` | `round_scope.previous_head`・`_reachable_from` | 同上 | 祖先の確かめは `_reachable_from` を使う |
-| `line_origin` | 同上 | 同上 | `origin` と同じ中身を、条件の無い `Basis()` で呼ぶ |
+| `read_origin` | `round_scope.previous_head`・`_reachable_from` | 同上 | 祖先の確かめは `_reachable_from` を使う |
+| `line_origin` | 同上 | 同上 | `read_origin` と同じ中身を、条件の無い `Basis()` で呼ぶ |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `origin_record` | 比較基点・重点・単位の指示・MVV・根拠の確認が違っても記録を返す | 一部が読めなかったラウンドを飛ばす | 読んでいない相手役・PR の違い・ラウンドが無いときは None |
-| `origin`・`line_origin` | 祖先の head を返す | 読んでいない相手役がいるとき、`origin` は None で `line_origin` は値 | 祖先でない・コミットが無いときは None |
+| `read_origin`・`line_origin` | 祖先の head を返す | 読んでいない相手役がいるとき、`read_origin` は None で `line_origin` は値 | 祖先でない・コミットが無いときは None |
 
 ## 新しく PR の変更になったファイルと変えた行（changes）
 
@@ -159,16 +162,20 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
-| `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str]) -> str` | 前の head からの差分（PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
-| `touched` | `changes.py` | 新設 | `touched(g: git.Git, since: str, head: str) -> leftover_decide.Touched` | `since` の後に変わったファイルと、足した行・書き換えた行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`origin`）ではない |
+| `new_in_pr` | `changes.py` | 新設 | `new_in_pr(g: git.Git, previous: Range, current: Range, listed: Listings) -> Optional[tuple[str, ...]]` | 比較基点が変わったことで、既読の差分にも今回渡す差分にも無い変更を持つファイルを返す。比べられなければ None |
+| `since_diff` | `changes.py` | 新設 | `since_diff(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> str` | 前の head からの差分（比較基点が違えば PR が変えるファイルに絞る）に、`added` の今の PR の差分を続けて返す |
+| `since_files` | `changes.py` | 新設 | `since_files(g: git.Git, previous: Range, current: Range, added: Sequence[str], listed: Listings) -> tuple[str, ...]` | `since_diff` が渡すファイルのパスを返す。足して渡す PR の差分に改名があれば、`since_diff` と同じく、改名前と改名後の両方のパスを返す。PR に既にあるインラインのコメントを選ぶ `reviewing.remarks` が使う |
+| `touched_since` | `changes.py` | 新設 | `touched_since(g: git.Git, since: str, current: Range, listed: Listings, since_lines: Optional[str] = None, pr_lines: Optional[str] = None) -> leftover_decide.Touched` | `since` の後に変わったファイル、足した行・書き換えた行の番号、今の PR の差分（`current`）に載る行の番号を返す。`since` に渡すのは線引きの起点（`line_origin` の head）で、差分を渡す起点（`read_origin`）ではない |
+| `commentable_lines` | `changes.py` | 新設 | `commentable_lines(pr_lines: str) -> dict[str, frozenset[int]]` | 取得済みの PR の全差分に載る head の側の行の番号を返す（`unpark` に渡す。git は起動しない） |
 
 - `new_in_pr`
   - 事前条件: `previous.head` は `current.head` の祖先
+  - `listed`: 呼び手が空の辞書を作って渡す。読んだ一覧が入るので、同じ辞書を `since_diff` へ渡す
   - 副作用: `git diff` と `git diff --raw` を打つ（読むだけ）
 - `since_diff`
-  - 事前条件: `added` は `new_in_pr` の返り
-  - 事後条件: 絞るファイル（PR が前のラウンドの時点か今に変えるファイル）が 1 つも無ければ、空文字列を返す。`added` は今の PR が変えるファイルの一部なので、このとき足す分も無い。パスの指定の無い `git diff` は全差分になるため打たない
+  - 比較基点が前のラウンドと違う: 先に `new_in_pr` を呼び、その返りを `added` に、同じ辞書を `listed` に渡す。返りが None のときは全差分にするので、`since_diff` は呼ばない
+  - 比較基点が前のラウンドと同じ: `new_in_pr` は呼ばない。`added=()` と空の辞書の `listed` を渡す。前の head からの差分に出るファイルはどれも PR の変更なので、一覧を読まず、絞らない
+  - 事後条件: 比較基点が違い、絞るファイル（PR が前のラウンドの時点か今に変えるファイル）が 1 つも無ければ、空文字列を返す。`added` は今の PR が変えるファイルの一部なので、このとき足す分も無い。パスの指定の無い `git diff` は全差分になるため打たない
 
 ### 異常系の処理
 
@@ -176,7 +183,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `new_in_pr` | 比べられない | 前の比較基点か前の head のコミットが手元に無い | `git.GitError` | 呼び出し元へ返す（None。呼び手は全差分にする） | 呼び手の注意 | 打ち直せる |
 | `since_diff` | 差分を読めない | 同上 | `git.GitError` | 呼び出し元へ返す（例外。今の `precondition`） | `git の操作が失敗した` で終了コードは前提の欠け | 打ち直せる |
-| `touched` | 差分を読めない | 同上 | `git.GitError` | 呼び出し元へ返す。呼び手は線引きをしない | 注意を 1 行 | 打ち直せる |
+| `touched_since` | 差分を読めない | 同上 | `git.GitError` | 呼び出し元へ返す。呼び手は線引きをしない | 注意を 1 行 | 打ち直せる |
 
 ### 処理の手順
 
@@ -184,47 +191,117 @@ plugins/ndf/
 
 今の PR の差分にある変更を 1 つずつ確かめ、どれか 1 つでも「読んだか、今回読む」に当たらないファイルを返す。
 
-同じソースの行でも、どの head の内容かで行番号がずれる。比べる位置は次の 2 つの番号にそろえる。今回渡す差分との比較は今の head の行番号で行う。既読の差分との比較は、その番号を今回渡す差分の対応（`changes._base_lines`）で前の head の行番号に直して行う。
+同じソースの行でも、どの head の内容かで行番号がずれる。比べる位置は次の 2 つの番号にそろえる。今回渡す差分との比較は今の head の行番号で行う。既読の差分との比較は、その番号を今回渡す差分の対応（変えずに残した行の前後の番号の対応）で前の head の行番号に直して行う。
 
 | 確かめる対象 | 位置の取り方 | 読んだか今回読むに当たる条件 |
 | --- | --- | --- |
 | 今の PR の差分が足したソースの行 | その行の、今の head での行番号 | 今回渡す差分が同じ位置で同じ内容を足している。または、前の head の番号に直した位置で、既読の差分が同じ内容を足している |
-| 今の PR の差分が消したソースの行 | 消したソースの行は今の head に無いので、消した箇所のすぐ後ろに残る行の、今の head での行番号 | 今回渡す差分が同じ位置で同じ内容を消している。または、前の head の番号に直した位置で、既読の差分が同じ内容を消している |
+| 今の PR の差分が消したソースの行 | 消したソースの行は今の head に無いので、消した箇所のすぐ後ろに残る行の、今の head での行番号 | 区間内の既読の削除と今回の削除を、下の手順で 1 つの列に並べる。今の PR の差分の削除がすべて、その列に同じ順で現れる |
 | 変更の種別・リネームの元と先・ファイルのモード | 行を使わない | 既読の差分か今回渡す差分の `git diff --raw` に同じ値がある |
-| ソースの行で比べられないファイル（バイナリなど） | 行を使わない | 今回渡す差分にそのファイルの変更がある。または、既読の差分に、変更前後の blob が同じ変更がある |
+| ソースの行で比べられないファイル（バイナリなど） | 行を使わない | 今の PR の差分の変更前の blob が、既読の差分の変更前の blob か、今回渡す差分の変更前の blob（今回渡す差分が中身を変える場合）と同じ |
+
+行の内容は、末尾の改行の有無も含めて比べる。改行の無い `x` と改行のある `x` は別の行である。
+
+バイナリは差分に中身が出ない。相手役が確かめる材料は、差分のファイルごとの見出しにある変更前後の blob ID（`index` の行）である。相手役は作業場所のリポジトリから、その ID の中身を読める。`--binary` を付けて符号化した中身を渡す案は、相手役が読めず token が増えるので採らない。今の PR の差分の変更後の blob は今の head の内容なので、今回渡す差分か既読の差分に必ず現れる。そこで照らすのは変更前の blob である。例えば今の PR が `B` → `C`、今回渡す差分が `A` → `C` で、既読の差分の変更前も `B` でなければ、`B` はどこにも渡っていないので、今の PR の差分を足して渡す。
+
+通常のファイルとシンボリックリンクを入れ替えると、差分は削除と追加の 2 つの hunk になる。間に残る行が無いので、1 つの変更のまとまりとして照らす。
 
 足した行の例: 既読の差分が、前の head の 10 行目に `x = 1` を足していた。今回渡す差分は、その上に 2 行を足した。今の PR の差分は `x = 1` を今の head の 12 行目に足している。12 は前の head の番号に直すと 10 になり、既読の差分と一致するので、読んだ行である。
 
 消した行の例: 既読の差分が `y = 0` を消し、すぐ後ろに残る行は前の head の 20 行目だった。今回渡す差分は、その上に 2 行を足した。今の PR の差分では、`y = 0` を消した箇所のすぐ後ろの行は今の head の 22 行目になる。22 は 20 に直るので一致する。
 
-最後の表の行は、設計の「範囲の起点の条件」の手順 3（今回渡す差分に無く、既読の差分と変更前後の内容が同じでもなければ、当たらない）を、当たる側から書いたものである。今回渡す差分にあれば、このラウンドで読む。無い場合は、既読の差分にファイルの名前があるだけでは後で中身が変わったかが分からないので、変更前後の blob まで同じことを求める。
+最後の表の行は、設計の「範囲の起点の条件」の手順 3 を、当たる側から書いたものである。今回渡す差分がファイルの中身を変えていれば、このラウンドで読む。今回渡す差分にファイルが無いときと、実行権限や名前だけを変えるときは、中身はこのラウンドで渡らない。この場合は、変更前後の blob が既読の差分と同じことを求める。ファイルの名前があるだけでは、中身が後で変わったかが分からないためである。今回渡す差分が名前を変えたファイルは、元の名前で既読の差分を引く。
 
-番号を直せない（位置の行が今回渡す差分で足された行である）場合は、当たらないとみなす。計算量の注意として、3 つの差分は 1 回ずつ読み、行は辞書で引く。
+足したソースの行は、番号を直せない（位置の行が今回渡す差分で足された行である）場合、既読の差分とは一致しないとみなす。
 
-`touched` の「変えた行」は、`since..head` の差分で足した行と書き換えた行の番号である。行を消しただけの箇所は、前後の行の番号を入れる。
+消したソースの行は、1 つの行番号ではなく区間で比べる。区間は前の head の行番号で定め、直前の対応行の次の行から、直後の対応行までである。対応行とは、今回渡す差分が変えずに残した行である。直前の対応行が無ければ 1 行目から、直後の対応行が無ければ末尾の次の行までとする。消した行の位置はすぐ後ろの行の番号で表すので、直後の対応行の番号も区間に含む。
+
+区間の中では順序も比べる。まず、区間の削除を前の head の行の順に並べる。行番号ごとに、既読の差分がその行の直前で消した行を置き、続けて、今回渡す差分がその行を消していれば置く。今の PR の差分がこの区間で消した行が、すべてこの並びに同じ順序で現れれば、読んだか今回読む行とする。1 つでも現れなければ当たらないとする。並びのうち今回渡す差分の削除に当てるには、内容に加えて、今の head 上の位置（すぐ後ろに残る行の番号）も同じであることを求める。既読の差分の削除は、区間の中なら位置を問わない。消したファイルには残る行が無いので、順序は比べず、本文と件数だけを比べる。
+
+区間で比べるのは、読んだ削除の跡に行を足したり、読んだ置き換えを書き直したりしただけで、そのファイルをもう一度渡さないためである。順序を比べるのは、ベースが行を移して生じた削除を、移す前の位置の削除と取り違えないためである。例えば、並びが「`X`（読んだ削除）、`A`（今回消す行）」の区間で、今の PR の差分が `A`、`X` の順に消していれば、`X` は読んでいない。
+
+今回渡す差分の削除に位置も求めるのは、同じ区間の別の位置で同じ内容を消した変更が、相手役に渡らないためである。例えば、前の head が `P / A / Z`、今の head が `P / R1 / R2 / Z`、今のベースが `P / R1 / A / R2 / Z`（`/` は改行）とする。今回渡す差分は `R1` の前の `A` を消し、今の PR の差分は `R2` の前の `A` を消す。内容は同じでも位置が違うので、当たらないとする。
+
+行番号の対応はファイルごとに 1 回だけ索引にする。
+
+#### git を起動する回数
+
+1 つの差分は、一覧（`git diff --raw --numstat -z`）と行の差分（`git diff`）の 2 回の起動で読む。一覧はパス・モード・blob ID・行で比べられるかを、区切りのあいまいでない形で返す。行の差分はそれを返さない。
+
+| ラウンド | 呼ぶ関数 | 起動の回数 |
+| --- | --- | --- |
+| 比較基点が変わった | `new_in_pr`（3 つの差分）と `since_diff` | `new_in_pr` が 6 回。`since_diff` は行の差分だけで 1 回、足すファイルがあれば 2 回 |
+| 比較基点が同じ | `since_diff` だけ | 行の差分 1 回 |
+| 線引きをする（上の 2 つに加わる） | `touched_since` | `since..head` の行の差分が 1 回（`since_lines` を渡せば 0 回）、その一覧が 1 回（`listed` にあれば 0 回）、今の PR の差分の行の差分が 1 回（`pr_lines` を渡せば 0 回）。合わせて 0〜3 回 |
+
+`since_diff` が取得した行の差分は、次のすべてに当たるラウンドで `touched_since` の `since_lines` に渡す。比較基点が同じなら、`since_diff` の返りは `since..head` の行の差分そのものだからである。
+
+- 相手役へ渡す差分を `since_diff` で作った
+- 差分を渡す起点の比較基点が、今の比較基点と同じ
+- 差分を渡す起点の head が、線引きの起点の head と同じ
+
+どれかに当たらないラウンドでは、`since..head` の行の差分を 1 回読む。比較基点が違うときの返りはファイルを絞ってあり、起点の head が違えば範囲が違うためである。渡す文字列は、改行を変換せずに持ち回る。
+
+今の PR の全差分（`current.base...current.head`）を同じラウンドで取得してあれば、`pr_lines` に渡す。取得してあるのは、相手役へ渡す差分が全差分のときと、根拠の確かめや席の穴埋めのために全差分のファイルを書いたときである。ファイルから読むときは、改行を変換せずに読む（`read_bytes().decode("utf-8")`）。
+
+取得済みの差分は、UTF-8 でないバイトを置き換え文字にしてある。そのため `since_lines` と `pr_lines` は、パスに置き換え文字があれば使わず、git から読み直す。
+
+`touched_since` は、今の PR の差分からは行の番号だけを使う。そのため、この差分の一覧は読まない。
+
+同じ範囲の一覧は、`listed` で 2 つの関数が共有する。`listed` は git が返した一覧を 1 ラウンドの間だけメモリに持つ写しで、共有しない場合より起動が 2 回少ない。
+
+省ける 2 回の起動（既読の差分と今の PR の差分の一覧）の時間は、このリポジトリで次のとおり測った。条件は git 2.53.0、x86_64 の 8 CPU、2 回の一覧の読み取りを 21 回繰り返した値である。どちらの測定も、前の head は `2c508370b`、今の head は `c5ba10c90` である。
+
+| 比較基点 | 変わったファイル | 省ける時間の中央値（最小〜最大） |
+| --- | --- | --- |
+| `7e7fcce8f`（PR 1 件の大きさの差分） | 17 | 23 ミリ秒（19〜28） |
+| `f5587e8e2`（大きい差分） | 1842 | 1.5 秒（1.3〜1.7） |
+
+PR 1 件の大きさでは短縮はわずかで、効くのは変わったファイルが多い PR である。写しはラウンドの中で作って捨て、コミットの範囲が同じなら一覧は変わらないので、古い値を読むことは無い。そのため共有する。
+
+`new_in_pr` が読んだ行の差分を、`touched_since` で再利用する案は採らない。
+
+| 観点 | 内容 |
+| --- | --- |
+| 減る起動 | 比較基点が変わり、足すファイルが無いラウンドで、最大 2 回（`since..head` と今の PR の差分の行の差分）。`since..head` が減るのは、線引きの起点と差分を渡す起点が同じ head のときである。比較基点が同じラウンドは `new_in_pr` を呼ばないので減らない |
+| 減る時間 | 今の PR の差分の行の差分 1 回は、下の表と同じ条件で 21 回繰り返した中央値が、17 ファイルの差分で 10 ミリ秒、1842 ファイルの差分で 0.71 秒 |
+| 増えるもの | 解析した差分の全行を、`new_in_pr` から線引きまでメモリに持つ。呼び手が持ち回る `listed` の型も変わる |
+
+効くのは比較基点が変わった一部のラウンドだけで、PR 1 件の大きさでは時間がほとんど変わらないので、読み直す。
+
+ほかの起動を分ける理由と、採らなかった案は次のとおりである。どれもローカルの git の起動で、token・API・CI は増えない。
+
+| 分けているもの | 理由 | 採らなかった案 |
+| --- | --- | --- |
+| 一覧と行の差分 | NUL 区切りの一覧と行の差分を 1 つの出力にすると、両方を切り分ける読み取りを新しく作ることになる | `git diff --raw --numstat -p -z` で 1 回にまとめる（`new_in_pr` の起動が 3 回減る） |
+| `since_diff` の行の差分 | 比較基点が違うときに渡す差分は PR が変えるファイルに絞る。`new_in_pr` が読んだ差分は絞っていない。比較基点が同じラウンドは `new_in_pr` を呼ばない | `new_in_pr` が読んだ差分の文字列を、ファイルごとに切り分けて組み立てる（起動が 1〜2 回減る） |
+
+`touched_since` の「変えた行」は、`since..head` の差分で足した行と書き換えた行の番号である。行を消しただけの箇所は、前後の行の番号を入れる。
+
+`Touched.commentable` は、今の PR の差分（`current.base...current.head`）の hunk に含まれる、head の側の行の番号である。変えた行と、その前後 3 行が当たる。GitHub が行コメントを受け付けるのはこの行なので、`sort` が投稿する位置を選ぶときに使う。このために、線引きをするラウンドでは手元の `git diff` を 1 回多く打つ。
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `Range(base: str, head: str)` | 型 | `changes.py` | 無し |
-| `Touched(files: frozenset[str], lines: Mapping[str, frozenset[int]])` | 型 | `leftover_decide.py` | 空 |
+| `Touched(files: frozenset[str], lines: Mapping[str, frozenset[int]], commentable: Mapping[str, frozenset[int]])` | 型 | `leftover_decide.py` | 空 |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `new_in_pr` | `changes._diff_files`・`_base_lines`・`review_diff` | `grep -rn "def .*new_files\|def .*touched\|def .*changed_lines\|def _base_lines\|--raw" --include=*.py src/ndf` | 差分の読み取りと行の対応は 3 つを使う。`git.Git.changed_lines` は行数の和を返すもので使えない |
+| `new_in_pr` | `changes._diff_files`・`_base_lines`・`review_diff` | `grep -rn "def .*new_files\|def .*touched\|def .*changed_lines\|def _base_lines\|--raw" --include=*.py src/ndf` | 差分の読み取りは `_diff_files` と `review_diff` の中身を使う。行の対応は、`_base_lines` が呼ぶたびに hunk を先頭からたどるので、1 回だけ作る索引を別に持つ。`git.Git.changed_lines` は行数の和を返すもので使えない |
 | `since_diff` | `changes.review_diff`・`git.Git.changed_files` | 同上 | 同じ差分の引数（`_DIFF`）に `--literal-pathspecs` とパスの指定を足して作る |
-| `touched` | `crossrefactor.scope.touched`（記号の単位） | 同上 | 返す単位が違うので使えない。`_diff_files` の行を使う |
+| `touched_since` | `crossrefactor.scope.touched`（記号の単位） | 同上 | 返す単位が違うので使えない。`_diff_files` の行を使う |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `new_in_pr` | 分岐したブランチへ比較先を変えると、新しく PR の変更になったファイルが返る。取り込みの競合を解消して前の head の内容に戻したファイルも返る | 競合の無いベースの取り込みは空。head が同じまま比較先を変えて実行権限の変更が現れる。同じ文の追加が同じファイルの別の関数にある。比較先を変えて差分から消えただけのファイルは返らない | コミットが無ければ None |
-| `since_diff` | PR に関係の無いベースの変更を含まない。`added` のファイルの今の差分を含む | 絞るファイルが無ければ空文字列 | コミットが手元に無ければ `git.GitError` |
-| `touched` | 足したソースの行と書き換えたソースの行 | 行を消しただけの箇所は前後の行。バイナリはファイルだけ | コミットが手元に無ければ `git.GitError` |
+| `new_in_pr` | 分岐したブランチへ比較先を変えると、新しく PR の変更になったファイルが返る。取り込みの競合を解消して前の head の内容に戻したファイルも返る | 競合の無いベースの取り込みは空。head が同じまま比較先を変えて実行権限の変更が現れる。同じ文の追加が同じファイルの別の関数にある。比較先を変えて差分から消えただけのファイルは返らない。末尾の改行の有無だけが違う行は別の行にし、種別の変更の削除と追加は 1 つにまとめる。バイナリは変更前の blob が渡っていなければ返す（この 3 つは差分を入力にして確かめる）。消した行は、今回渡す差分と同じ内容でも位置が違えば未読にする（上の `R1`・`R2` の例。差分を入力にして確かめ、git を起動しない） | コミットが無ければ None |
+| `since_diff` | PR に関係の無いベースの変更を含まない。`added` のファイルの今の差分を含む | 比較基点が違い、絞るファイルが無ければ空文字列 | コミットが手元に無ければ `git.GitError` |
+| `touched_since` | 足したソースの行と書き換えたソースの行 | 行を消しただけの箇所は前後の行。バイナリはファイルだけ。`commentable` は PR の差分の変えた行と前後 3 行 | コミットが手元に無ければ `git.GitError` |
 
 ## 線引きと残し方（leftover_decide）
 
@@ -236,17 +313,19 @@ plugins/ndf/
 | --- | --- | --- | --- | --- |
 | `normalized` | `leftover_decide.py` | 新設 | `normalized(text: str) -> str` | 空白をまとめ大文字小文字をそろえた本文の全体を返す（#2468 も同じ指摘の判定に使う） |
 | `proceeds` | `leftover_decide.py` | 新設 | `proceeds(row: Mapping[str, Any], touched: Touched, *, returned: bool = False, unconfirmed: bool = False) -> bool` | 指摘を直さずに残さないか（真なら `parked` を付けない） |
-| `kinds_of` | `leftover_decide.py` | 新設 | `kinds_of(row: Mapping[str, Any]) -> frozenset[str]` | 指摘の種類（行の `protect` と `check.tracks` の和） |
+| `finding_kinds` | `leftover_decide.py` | 新設 | `finding_kinds(row: Mapping[str, Any]) -> frozenset[str]` | 指摘の種類（行の `protect` と `check.tracks` の和） |
 | `files_issue` | `leftover_decide.py` | 新設 | `files_issue(row: Mapping[str, Any]) -> bool` | 重い指摘（critical・major）が起票してよい種類を持つか |
 | `identity` | `leftover_decide.py` | 新設 | `identity(origin_pr: int, text: str) -> str` | 元の PR の番号と `normalized(text)` の SHA-256 の先頭 12 字 |
-| `issue_parts` | `leftover_decide.py` | 新設 | `issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str], ident: str) -> tuple[str, str]` | 伏せ終えた値から起票の題と本文を組む |
-| `trusted` | `leftover_decide.py` | 新設 | `trusted(author: str, association: str, me: str, logins: Collection[str]) -> bool` | 起票の記録と Issue の作者を信用してよいか |
-| `matches` | `leftover_decide.py` | 新設 | `matches(listed: Listed, ident: str, pr_url: str, text: str) -> bool` | Issue がこの指摘を扱うものか（設計の「起票の形」の条件） |
-| `record_entries` | `leftover_decide.py` | 新設 | `record_entries(body: str) -> dict[str, dict[str, Any]]` | 起票の記録の本文から、識別値ごとの `at` と `url`（どちらも無いことがある）を読む |
-| `record_body` | `leftover_decide.py` | 新設 | `record_body(entries: Mapping[str, Mapping[str, Any]]) -> str` | 起票の記録の本文を組む（マーカー `<!-- ndf:cross-review-leftover-record -->` で始める） |
+| `issue_parts` | `leftover_decide.py` | 新設 | `issue_parts(text: str, impact: str, place: str, pr_urls: Sequence[str]) -> tuple[str, str]` | 伏せ終えた値から起票の題と、目印を除く本文を組む |
+| `issue_mark` | `leftover_decide.py` | 新設 | `issue_mark(ident: str) -> str` | Issue の本文の最後に置く目印の行を返す。`Publisher.create_issue` が検査した本文の後に足す |
+| `trusted` | `leftover_decide.py` | 新設 | `trusted(author_id: int, me: int, account_ids: Collection[int]) -> bool` | 起票の記録と Issue の作者が、実行のアカウントか `issue_account_ids` のアカウントか（アカウント ID で照らす）。ほかの作者は `Port.trusts` で確かめる |
+| `matches_finding` | `leftover_decide.py` | 新設 | `matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool` | 検索か一覧で読んだ Issue がこの指摘を扱うものか（設計の「起票の形」の条件） |
+| `names_finding` | `leftover_decide.py` | 新設 | `names_finding(listed: Listed, ident: str, text: str, prs_of: Callable[[str], Sequence[int]] = issue_prs) -> bool` | 起票の記録か引き継ぎの URL の Issue がこの指摘のものか（Pull Request でなく、本文の引用とコードブロックの外に目印だけの行がある。目印は今の識別値か、本文の PR の URL の番号と `text` の識別値。今の識別値の目印が無いときだけ `prs_of` で本文の PR の番号を抽出し、呼び手は抽出の結果を本文ごとに使い回す） |
+| `record_entries` | `leftover_decide.py` | 新設 | `record_entries(body: str, issues_url: str) -> dict[str, dict[str, Any]]` | 起票の記録の本文から、識別値ごとの `at` と `url`（どちらも無いことがある）を読む。`url` は `issues_url` と番号から組む |
+| `record_body` | `leftover_decide.py` | 新設 | `record_body(entries: Mapping[str, Mapping[str, Any]], issues_url: str) -> str` | 起票の記録の本文を組む。本文はマーカー `<!-- ndf:cross-review-leftover-record -->` で始める。固定の文とキーに、形を確かめた識別値（12 桁の 16 進数）・時刻（ISO 8601）・Issue の番号だけを足し、形の違う値は書かない。`issues_url` で始まる `url` は番号にして書き、ほかの URL は書かない。本文は伏せ字に通さない。手元のアカウント名が `number` や番号と同じ数字だと、キーや値が置き換わって読み戻せなくなるためである |
 | `result_fields` | `leftover_decide.py` | 新設 | `result_fields(row: Mapping[str, Any], comment_url: Optional[str]) -> dict[str, str]` | 結果の `items` に足す `disposition` と `url`（残さない行は空） |
 | `summary_line` | `leftover_decide.py` | 新設 | `summary_line(rows: Sequence[Mapping[str, Any]]) -> Optional[str]` | 「残した指摘 N（起票 M）」。残した指摘が無ければ None |
-| `decisions` | `leftover_decide.py` | 新設 | `decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> list[dict[str, str]]` | MVV に反する残した指摘を、番号・MVV の項目・URL の判断にする |
+| `decisions` | `leftover_decide.py` | 新設 | `decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> list[dict[str, str]]` | MVV に反する残した指摘を、番号・MVV の項目・URL の判断にする。理由（変えていない行か、行を特定していないか）は行の `parked_on_line` から選ぶ |
 
 - `issue_parts`
   - 事前条件: `text`・`impact`・`place` は、**全文に伏せ字（秘密を伏せる処理）を当てた後の値**である。関数は切り出すだけで伏せない
@@ -270,29 +349,31 @@ plugins/ndf/
 | 9 | `unconfirmed`（判定を依頼して確認できなかった） | 進む |
 | 10 | ほか | 残す |
 
-`path` は先頭の `./` を除いて照らす。順 1 を先頭に置くので、前の確認で `check.tracks` が付いた指摘や、直さずに残した指摘に後から承認の要る操作が指摘された場合も、必ず進む側になる。
+`path` は先頭の `./` を除いて照らす。指摘の行へ保存するときも除く（`plain_path`）。投稿の処理は `path` を PR の変更ファイルの一覧と突き合わせるので、`./` が残るとスレッドが作られないためである。順 1 を先頭に置くので、前の確認で `check.tracks` が付いた指摘や、直さずに残した指摘に後から承認の要る操作が指摘された場合も、必ず進む側になる。
 
-`files_issue` は `severity` が critical か major で、`kinds_of` が `review-criteria.json` の `kinds.filed`（`delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval`）と重なる場合だけ真である。この課題の線引きで残るのは major だけだが（critical は `proceeds` の順 5 で進む）、#2468 は上限で残った critical も同じ関数で起票するかを決めるためである。
+`files_issue` は `severity` が critical か major で、`finding_kinds` が `review-criteria.json` の `kinds.filed`（`delivered`・`safety`・`secret`・`user_data`・`irreversible`・`approval`）と重なる場合だけ真である。この課題の線引きで残るのは major だけだが（critical は `proceeds` の順 5 で進む）、#2468 は上限で残った critical も同じ関数で起票するかを決めるためである。
 
 ### 内部のデータと定数
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `TITLE_CHARS` | 定数 | `leftover_decide.py` | 80（題にする本文の先頭の字数） |
-| `Listed(url, body, author, association, created_at, is_pull)` | 型 | `leftover_decide.py` | 無し |
+| `Listed(url, body, author, association, created_at, is_pull, author_id)` | 型 | `leftover_decide.py` | 無し |
 | `kinds.filed` | 定数 | `contracts/data/review-criteria.json` | 上の 6 つ |
-| `PARKED = "parked"`・`ISSUE = "issue"`・`ISSUE_ERROR = "issue_error"` | 行のキー | `leftover_decide.py` | 無し |
+| `PARKED = "parked"`・`PARKED_ON_LINE = "parked_on_line"`・`Filed.URL = "issue"`・`Filed.ERROR = "issue_error"`・`Filed.CHECKED = "issue_checked"`（`Filed` は StrEnum） | 行のキー | `leftover_decide.py` | 無し |
+| `PLACED_ROUND = "placed_round"` | 行のキー | `journal.py` | 無し（無ければ `round`） |
+| `OFF_DIFF = "off_diff"` | 行のキー | `leftover_decide.py` | 無し（投稿の位置に行を使う） |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `normalized` | `oscillation.finding_key` | `grep -rn "def finding_key" src/ndf` | `finding_key` は先頭だけを返すので使えない。そろえ方（空白と大文字小文字）は同じにする |
-| `proceeds`・`kinds_of`・`files_issue` | `journal._blocking`・`criteria_decide.protect_kinds` | `journal.py`・`criteria_decide.py` を読んだ | 種類の一覧は `criteria_decide` を使う。線引きの関数は無い |
+| `proceeds`・`finding_kinds`・`files_issue` | `journal._blocking`・`criteria_decide.protect_kinds` | `journal.py`・`criteria_decide.py` を読んだ | 種類の一覧は `criteria_decide` を使う。線引きの関数は無い |
 | `identity` | `journal.citation_key`・`scope_decide.unit_id`（どちらも SHA-256） | `grep -rn "sha256(" --include=*.py src/ndf/domains/crossreview` | 入力と切り出す長さが違うので新しく書く |
 | `issue_parts` | `publish.Publisher.create_issue`・`backlog.issues_gh.create_issue` | `grep -rn "def create_issue" src/ndf` | 作成は `Publisher.create_issue` を使い、文の組み立てだけを新しく書く |
-| `trusted` | `github.GitHub.trusts` | `grep -rn "author_association\|authorAssociation" --include=*.py src/ndf` | `trusts` は write 権限まで読み、設計の条件（所有者・メンバー・共同作業者・実行の login・`issue_logins`）と違うので使わない |
-| `matches`・`record_entries`・`record_body` | `report_decide.open_block`・`open_items` | `report_decide.py` を読んだ | 記録のコメントの一覧とは書き先と中身が違う。HTML のコメントに JSON を埋める形はそろえる |
+| `trusted` | `github.GitHub.trusts` | `grep -rn "author_association\|authorAssociation" --include=*.py src/ndf` | 所有者・メンバー・共同作業者の判定は `trusts` を使う（write 権限まで読む）。`trusted` は `trusts` が見ない実行のアカウントと `issue_account_ids` だけを持つ |
+| `matches_finding`・`record_entries`・`record_body` | `report_decide.open_block`・`open_items` | `report_decide.py` を読んだ | 記録のコメントの一覧とは書き先と中身が違う。HTML のコメントに JSON を埋める形はそろえる |
 | `result_fields`・`summary_line`・`decisions` | `finish_decide._counts`・`_limit_decision` | `finish_decide.py` を読んだ | 残した指摘の数え方は無い。`decisions` の形（`decision`・`basis`）は同じにする |
 
 ### 単体テストの観点
@@ -302,8 +383,8 @@ plugins/ndf/
 | `proceeds` | critical・変えたソースの行への major・保護の対象（人の安全を含む）の major は真。変えていないソースの行への major は偽 | `line` が無くパスのファイルが変わった指摘・`path` も無い指摘・minor（真だが修正担当へは渡らない）・`round` 0・`returned`・`unconfirmed`・`./` 付きのパス | **`redline` を持つ指摘は、変えていないソースの行への major で起票する種類（`check.tracks`）を持っていても、`parked` が付いていても真** |
 | `files_issue` | `delivered` を持つ major は真。`user_data` を持つ critical も真 | `authz` だけは偽。`authz` と `delivered` は真 | minor は偽 |
 | `identity` | 同じ本文は同じ値 | 空白と大文字小文字の違いは同じ値。先頭が同じで続きが違えば違う値 | 無し |
-| `issue_parts` | 題・本文・目印の行が最後 | **題の切り出しの長さの境目をまたぐ偽の秘密を、伏せた後の値で渡すと、題にも本文にも断片が無い**（テストは偽の秘密を実行時に連結して作る。秘密の検査 `check-repo-secrets.py` に当たらないようにする） | 本文が空の 1 文・場所 |
-| `matches`・`trusted` | 条件をすべて満たす Issue は真 | login 自身・`issue_logins` の bot | 引用の中の目印・目印が最後でない・Pull Request・第三者 |
+| `issue_parts` | 題と本文（目印は `create` の後で最後の行にある） | **題の切り出しの長さの境目をまたぐ偽の秘密を、伏せた後の値で渡すと、題にも本文にも断片が無い**（テストは偽の秘密を実行時に連結して作る。秘密の検査 `check-repo-secrets.py` に当たらないようにする） | 本文が空の 1 文・場所 |
+| `matches_finding`・`trusted` | 条件をすべて満たす Issue は真 | 実行のアカウント自身・`issue_account_ids` の bot | 引用の中の目印・目印が最後でない・Pull Request・第三者・write 権限の無いメンバー・前に起票した login を取得した別の ID |
 | `record_entries`・`record_body` | 書いた形を読み戻せる | 空の記録 | 壊れた本文は空 |
 
 ## 起票（leftover）
@@ -315,24 +396,27 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `primary_of` | `leftover.py` | 新設 | `primary_of(main: Optional[Path]) -> tuple[Optional[str], Optional[str]]` | メインディレクトリの `.ndf/project.json` の `issues.primary` と、注意（未設定のとき） |
-| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], primary: Optional[str], *, manual: bool = False) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error` と状態の `issue_logins`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
+| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], *, manual: bool = False) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error`・`issue_checked` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
 
-`Port`（テストは偽物）は次のメソッドを持ち、`GitHubIssues` が GitHub の REST で実装する。
+`Port`（テストは偽物）は次のメソッドを持ち、`GitHubIssues` が GitHub の API で実装する。記録の URL が指す Issue のまとめ読みは GraphQL、ほかは REST である。
 
 | メソッド | 返り | 使う API |
 | --- | --- | --- |
-| `viewer()` | login | `threads.GitHubPort.viewer`（1 回だけ読む） |
+| `trusts(author, association)` | 所有者か、write 以上の権限を持つメンバー・共同作業者か | `GitHub.trusts`（collaborators の permission の GET） |
+| `viewer()` | login とアカウント ID（`Viewer`） | `GitHubIssues` に渡す関数。呼び手は、`threads.GitHubPort` に渡すのと同じ `GitHub` のインスタンスの `viewer` を渡す。`GitHubPort` もスレッドの書き手の確認に同じ `viewer` を使うので、読むのは 1 回である。ID が 0（読めない）なら起票しない |
 | `pr_url(pr)` | PR の URL | 呼ばない（リポジトリ名から組む） |
+| `issues_url()` | このリポジトリの Issue の URL の、番号より前 | 呼ばない（リポジトリ名から組む） |
 | `redact(*texts)` | 伏せた値の並び | `publish.Publisher.guarded` |
-| `comments(pr)`・`comment(id)` | コメント（番号・本文・投稿者・更新時刻） | issue comments の GET |
-| `post(pr, body)`・`edit(id, body)` | 番号と応答の更新時刻 | POST・PATCH（`threads.patient` を通す） |
+| `comments(pr)`・`comment(id)` | コメント（番号・本文・投稿者とそのアカウント ID・更新時刻） | issue comments の GET。`comments` はページごとに読んで返し、呼び手が記録を見つけたら後のページを取らない |
+| `post(pr, body)`・`edit(id, body)` | 番号と応答の更新時刻 | POST・PATCH（`threads.patient` を通す）。`body` は `record_body` が形を確かめた値だけで組んだ本文 |
 | `search(ident)` | `Listed` の並び | `GET search/issues` |
-| `recent(since)` | 作成時刻が `since` 以後（同じ時刻を含む）の `Listed` の並び（超えれば `TooMany`） | `GET repos/{repo}/issues?sort=created`。上限は `github.list-pages` |
-| `create(title, body)` | Issue の URL | `publish.Publisher.create_issue` |
+| `recent(since)` | 作成時刻が `since` 以後（同じ時刻を含む）の `Listed` の並び（超えれば、読めた分を持つ `TooMany`） | `GET repos/{repo}/issues?sort=created`。上限は `github.list-pages` |
+| `issues(urls)` | URL ごとの、このリポジトリの Issue の `Listed`。別の場所の URL と無い Issue は None | GraphQL のまとめ読み（`GitHub.nodes`。`github.graphql-batch` 件ごとに 1 回） |
+| `create(title, body, mark)` | Issue の URL | `publish.Publisher.create_issue`。`mark` は検査の後に本文の最後へ足す |
 
 - `file_issues`
   - 事前条件: 呼び手は、記録の公開のロック（`write_gate.pr_lock` の今の PR 番号）に加えて、元の PR 番号のロックを持つ。2 つの番号が同じなら 1 回だけ取る（同じ番号を 2 回取ると、2 回目が待ち切れで失敗する）。順は今の番号が先である
-  - 事後条件: 起票の候補の行は `issue` か `issue_error` を持つ。Issue を作る前に `issue_logins` と起票の記録を保存している
+  - 事後条件: 起票の候補の行は `issue` か `issue_error` を持つ（照合だけの候補で、その指摘の Issue が無い行は、どちらも持たず `issue_checked` を持つ）。Issue を作る前に `issue_account_ids` と起票の記録を保存している
   - 副作用: 元の PR の起票の記録のコメントと、Issue を GitHub に書く。状態ファイルを `save` で書く
 
 ### 異常系の処理
@@ -341,20 +425,20 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- | --- |
 | `primary_of` | 設定を読めない・未設定・`unknown` | ファイルが無い・壊れている | JSON の読み取り | 既定値で続ける（起票しない） | `github` を設定するよう注意 | 設定すれば次の公開で起票する |
 | `file_issues` | 起票の記録を読めない・書けない | 通信・権限・二次レート制限の上限 | `GitHubError` | 止めない。どの候補も起票せず `issue_error` | 注意と記録のコメントの表。終了コードは変えない | 次の起動か `ndf cross-review report` で打ち直す |
-| `file_issues` | 検索か一覧を読めない・無いと確かめられない | 検索の上限・`TooMany` | `GitHubError`・`TooMany` | その候補を起票せず `issue_error`。`TooMany` なら `issue_list_full` に上限の値 | 同上 | `issue_list_full` がある間、自動の公開は一覧を読まない。`github.list-pages` を上げるか `report` で打ち直す |
+| `file_issues` | 検索か一覧を読めない・無いと確かめられない | 検索の上限・`TooMany` | `GitHubError`・`TooMany` | その候補を起票せず `issue_error`。`TooMany` なら `issue_list_full` に上限の値 | 同上 | `issue_list_full` がある間、自動の公開は一覧を読まない。`github.list-pages` を上げると読み直す。手動の `report` は、今の上限まで読み直す |
 | `file_issues` | GitHub が作成をはっきり拒む | 4xx | `GitHubError.status` | 起票の記録からその識別値を消し、`issue_error` | 同上 | 打ち直せる |
 | `file_issues` | 作成の結果が分からない（5xx・不達・保存の前の中断） | 通信の障害 | 次の起動で記録に URL が無い識別値 | 起票の記録を残し、次の公開で検索と一覧で確かめる | 同上 | 打ち直しても 2 件作らない |
 
 ### 処理の手順
 
-`file_issues` は、設計の「起票の形」の順で進む。指摘の行に `issue` があるものは起票しない。起票の記録は元の PR の専用のコメントで、本文に識別値ごとの `at`（試みた時刻）と `url` を持つ。コメントの番号は状態ファイルの `issue_record_id` に置く。1 回の公開で記録を書くのは、作成の前の 1 回と結果の 1 回である。
+`file_issues` は、設計の「起票の形」の順で進む。指摘の行に `issue` があるものは起票しない。起票の記録は元の PR の専用のコメントで、本文に識別値ごとの `at`（試みた時刻）と `number`（Issue の番号）を持つ。読むときに番号から対象リポジトリの Issue の URL を組み立てる。以下の手順の `url` は、この組み立てた URL である。コメントの番号は状態ファイルの `issue_record_id` に置く。1 回の公開で記録を書くのは、作成の前の 1 回と結果の 1 回である。
 
-1. 記録を読む（本文とコメントの更新時刻）。`url` も `at` も無い識別値には、読んだ更新時刻を `at` として当てる
-2. `url` のある識別値は起票せず、その URL を使う
-3. `url` の無い識別値（作成の結果が分からないもの）は、識別値で検索し、無ければ作成時刻が `at` 以後の Issue の一覧を読む
-4. 1 回目の書き込み: 記録に無い識別値と、順 3 でどちらにも無いと確認できた識別値を、`at` と `url` の無い項目として書く。試みた時刻はこの書き込みの応答の更新時刻なので、この本文には入れられない。書けなければ作らない
+1. 記録を読む（本文とコメントの更新時刻）。`at` の無い識別値には、読んだ更新時刻を `at` として当てる
+2. 起票の記録の `url`、行の `prior_issue`、状態の `issue_carried_urls` が指す Issue をまとめて読み、作者を信用できるかを確かめる。Issue の取得か作者の権限の照会に失敗した場合（`GitHubError` が返る通信の失敗・5xx・利用上限など）は、URL を残したまま `issue_error` に理由を書いて保留し、保留した候補は順 3 の検索にも起票にも進まない。保留するのは、設計の「起票の形」のとおり、`issue_carried_urls` があれば全部の候補、無ければ `url` か `prior_issue` のある候補である。権限の照会の応答が利用上限によらない 403・404 の場合は、失敗に数えない。`GitHub.permission` がこの応答を権限なし（`none`）として返すので、その作者は信用しない。失敗しなかった場合、URL が同じリポジトリの Issue を指し、作者を信用でき、本文の引用とコードブロックの外にこの指摘の目印だけの行があれば、起票せずその URL を使う。目印は、設計の「起票の形」の順（今の識別値、次に Issue の本文の PR の番号から作り直した識別値）で照合する。本文の PR の番号の抽出は、1 回の公開で Issue の本文ごとに 1 回にする。満たさなければ `url` と `prior_issue` を捨て、順 3 で確かめる
+3. 起票の記録にあって使える URL の無い識別値（作成の結果が分からないもの。順 2 で `url` を捨てた識別値を含む）は、識別値で検索し、無ければ作成時刻が `at` 以後の Issue の一覧を読む
+4. 1 回目の書き込み: 起票の対象の種類を持つ候補のうち、記録に無い識別値と、順 3 でどちらにも無いと確認できた識別値を、`at` と `url` の無い項目として書く。試みた時刻はこの書き込みの応答の更新時刻なので、この本文には入れられない。書けなければ作らない
 5. 順 4 で書いた識別値の Issue を作る
-6. 2 回目の書き込み: 作れた識別値は `url` と `at` を、結果が分からない識別値は `at` を書き、GitHub がはっきり拒んだ（4xx）識別値は消す。作れた URL は指摘の行にも書く
+6. 2 回目の書き込み: 作れた識別値は `number` と `at` を、結果が分からない識別値は `at` を書き、GitHub がはっきり拒んだ（4xx）識別値は消す。作れた URL は指摘の行にも書く。作る識別値が無くても、順 2・3 で記録に無かった URL を見つけた場合は、その `number` を書く。この書き込みに失敗した場合は URL を状態の `issue_unrecorded` に残し、次の公開は起票の候補が無くても順 1 で記録を読んで書き直す
 
 `url` も `at` も無い項目が次の起動に残るのは、順 4 の後、順 6 の前に中断したか、順 6 の書き込みに失敗した場合である。このときコメントの更新時刻は順 4 の応答の値のままなので、順 1 がそれを試みた時刻にする。記録を書く処理は書く前に必ず読んで `at` を当てるので、後の書き込みで時刻が動いても、先の項目の時刻は失われない。人がコメントを編集して更新時刻が後ろへ動いた場合の扱いは、設計書が定めていない。
 
@@ -362,13 +446,13 @@ plugins/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 同じ PR の別の公開（別の保存先と、巻き直しの前後を含む） | 起票の記録のコメント | 起票の記録を置く元の PR 番号の公開のロック | 作成の前に記録へ書くので、中断しても候補が分かる |
+| 同じ PR の別の公開（別の保存先と、巻き直しの前後を含む） | 起票の記録のコメント | 起票の記録を置く元の PR 番号の公開のロック（1 台のマシンの中だけに効く。別のマシンの同時の公開は排他しない。設計の「起票の形」） | 作成の前に記録へ書くので、中断しても候補が分かる |
 
 ### ログと記録の出力
 
 | 関数 | 出すもの | レベルまたは書き先 | 出さないもの |
 | --- | --- | --- | --- |
-| `file_issues` | 起票した URL・失敗の理由 | 行の `issue`・`issue_error`、結果の `warnings` | 伏せる前の指摘の本文。起票の記録には識別値・時刻・URL だけを書く |
+| `file_issues` | 起票した URL・失敗の理由 | 行の `issue`・`issue_error`、結果の `warnings` | 伏せる前の指摘の本文。起票の記録には識別値・時刻・Issue の番号だけを書く |
 
 ### 既存の部品の再利用
 
@@ -381,7 +465,7 @@ plugins/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `file_issues` | 起票して URL を行に書き、同じ指摘は 2 回目に起票しない | 作成を試みていない候補だけなら検索も一覧も呼ばない。`issue_logins` の bot が書いた記録を別の login で読む。読み済みの login を取り直さない | 作成の失敗で行が残る。作成の後の保存の失敗の打ち直しで、同じ保存先・別の保存先・PR を巻き直した後でも起票しない。記録を書けなければ作成しない。検索に反映される前は一覧で見つける。作成時刻が `at` と同じ Issue も一覧で見つける。**題の境目をまたぐ偽の秘密を持つ指摘を起票すると、作った Issue の題にも本文にも断片が無い** |
+| `file_issues` | 起票して URL を行に書き、同じ指摘は 2 回目に起票しない | 作成を試みていない候補だけなら検索も一覧も呼ばない。`issue_account_ids` の bot が書いた記録を別のアカウントで読む。読み済みの利用者を取り直さない。記録が見つかったページでコメントの取得を終える。目印と同じ名前のアカウントを伏せても目印が残る | 作成の失敗で行が残る。作成の後の保存の失敗の打ち直しで、同じ保存先・別の保存先・PR を巻き直した後でも起票しない。記録を書けなければ作成しない。検索に反映される前は一覧で見つける。作成時刻が `at` と同じ Issue も一覧で見つける。**題の境目をまたぐ偽の秘密を持つ指摘を起票すると、作った Issue の題にも本文にも断片が無い** |
 | `primary_of` | `primary` が `github` なら `("github", None)` を返し、起票する | `primary` が `markdown` で `others` に `github` がある場合は `("markdown", None)` を返し、起票しない | ファイルが無い・`issues` が無いか null・`unknown`・壊れた JSON は、値が None で注意の文を返し、起票しない |
 
 ## ジャーナルと引き継ぎ（journal・prior_decide）
@@ -393,15 +477,110 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `sort` | `journal.py` | 新設 | `sort(self, touched: leftover_decide.Touched, unconfirmed: Collection[str] = ()) -> frozenset[str]` | このラウンドで出た指摘のうち分け直すものに線引きを当て、残した指摘のキーを返す |
+| `passed` | `journal.py` | 新設 | `passed(self, fid: str, touched: leftover_decide.Touched, *, unconfirmed: bool = False) -> list[dict[str, Any]]` | このラウンドの出し直しの位置のうち、修正へ進むものを返す（`sort` と `_wants_tracks` が使う） |
+| `unpark` | `journal.py` | 新設 | `unpark(self, touched: leftover_decide.Touched) -> None` | 線引きをしないラウンドで、出し直された指摘の `parked` を外して位置を置き換え、投稿できる行かを確かめる |
 | `enter` | `journal.py` | 変更 | シグネチャは変えない | このラウンドで出た指摘の番号を `self.raised_ids` に残し、`self.returned`（直した後に戻った指摘の番号）を呼び出しごとに空にする |
-| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文から URL への対応 `self.filed` に残す。`issue` を持つほかの項目は指摘の行へ移す |
+| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文と URL の組の並び `self.filed` に残す。引き継ぎの処理（`carry.py`）はその URL すべてを状態の `issue_carried_urls` に残し、`file_issues` が Issue の目印で指摘と照らす。`issue` を持つほかの項目は指摘の行へ移す |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 直した（`fixed`）指摘が戻ったときに、番号を `self.returned` に足す |
 | `handable` | `journal.py` | 変更 | シグネチャは変えない | `parked` の指摘を返さない |
 | `_classify` | `journal.py` | 変更 | シグネチャは変えない | 必ず人の承認が要る操作と分かった指摘の `parked` を外す |
 | `findings` | `journal.py` | 変更 | シグネチャは変えない | `Finding.parked` を渡す |
-| `_recorded_one` | `prior_decide.py` | 変更 | シグネチャは変えない | `Carried` に `parked: bool` と `issue: Optional[str]` を読む |
+| `_recorded_one` | `prior_decide.py` | 変更 | シグネチャは変えない | `Carried` に `parked: bool` と `issue: Optional[str]` を読む。`parked` と `issue` だけの項目は、本文の無い残した指摘にして URL を引き継ぐ |
 
-`sort` が分け直すのは、このラウンドで出た指摘（`raised_ids`）のうち、新しく出たか戻った指摘（`fresh`）と、`parked` を持つ指摘だけである。前から未解決で `parked` の無い指摘は、出し直されても分け直さない（I2: 一度修正へ進むと決めた指摘は、直すか見送るまで進む）。`proceeds` が偽なら `parked` を付けて `self.filed` の URL を `issue` に戻し、真なら `parked` を外す。収束を止める指摘の判定（`_blocking`）は `parked` の指摘を外す。
+`sort` が分け直すのは、このラウンドで出た指摘（`raised_ids`）のうち、新しく出たか戻った指摘と、`parked` を持つ指摘だけである。新しく出たか戻った指摘は、判定役へ渡す候補の `fresh` ではなく、絞る前の一覧を使う。内容の違う重い報告が重なって判定役へ渡さない新しい指摘も、線引きするためである。前から未解決で `parked` の無い指摘は、出し直されても分け直さない（I2: 一度修正へ進むと決めた指摘は、直すか見送るまで進む）。
+
+`proceeds` に渡す位置は、今回の出し直しのものを 1 件ずつ当てる。直さずに残した指摘の行の位置は、前の head の行番号だからである。どれか 1 件が真なら進める。指摘の行には、真になった出し直しの中から 1 件を選んで、その `path`・`line` を保存する。進むかどうかの判定と、保存する位置の選び方は分ける。保存する出し直しは次の順に選ぶ。
+
+1. PR の差分に載る行（`Touched.commentable`）を指す出し直しを先にする。その中では、今回変えた行を指すものを先にする
+2. そのような出し直しが無ければ、残りから今回変えた行を指すもの、`path` を持つものの順に選ぶ
+
+手順 2 で選んだ行は PR の差分に載らないが、`line` は除かずに保存する。投稿の位置からは、後で述べる欄 `off_diff` で除き、ファイルの位置にする。差分に載らない行を投稿に使わないのは、行コメントが拒否され、API 呼び出しが増えるためである。どの出し直しも `proceeds` が偽なら `parked` を付けて `self.filed` の URL を `issue` に戻す。
+
+`parked` の指摘を修正担当へ渡さないのは `handable` である。重さの判定（`_blocking`）は変えない。`enter` が返すキーには残していた指摘も含め、駆動が `sort` の返りを除く。出し直しで進むことになった指摘のキーが、振動の判定の履歴から抜けないためである。
+
+ただし、直さずに残した指摘が次のどれかとして出し直されたときは、`enter` が取り込む時点で `parked` を外し、行の位置をその出し直しのものに置き換える。その出し直しに `path` や行番号が無ければ、同じラウンドのほかの出し直しから補う。行番号を持つ位置を、`path` だけの位置より優先する。外した出し直しに `path` があるときは、同じ `path` の出し直しからだけ補う。
+
+- critical
+- 保護の対象の指摘
+- 必ず人の承認が要る操作の指摘（`_classify` が外す。修正担当へは渡さず、人の判断を待つ）
+
+これらの条件は今の差分と照らさなくても決まるので、`enter` の時点で外す。`parked` を外した出し直しに `path` と行番号があれば、同じラウンドに通常の報告が先に届いていても、`enter` はその位置を選ぶ。
+
+線引きをしないラウンド（変えた行を読めないラウンドを含む）では、`_sort_leftovers` が `sort` の代わりに `unpark` を呼ぶ。`unpark` は、このラウンドで出し直された指摘の `parked` をすべて外し、行の位置を同じ決まりで出し直しのものに置き換える。線引きを当てられないラウンドは重い指摘をすべて進めるので、前のラウンドで残した指摘も修正へ戻すためである。
+
+線引きを当てられるかと、投稿できる行かの確認は分ける。`unpark` は、置き換えた位置（`enter` が置き換えたものを含む）を、後で述べる `off_diff` の判定にかける。判定に使う `Touched.commentable` は、このラウンドで取得済みの全差分から `changes.commentable_lines` で読み、git は起動しない。全差分が無いか読めないときは、このラウンドで位置を置き換えた指摘のうち、行番号があるものに `off_diff` を付け、ファイル単位で投稿する。差分に載らない行が 1 件でも混じると、まとめた投稿の全体が拒否されるためである。
+
+`enter` の後に `sort` を呼ぶ（線引きをする）ラウンドでも、`sort` は `parked` の外れた指摘を修正へ進めるかどうかを判定し直さない。投稿の位置だけは、次のとおり確かめる。
+
+- `enter` が置き換えた行が PR の差分に載れば、その位置を保つ
+- 載らなければ、`enter` が候補にした出し直しから、上の番号付きの 2 つの順で選び直して保存する
+
+`sort` が `off_diff` を判定し直すのは、このラウンドで報告された指摘のうち、位置の基準のラウンド番号（`placed_round`、無ければ `round`）が現在のラウンド番号と一致するものである。コミットが同じかどうかでは選ばない。前のラウンドと同じ head を再レビューしても、基準が前のラウンドの指摘は `off_diff` をそのまま保つ。判定は次の順で行う。
+
+1. 指摘の行から、前に付けた `off_diff` を外す。付けたまま読むと `leftover_decide.location` は行番号を返さず、差分に載るかを確かめられない
+2. `leftover_decide.location` で投稿に使うパスと行番号を読む
+3. 行番号があり、現在のラウンドの head の PR の差分に載らなければ、`off_diff` を付ける
+
+投稿するときは、判定の後の `off_diff` を反映した位置を `leftover_decide.location` で読む。判定し直した指摘の投稿の方法は次のとおりである。表は、パスが PR の変更ファイル一覧にある指摘を対象にする。一覧に無いパスの指摘とパスの分からない指摘は、スレッドを作らず（`threads._Sync.plan`）、PR の記録のコメントの「指摘」の表に載る。
+
+| 判定で読んだ行番号 | `off_diff` | 投稿の方法 |
+| --- | --- | --- |
+| PR の差分に載る | 付けない | その行に投稿する |
+| PR の差分に載らない | 付ける | ファイル単位で投稿する |
+| 無い（ファイルパスだけがある） | 付けない | ファイル単位で投稿する |
+
+位置を置き換えるのは、位置を取る出し直しに `path` があるときだけである。同じラウンドのどの出し直しからも `path` を取れなければ、元の `path`・`line`・`placed_round` をそのまま残す。投稿の処理は `path` の無い指摘の位置を `section` と本文の先頭の行番号から読むので、後の head を組み合わせると別の行を指すためである。
+
+投稿が拒否されて API 呼び出しが増えないように、基準のコミットの PR の差分に載らない行は、投稿の位置に使わない。指摘の行には `path`・`line` を保存したまま、差分に載らないことを欄 `off_diff` に残し、投稿するときに行番号を除く。
+
+- 付けるのは `sort` と `unpark` である。`unpark` が確かめるのは、位置を置き換えた指摘だけである。`sort` は、位置を選んで保存した後に、このラウンドで出た指摘のうち、位置の基準がこのラウンドのものを確かめる。修正へ進む指摘も、直さずに残す指摘も対象にする。投稿の処理と同じ関数（`leftover_decide.location`）で読むので、`path` の無い指摘は `section` と本文の先頭から読んだ行を確かめる
+- 参照するのは `leftover_decide.location` である。`off_diff` を持つ指摘は行を返さず、ファイルの位置になる。線引きを省くラウンドで見送りが解けた指摘も、同じ扱いになる
+- `off_diff` を付けるときは、保存した `path`・`line` と位置の基準を書き換えない。行番号は起票の「場所」に使うためである
+- 位置の基準が前のラウンドの指摘は、今の差分では確かめられないので、`off_diff` をそのまま保つ。位置を置き換えるか、直した指摘が戻ったときは消す
+
+指摘の行の位置を置き換えるときは、指摘が出たラウンド（`round`）を変えない。`path`・`line` と、その行番号の基準になるラウンド（`placed_round`）を一緒に書き換える。ジャーナルから投稿の処理（`threads.py`）へ渡す位置の取り決めは次のとおりである。
+
+| 指摘の行 | `path`・`line` の基準のコミット |
+| --- | --- |
+| `placed_round` が無い | `round` のラウンドの head |
+| `placed_round` がある（位置を後のラウンドの出し直しに置き換えた） | `placed_round` のラウンドの head |
+
+`placed_round` は、置き換えたラウンドが `round` と違うときだけ持つ。直した指摘が戻って `round` が変わるとき（`_revive`）は消す。
+
+位置を置き換えると、1 回の公開で行う API 呼び出しの回数が増えることがある。指摘のスレッドを作るときの呼び出し（`threads.sync`）は次のとおりである。スレッドを作るのは、パスが PR の変更ファイル一覧にある指摘だけである。投稿の方法は、指摘の行に保存した `line` ではなく、投稿に使う行番号（`leftover_decide.location` が返す行番号）の有無で決まる。
+
+| 場面 | API 呼び出し |
+| --- | --- |
+| `leftover_decide.location` が行番号を返す指摘 | 基準のコミットごとに 1 回のレビュー投稿（`POST /repos/{repo}/pulls/{pr}/reviews`）にまとめる。複数のラウンドが同じ head を持てば、そのコミットへの投稿は 1 回である |
+| `leftover_decide.location` がファイルパスだけを返す指摘（ファイル単位のコメント） | 指摘 1 件につき 1 回 |
+| レビュー投稿が 1 つでも成功した | 投稿したスレッドの一覧の読み直しが、1 回の公開につき 1 回。一覧は GraphQL で 100 件ずつ読むので（`threads.GitHubPort._thread_nodes`）、API 呼び出しはページの数だけになる |
+| レビュー投稿が行の位置を理由に拒否された | 拒否された 1 回に加え、まとめていた指摘を 1 件ずつ投稿し直す。行への投稿が 1 回で、それも拒否された指摘はファイルへの投稿がもう 1 回 |
+
+位置の置き換えで回数が増えるのは、次の場合である。
+
+- 投稿に使う行番号を持つ指摘があるコミットが増える。レビュー投稿が、増えたコミットの数だけ増える。レビュー投稿の回数は、ラウンドの数を超えない
+- 投稿に使う行番号の無かった指摘にその行番号が付き、その公開で初めてレビュー投稿をする。ファイル単位の投稿 1 回がレビュー投稿 1 回に変わるので投稿の回数は同じだが、一覧の読み直しが 1 回増える。増える API 呼び出しは、一覧のページの数である
+
+正しい行にスレッドを付けるために、この 2 つの増加は受け入れる。
+
+PR の差分に載らない行がレビュー投稿にまとめる指摘に混じると、組の全体が拒否される。組が n 件で、そのうち行への個別の投稿も拒否される指摘が k 件なら、1 回で済む投稿が、拒否 1 回、行への投稿 n 回、ファイルへの投稿 k 回の、合わせて `1 + n + k` 回になる。`sort` は差分に載らない行を位置に使わず、`enter` が `parked` を外して置き換えた位置も確かめ直すので、線引きをするラウンドではこの増加は起きない。線引きをしないラウンドでは、`unpark` が置き換えた位置を取得済みの全差分と照らし、照らせなければファイル単位にする。
+
+`off_diff` でファイル単位の投稿に移すと、全部の行が差分に載って 1 回のレビュー投稿にまとまる場合より、API 呼び出しが増えることがある。同じコミットの指摘 n 件のうち k 件（k は 1 以上）が移る場合の差し引きは、次のとおりである。P は、投稿の後にスレッドの一覧を読み直すページの数である。
+
+| 場面 | API 呼び出しの差し引き |
+| --- | --- |
+| そのコミットへのレビュー投稿が残る（k < n） | ファイル単位の投稿の分、k 回増える |
+| レビュー投稿が無くなり（k = n）、同じ公開のほかのレビュー投稿が成功する | 投稿が n − 1 回（k − 1 回）増える。一覧の読み直しは変わらない |
+| レビュー投稿が無くなり（k = n）、その公開にほかのレビュー投稿が無い | 投稿が n − 1 回増え、一覧の読み直しが P 回減る。差し引きは n − 1 − P 回 |
+
+この増加は受け入れる。差分に載らない行をレビュー投稿に混ぜると組の全体が拒否され、投稿が `1 + n + k` 回になって、ファイル単位に移すより多くなるためである。
+
+位置の置き換えについて、次の 2 つの案は採らない。
+
+| 案 | 採らない理由 |
+| --- | --- |
+| 行番号を現在の head へ写して、1 回にまとめて投稿する | コミットの間の差分を読んで行を対応させる処理と `git diff` の起動が増える。書き換えた行や消した行には対応先が無い |
+| 位置を置き換えず、元のラウンドのコミットに付ける | スレッドが、修正へ進める根拠になった箇所ではない行を指す |
 
 ### 既存の部品の再利用
 
@@ -427,10 +606,11 @@ plugins/ndf/
 | `_finding_gaps` | `finish_decide.py` | 変更 | シグネチャは変えない | `parked` の指摘を欠け（MVV の欠けを含む）にしない |
 | `_counts` | `finish_decide.py` | 変更 | シグネチャは変えない | `parked` の指摘を未解決の数に入れない |
 | `as_findings` | `finish_decide.py` | 変更 | シグネチャは変えない | 要約の指摘の `parked` を読む |
-| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `parked` の行の終わり方に「直さずに残した（起票: <URL>）」か「直さずに残した（記録のみ）」を出す |
-| `open_block` | `report_decide.py` | 変更 | シグネチャは変えない | 一覧の項目に `parked` と `issue` を足す |
-| `viewer` | `threads.py` | 新設 | `GitHubPort.viewer(self) -> str` | 今の認証の login を 1 回だけ読んで返す |
+| `_finding_rows` | `report_decide.py` | 変更 | 引数 `repo: Optional[str] = None` を足す | `parked` の行の終わり方に「直さずに残した（起票: #<番号>）」か「直さずに残した（記録のみ）」を出す。`repo` の Issue でない URL は URL のまま出す |
+| `open_block` | `report_decide.py` | 変更 | シグネチャは変えない | 一覧の項目に `parked` と `issue` を足す。状態の `issue_carried_urls` のうちどの項目にも無い URL は、`parked` と `issue` だけの項目にする |
+| `_trusted` | `threads.py` | 変更 | シグネチャは変えない | 書き手の login を `GitHub.viewer` の login と比べる。起票と同じ読み取り結果を使う |
 | `_wanted` | `threads.py` | 変更 | シグネチャは変えない | スレッドの無い `parked` の指摘にスレッドを作らない |
+| `_placed_head` | `threads.py` | 新設 | `_placed_head(rounds, finding) -> Optional[str]` | スレッドを付けるコミットを、`placed_round`（無ければ `round`）のラウンドの head にする |
 
 `Finding` に `parked: bool = False` を足す。`summary_of` は `Finding` の全項目を書くので変えない。`--stop-on-hold` の欠けを作る `_held` も変えない。`parked` の指摘は未解決で `redline` でないので、今の条件で数えないためである。
 
@@ -438,13 +618,13 @@ plugins/ndf/
 
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `viewer` | login を読めない | 認証・通信 | `GitHubError` | 呼び出し元へ返す（起票は `issue_error`、スレッドは今の注意） | 注意 | 打ち直せる |
+| `GitHub.viewer` | login と ID を読めない | 認証・通信 | 上限と一時的な失敗は `GitHubError`。ほかは login が空で ID が 0 | `GitHubError` は呼び出し元へ返す。空と 0 の場合、起票はせず `issue_error`、スレッドはどの書き手も信用しない | 注意 | 打ち直せる |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `viewer` | `GitHubPort._trusted` の中の `VIEWER` の照会 | `threads.py` を読んだ | 同じ照会を公開のメソッドに切り出し、`_trusted` もそれを呼ぶ |
+| 実行している利用者の読み取り | `GitHub.viewer`・`threads.py` の `VIEWER` の照会 | `github.py`・`threads.py` を読んだ | `GitHub.viewer` は login とアカウント ID を一度に読んで保持する。`threads.py` の照会は無くし、スレッドと起票の両方が `GitHub.viewer` を使う |
 
 ### 単体テストの観点
 
@@ -452,7 +632,7 @@ plugins/ndf/
 | --- | --- | --- | --- |
 | `_finding_gaps` | 残した指摘だけなら欠けが無い | MVV の残した指摘は `outputs.mvv.findings` に未解決で載り、欠けにならない | 無し |
 | `_finding_rows`・`open_block` | 残し方と URL が出る | 起票に失敗した行は記録のみ | 無し（文言は照合せず、URL と番号が現れることを見る） |
-| `_wanted`・`viewer` | `parked` の指摘にスレッドを作らない | 2 回目は照会しない | 無し |
+| `_wanted`・`_trusted` | `parked` の指摘にスレッドを作らない | 書き手が `GitHub.viewer` の login と違えば信用しない | 無し |
 
 ## 駆動とサブコマンド（drive・cli・settings）
 
@@ -462,11 +642,11 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
-| `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, prep: Prepared, checked: Checked) -> frozenset[str]` | 線引きの対象のラウンドなら、`changes.touched(g, prep.lines, prep.head)` で変えた行を読んで `journal.sort` を呼ぶ |
+| `_ranges` | `drive.py` | 新設 | `_ranges(run: _Run, merge_base: str, head: str) -> Ranges` | 目的ごとに、差分を渡す起点（`read_origin`）・足すファイル・線引きの起点（`line_origin`）を決める |
+| `_sort_leftovers` | `drive.py` | 新設 | `_sort_leftovers(run: _Run, touched: Optional[leftover_decide.Touched], checked: Checked, prep: reviewing.Prepared, got: reviewing.Reviewed) -> frozenset[str]` | `_confirm_heavy` の前に読んだ変えた行を受け取り、線引きの対象のラウンドなら `journal.sort` に渡し、ほかは取得済みの全差分から読んだ行を `journal.unpark` に渡す |
 | `default_max_rounds` | `settings.py` | 新設 | `default_max_rounds(every_section: bool) -> int` | `--max-rounds` を省いたときの上限（設計の PR は 3、ほかは 4） |
 | `_with_leftovers` | `cli.py` | 新設 | `_with_leftovers(verdict: fin.Verdict, items: list[dict[str, Any]], data: Mapping[str, Any]) -> fin.Verdict` | 結果の `items` に残し方を足し、要約の行と MVV の判断を足す |
-| `_prepare_round` | `drive.py` | 変更 | シグネチャは変えない（返りの `Prepared` に `lines: Optional[str]` を足す） | 実装の PR は起点からの差分を `since_diff` で作る。`lines` には線引きの起点（`line_origin` の head）を入れ、線引きをしないラウンドは None にする |
+| `_prepare_round` | `drive.py` | 変更 | シグネチャは変えない（返りの `Prepared` に `lines: Optional[str]` と `listed: changes.Listings` を足す） | 実装の PR は起点からの差分を `since_diff` で作る。`lines` には線引きの起点（`line_origin` の head）を入れ、線引きをしないラウンドは None にする |
 | `_publish` | `cli.py` | 変更 | `_publish(ref, final, warnings, hub, main: Optional[Path])` | スレッドの後、記録のコメントの前に `leftover.file_issues` を呼ぶ。元の PR 番号が今の番号と違えば、その呼び出しを元の番号の公開のロックで囲む |
 | `_post_report` | `cli.py` | 変更 | `_post_report(state_dir, pr, final, warnings, hub_of, main: Optional[Path] = None)` | `main` を `_publish` へ渡す |
 | `_report` | `cli.py` | 変更 | シグネチャは変えない | 起票に失敗した指摘があれば、前回の記録が同じでも書き直す |
@@ -475,7 +655,7 @@ plugins/ndf/
 | `_run_parser` | `cli.py` | 変更 | シグネチャは変えない | `--max-rounds` の既定を None にする |
 | `cmd_scope` | `cli.py` | 変更 | シグネチャは変えない | 範囲を `local_scope.decide` に決めさせる |
 | `cmd_report` | `cli.py` | 変更 | シグネチャは変えない | 打った場所からメインディレクトリを決め、`manual=True` で起票する |
-| `_round` | `drive.py` | 変更 | シグネチャは変えない | 判定役へ指摘の種類を求めるか（`use_tracks`）を `_confirm` へ渡し、`_sort_leftovers` を呼び、振動の判定の履歴から残した指摘を除く |
+| `_round` | `drive.py` | 変更 | シグネチャは変えない | 判定役へ指摘の種類を求めるか（`use_tracks`）を `_confirm_heavy` へ渡し、`_sort_leftovers` を呼び、振動の判定の履歴から残した指摘を除く |
 
 `Hub` に `leftovers: Optional[Callable[[int], leftover.Port]] = None` を足す。
 
@@ -487,13 +667,20 @@ plugins/ndf/
 | 目的 | `_ranges` の結果 |
 | --- | --- |
 | 設計の PR（`every_section`） | 今のとおり `round_scope.previous_head`。線引きの起点は無し |
-| 実装の PR で `origin` が無い | 全差分。線引きの起点は `line_origin`（あれば） |
-| 実装の PR で `origin` があり、比較基点が同じ | 起点は `origin.head`、足すファイル無し |
+| 実装の PR で `read_origin` が無い | 全差分。線引きの起点は `line_origin`（あれば） |
+| 実装の PR で `read_origin` があり、比較基点が同じ | 起点は `read_origin.head`、足すファイル無し |
 | 実装の PR で比較基点が違う | `new_in_pr` の結果を足す。None なら全差分で線引きなし |
 
-線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち `proceeds` が偽のものがある場合だけである。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
+線引きをするのは、実装の PR で、状態ファイルの通算で 2 ラウンド目以降で、`line_origin` があり、比較基点の変化で足すファイルが無いラウンドである。足すファイルの有無は、`read_origin` が無くて全差分になるラウンドでも、`line_origin` の比較基点が今と違えば `new_in_pr` で確かめる。`_confirm_heavy` の `use_tracks` を真にするのは、線引きをするラウンドで、このラウンドの新しい重い指摘に、MVV の項目を持ち、`sort` が残すと判定するものがある場合だけである。`sort` と同じく出し直しのすべての位置に `proceeds` を当て（`journal.passed`）、すべて偽なら残すと判定する。その指摘は、回答の指摘の種類によって、進むか（保護の種類が付く）、起票するかが変わる。
 
-保護の対象の指摘は `proceeds` の順 7 で進むと決まっていて、起票もしない。critical や変えた行の MVV の指摘も進むと決まっている。これらだけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。`proceeds` に渡す `touched` は、`_confirm` の前に 1 回読み、`_sort_leftovers` でも使う。
+次の 2 種類の指摘は、判定役の回答で扱いが変わらない。1 つは保護の対象の指摘で、`proceeds` の順 7 までに進むと決まり、起票もしない。もう 1 つは MVV の項目を持つ指摘のうち、`proceeds` が真のもの（critical のものや、変えた行を指すものなど）である。回答がどうであれ修正へ進み、MVV の項目を持つ指摘は重要度も下げない。新しい重い指摘がこの 2 種類だけのラウンドでは、判定役を起動しない（ほかの理由で起動するラウンドでは、今のとおり一緒に渡る）。判定役に渡す候補は、`FindingJournal.enter` が `fresh` に入れた指摘である。そのうち保護の種類も MVV の項目も持たない critical・major は、今のとおり重要度を確認するために判定役へ渡す（必ず人の承認が要る操作の指摘と NDF が作った指摘は除く）。`proceeds` に渡す `touched` は、線引きをするラウンドで `_confirm_heavy` の前に `changes.touched_since(g, prep.lines, changes.Range(merge_base, prep.head), listed, since_lines, pr_lines)`（`merge_base` は `_ranges` に渡す今の比較基点） で 1 回読み、`_sort_leftovers` にも渡す（線引きをしないラウンドと、線引きにも投稿の位置の確かめにも使う指摘が無いラウンドは、読まずに None。`journal.sortable`。数えるのは critical・major だけで、minor・nit は線引きで扱いが変わらず、スレッドにもしないので数えない）。`since_lines` は、「git を起動する回数」の条件に当たるラウンドでは `since_diff` の返り、ほかは None である。`listed` は `prep.listed`（`_ranges` が読んだ差分の一覧。読んでいなければ空）で、一覧を読んだ範囲は読み直さない。
+
+`pr_lines` は、このラウンドで取得した今の PR の全差分である。相手役の起動と席の穴埋めが終わった後なので、次の順で最初に当たるファイルを `read_bytes().decode("utf-8")` で読んで渡す。
+
+1. 相手役へ渡す差分が全差分（`prep.scope.base` が None）なら `prep.diff`
+2. 根拠の確かめのために全差分を書いてあれば `run.last_target.full_diff`
+3. 席の穴埋めで全差分を書いてあれば `got.filled.diff`
+4. どれも無ければ None（`touched_since` が git で読む）
 
 `run.history`（振動の判定に使う、ラウンドごとの指摘のキーの集合）へは、`enter` が返したキーから、下げた指摘（`Checked.lowered`）と残した指摘（`_sort_leftovers` の返り）を除いて足す。どちらも修正担当へ渡らないので、後でもう一度出ても、直しては戻す往復には当たらないためである。
 
@@ -502,7 +689,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `_ranges` | 比べられない | コミットが手元に無い | `new_in_pr` が None | 既定値で続ける（全差分） | 注意を 1 行 | 打ち直せる |
-| `_sort_leftovers` | 変えた行を読めない | `git.GitError` | `changes.touched` | 既定値で続ける（線引きなし。すべて進む） | 注意を 1 行 | 打ち直せる |
+| `_sort_leftovers` | 変えた行を読めない | `git.GitError` | `changes.touched_since` | 既定値で続ける（線引きなし。すべて進む） | 注意を 1 行 | 打ち直せる |
 
 ### 既存の部品の再利用
 

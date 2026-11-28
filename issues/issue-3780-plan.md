@@ -51,7 +51,7 @@
 
 ### Task 4: 起点の条件と、新しく PR の変更になったファイル
 - **対象ファイル:** `scope_decide.py`、`round_scope.py`、`changes.py`、`test_crossreview_scope.py`
-- **変更内容:** `origin_record`・`origin`・`line_origin`・`new_in_pr`・`since_diff`
+- **変更内容:** `origin_record`・`read_origin`・`line_origin`・`new_in_pr`・`since_diff`
 - **満たす受け入れ条件:** 3780:1
 - **進め方:** 一時のリポジトリで失敗するテスト（詳細設計の `new_in_pr` の観点。比較先の変更、競合の解消、実行権限だけの変更、同じ文の追加）→ 最小実装 → 整理
 
@@ -62,8 +62,8 @@
 - **進め方:** 失敗するテスト → 最小実装 → 整理
 
 ### Task 6: 線引きの判断と、残した指摘のジャーナル
-- **対象ファイル:** `leftover_decide.py`、`changes.py`（`touched`）、`journal.py`、`review-criteria.json`、`test_crossreview_leftover.py`（新設）
-- **変更内容:** `normalized`・`proceeds`・`kinds_of`・`touched`・`sort`、`enter` の `raised_ids`・`returned`、`_classify` が `parked` を外す。**必ず人の承認が要る操作の指摘は直さずに残さないことを確かめるテストを最初に書く。** 変えていない行の major で起票する種類を持つ場合、以前の確認で指摘の種類（`check.tracks`）が付いた行に後から承認の要る操作が指摘された場合、直さずに残した行（`parked`）に後から指摘された場合の 3 つで、`parked` が付かないか外れ、起票されず、人の判断を待つ
+- **対象ファイル:** `leftover_decide.py`、`changes.py`（`touched_since`）、`journal.py`、`review-criteria.json`、`test_crossreview_leftover.py`（新設）
+- **変更内容:** `normalized`・`proceeds`・`finding_kinds`・`touched_since`・`sort`、`enter` の `raised_ids`・`returned`、`_classify` が `parked` を外す。**必ず人の承認が要る操作の指摘は直さずに残さないことを確かめるテストを最初に書く。** 変えていない行の major で起票する種類を持つ場合、以前の確認で指摘の種類（`check.tracks`）が付いた行に後から承認の要る操作が指摘された場合、直さずに残した行（`parked`）に後から指摘された場合の 3 つで、`parked` が付かないか外れ、起票されず、人の判断を待つ
 - **満たす受け入れ条件:** 3780:5
 - **進め方:** 失敗するテスト → 最小実装 → 整理
 
@@ -75,12 +75,12 @@
 
 ### Task 8: 起票と起票の記録
 - **対象ファイル:** `leftover.py`（新設）、`leftover_decide.py`、`github.list-pages.json`、`test_crossreview_leftover.py`
-- **変更内容:** `files_issue`・`identity`・`issue_parts`・`trusted`・`matches`・起票の記録・`file_issues`・`primary_of`。作成の後に記録の結果の書き込みができなかった打ち直しは、コメントの更新時刻を試みた時刻にして Issue を探し、2 件作らないことをテストする。**指摘の全文の秘密を伏せてから題を切り出す。** 題の切り出しの長さの境目をまたぐ偽の秘密を持つ指摘を起票し、題にも本文にも断片が無いことを確かめるテストを置く。偽の秘密はテストの中で文字列を連結して作り、`scripts/check-repo-secrets.py` に当たらないようにする
+- **変更内容:** `files_issue`・`identity`・`issue_parts`・`trusted`・`matches_finding`・起票の記録・`file_issues`・`primary_of`。作成の後に記録の結果の書き込みができなかった打ち直しは、コメントの更新時刻を試みた時刻にして Issue を探し、2 件作らないことをテストする。**指摘の全文の秘密を伏せてから題を切り出す。** 題の切り出しの長さの境目をまたぐ偽の秘密を持つ指摘を起票し、題にも本文にも断片が無いことを確かめるテストを置く。偽の秘密はテストの中で文字列を連結して作り、`scripts/check-repo-secrets.py` に当たらないようにする
 - **満たす受け入れ条件:** 3780:2
 - **進め方:** GitHub を差し替える偽物で失敗するテスト → 最小実装 → 整理
 
 ### Task 9: 記録のコメント・結果・引き継ぎへの組み込み
-- **対象ファイル:** `report_decide.py`、`prior_decide.py`、`journal.py`（`carry`）、`threads.py`（`viewer`）、`cli.py`、`cross-review.result.schema.json`、`conftest.py`、`test_crossreview_report.py`、`test_crossreview_prior.py`
+- **対象ファイル:** `report_decide.py`、`prior_decide.py`、`journal.py`（`carry`）、`cli.py`、`cross-review.result.schema.json`、`conftest.py`、`test_crossreview_report.py`、`test_crossreview_prior.py`
 - **変更内容:** 表の残し方と URL、一覧の `parked`・`issue`、`Hub.leftovers`、`_github_hub`・`_publish`・`_post_report`・`_report`・`cmd_report`・`_with_leftovers`
 - **満たす受け入れ条件:** 3780:2
 - **進め方:** 失敗するテスト（結果の `items` に `disposition` と `url`、起票の失敗の後の打ち直しで 1 回だけ起票、別の保存先は残した指摘を引き継がず URL を戻す）→ 最小実装 → 整理
@@ -97,7 +97,7 @@
 | --- | --- | --- | --- | --- |
 | 範囲の判断の分離 | Task 1 | 無し | 約 220 | |
 | 退行テストと上限の既定 | Task 2・3 | 3780:3・4 | 約 200 | |
-| 起点と新しい変更 | Task 4 | 3780:1 | 約 400 | |
+| 起点と新しい変更 | Task 4 | 無し | 約 400 | |
 | 範囲の組み込み | Task 5 | 3780:1・4 | 約 300 | |
 | 線引きの判断 | Task 6 | 3780:5 | 約 400 | |
 | 線引きの組み込み | Task 7 | 3780:2・4・5 | 約 300 | |

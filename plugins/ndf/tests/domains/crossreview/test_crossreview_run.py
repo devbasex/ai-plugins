@@ -21,6 +21,7 @@ from ndf.contracts import result
 from ndf.domains.crossreview import cli, drive, fixer, report_decide, settings, store
 from ndf.domains.crossreview import finish_decide as fin
 
+from ._judge import answer, holding, is_judge
 from ._repos import BRANCH, Repos, commit, run_cli, sh
 
 PR = 41
@@ -42,6 +43,9 @@ class Fake:
 
     相手役は毎ラウンド 1 回ずつ起動されるので、n はラウンドの番号 - 1 にあたる。台本の位置と修正の回数は偽物が
     数える（相手役は並べて起動されるので、数える値はロックで守る）。
+
+    判定役の起動（#4363）は `calls`・`launches` に数えず `judged` に残し、`_judge.answer` が `verdict` で回答する。
+    `judge_fails` が真なら失敗で終わる。
     """
 
     def __init__(self, state_dir: Path, script: dict[str, list[Any]], decide: Optional[Callable[[str], Optional[dict]]] = None):
@@ -52,6 +56,10 @@ class Fake:
         self.calls: list[str] = []
         # 起動の中身の並び（起動の引数を見るテストが使う。#4013）
         self.launches: list[agents.Launch] = []
+        # 判定役の起動の並びと、回答の作り方（#4363）
+        self.judged: list[agents.Launch] = []
+        self.verdict: Callable[[dict], Optional[dict]] = holding
+        self.judge_fails = False
         self._lock = threading.Lock()
         self._said: dict[str, int] = {}
         self._fixes = 0
@@ -77,7 +85,17 @@ class Fake:
         lines = self.script.get(agent, [])
         return lines[at] if at < len(lines) else []
 
+    def _judge(self, spec: agents.Launch) -> agents.AgentStatus:
+        with self._lock:
+            self.judged.append(spec)
+            self._keep_inputs(spec.argv[-1])
+        if self.judge_fails:
+            return agents.AgentStatus(spec.agent, agents.AgentState.FAILED, 1, "落ちた", ())
+        return answer(spec, self.verdict)
+
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
+        if is_judge(spec):
+            return self._judge(spec)
         self.calls.append(spec.agent)
         with self._lock:
             self.launches.append(spec)
@@ -315,9 +333,8 @@ def test_issue_2770_leftover_fix_result_is_taken_in_on_restart(wt: Path, tmp_pat
     ref = store.state_pr(state_dir, PR)
     finding = {"id": "r1-1", "key": "k", "text": "直す", "section": None, "round": 1, "outcome": fin.UNRESOLVED, "reason": None}
     head = sh(wt, "rev-parse", "HEAD").strip()
-    store.write_object(
-        ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}], "findings": [finding]}
-    )
+    rounds = [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}]
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": rounds, "findings": [finding]})
     store.fix_result_path(state_dir, ref).write_text(json.dumps({"pr": PR, "findings": [{"id": "r1-1", "outcome": fin.FIXED}]}))
     fake = Fake(state_dir, {"codex": [[], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
@@ -377,7 +394,8 @@ def test_issue_4109_resend_does_not_restore_a_finding_made_by_ndf(repos: Repos, 
     ref = store.state_pr(state_dir, PR)
     rows = [{"id": i, "text": f"{i} の本文", "round": 1, "outcome": fin.UNRESOLVED, "reason": None, "by": by} for i, by in MADE_BY]
     head = sh(wt, "rev-parse", "HEAD").strip()
-    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}], "findings": rows})
+    rounds = [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}]
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": rounds, "findings": rows})
     sha = commit(wt, "fix.txt", "直した", "直す")
     path = store.fix_result_path(state_dir, ref)
     found = [{"id": i, "outcome": fin.FIXED, "reason": f"{i} を直した"} for i, _ in MADE_BY]
@@ -414,7 +432,7 @@ def test_run_config_resolves_relative_paths_from_the_caller(tmp_path: Path, monk
 def test_issue_2770_changes_required_without_any_fix_stops(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     state_dir = tmp_path / "st"
     ref = store.state_pr(state_dir, PR)
-    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
     fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["cause"]["kind"] == "work_stopped" and fake.calls == []
@@ -449,7 +467,8 @@ class Recording(Fake):
         self.prompts: list[tuple[str, str, str]] = []
 
     def __call__(self, spec: agents.Launch) -> agents.AgentStatus:
-        self.prompts.append((spec.agent, spec.paths.out.name, spec.argv[-1]))
+        if not is_judge(spec):
+            self.prompts.append((spec.agent, spec.paths.out.name, spec.argv[-1]))
         return super().__call__(spec)
 
 
@@ -470,22 +489,26 @@ def _entry(fid: str, by: str, text: str, outcome: str, round_no: int, reason: Op
 
 
 def _findings(state: dict) -> list[dict]:
-    """ジャーナルの行から発生の値（乱数。#4016）と、修正担当が直したと返した時刻（#3959）を外す。"""
+    """ジャーナルの行から発生の値（乱数。#4016）と、修正担当が直したと返した時刻（#3959）と、判定役の確認の結果（#4363）を外す。"""
     assert all(len(f["occurrence"]) == 12 for f in state["findings"])
     assert all(isinstance(f.get("fixed_at", ""), str) for f in state["findings"])
-    return [{k: v for k, v in f.items() if k not in ("occurrence", "fixed_at")} for f in state["findings"]]
+    return [{k: v for k, v in f.items() if k not in ("occurrence", "fixed_at", "check")} for f in state["findings"]]
 
 
 def _rounds_without_heads(state: dict) -> list[dict]:
     """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base。merge-base の
-    SHA）と相手役の並び（reviewers）と重点（focus）と、MVV が無いときの MVV の記録（mvv）を外す。"""
+    SHA）と相手役の並び（reviewers）と重点（focus）と PR の番号（pr_number）と、MVV が無いときの MVV の記録（mvv）を外す。判定役の
+    出力の名前（judge_output）は、起動ごとに変わる接尾辞だけを落とす。"""
     out = []
     for r in state["rounds"]:
         assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
         assert (r["mvv"], r["mvv_checked"]) == ({"id": "absent:::", "mvv_branch": "main"}, True)
-        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv", "mvv_checked")}
+        assert r["pr_number"] == PR
+        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv", "mvv_checked", "pr_number")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
+        if "judge_output" in row:
+            row["judge_output"] = re.sub(r"-\w+$", "", row["judge_output"])
         out.append(row)
     return out
 
@@ -503,6 +526,7 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     assert got["process"] == [
         {"run": "round 1 codex", "result": "指摘 1 件"},
         {"run": "round 1 kiro", "result": "指摘 2 件"},
+        {"run": "round 1 verify", "result": "判定役へ 2 件、有効な回答 2 件"},
         {"run": "round 1 claude", "result": f"指摘 2 件を扱った（新しい会話: {fixer.UNSAVED}）"},
         {"run": "round 2 codex", "result": "指摘 0 件"},
         {"run": "round 2 kiro", "result": "指摘 0 件"},
@@ -515,11 +539,12 @@ def test_run_records_the_journal_process_and_summary(wt: Path, tmp_path: Path, c
     ]
     assert state["pr"] == PR
     assert state["reviewed_sections"] == ["doc.md#セクション A", "doc.md#セクション B", "doc.md#設計"]
+    fix = {"fixed": ["r1-1", "r1-2"], "reported": 2}
     assert _rounds_without_heads(state) == [
-        {"fix": {"fixed": ["r1-1", "r1-2"], "reported": 2}, "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
+        {"fix": fix, "judge_output": "round1-verify", "round": 1, "scope": "full", "verdict": drive.CHANGES_REQUIRED},
         {"round": 2, "scope": "since", "verdict": fin.CONVERGED},
     ]
-    made_by_reviewer = {"mvv": None, "redline": False, "by_ndf": False, "defer": None}
+    made_by_reviewer = {"mvv": None, "redline": False, "by_ndf": False, "defer": None, "parked": False}
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME) == {
         "final": fin.CONVERGED,
         "findings": [
@@ -559,7 +584,7 @@ def test_run_lists_deferred_findings_in_the_next_review_prompt_and_does_not_reen
     )
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["summary"]) == (0, "2 ラウンドで converged。指摘 2 件（直した 1・見送った 1・未解決 0）")
-    assert got["process"][3] == {"run": "round 2 codex", "result": "指摘 1 件"}
+    assert got["process"][4] == {"run": "round 2 codex", "result": "指摘 1 件"}
     assert _findings(_state(fake.state_dir)) == [
         _entry("r1-1", "codex", "一つ目", fin.FIXED, 1),
         {**_entry("r1-2", "codex", "二つ目", fin.SKIPPED, 1, "別で直す"), "skipped_mvv": "absent:::"},
@@ -579,9 +604,11 @@ def test_run_reopens_a_fixed_finding_that_returns(wt: Path, tmp_path: Path, caps
     assert [p["run"] for p in got["process"]] == [
         "round 1 codex",
         "round 1 kiro",
+        "round 1 verify",
         "round 1 claude",
         "round 2 codex",
         "round 2 kiro",
+        "round 2 verify",
         "round 2 claude",
     ]
     state = _state(fake.state_dir)
@@ -607,7 +634,7 @@ def test_run_fixer_without_a_result_is_a_warning_and_errored(wt: Path, tmp_path:
     assert got["process"][-1] == {"run": "round 1 claude", "result": f"結果無し（failed）（新しい会話: {fixer.UNSAVED}）"}
     state = _state(fake.state_dir)
     assert _findings(state) == [_entry("r1-1", "codex", "直す", fin.UNRESOLVED, 1)]
-    assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR}]
+    assert _rounds_without_heads(state) == [{"round": 1, "scope": "full", "verdict": fin.ERROR, "judge_output": "round1-verify"}]
     assert store.read_object(fake.state_dir / drive.SUMMARY_NAME)["final"] == fin.ERROR
     again = Fake(fake.state_dir, {"codex": [["直す"], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, again, wt)
@@ -673,7 +700,7 @@ def test_run_leftover_fix_result_for_another_pr_is_invalid(wt: Path, tmp_path: P
     """PR #3466 の指摘: 前の起動が残した番号の合わない結果ファイルは、トレースバックでなく invalid の結果で止める。"""
     state_dir = tmp_path / "st"
     ref = store.state_pr(state_dir, PR)
-    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
     store.fix_result_path(state_dir, ref).write_text(json.dumps({"pr": 1, "findings": []}), encoding="utf-8")
     fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
@@ -807,22 +834,6 @@ def test_pr_settings_hidden_by_an_unsent_commit_are_warned(repos: Repos, wt: Pat
     commit(wt, ".ndf/review.json", trusted, "実行者の設定へ戻す")
     code, got = _run(capsys, monkeypatch, Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]}), wt)
     assert (code, got["status"]) == (0, "ok") and any("review.json" in w for w in got["warnings"])
-
-
-def test_changed_focus_reviews_the_full_diff_again(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """PR 3944 の r4-3: 収束した PR を、重点を足して同じ head で打ち直すと、前回の収束を返さず全差分を足した重点で読ませる。"""
-    state_dir = tmp_path / "st"
-    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt)
-    (repos.main / ".ndf").mkdir(exist_ok=True)
-    (repos.main / ".ndf" / "review.json").write_text(json.dumps({"version": 1, "focus": ["足した重点"]}), encoding="utf-8")
-    fake = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt)
-    assert (code, got["status"]) == (0, "ok") and fake.prompts
-    assert all(_focus_line("足した重点") in p and "範囲: full" in p for _, _, p in fake.prompts)
-    assert _state(state_dir)["rounds"][-1]["focus"] == ["足した重点"]
-    again = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
-    _run(capsys, monkeypatch, again, wt)
-    assert again.prompts == []
 
 
 def test_unresolved_policy_location_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:

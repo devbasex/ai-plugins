@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -178,7 +179,8 @@ class Warned:
 
 @dataclass(frozen=True)
 class Launch:
-    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。"""
+    """外部 CLI の 1 回の起動。`timeout` は監視の上限の秒。`env` は足す環境変数。`private` は標準エラーが非公開の内容を
+    含みうる起動で、監視の早期の警告は種類だけを知らせ、行は標準エラーのログにだけ残す。"""
 
     agent: str
     argv: tuple[str, ...]
@@ -186,6 +188,7 @@ class Launch:
     paths: AgentPaths
     timeout: float
     env: Optional[dict[str, str]] = None
+    private: bool = False
 
 
 class AgentState(StrEnum):
@@ -245,7 +248,8 @@ class _Watch:
 
 def _report_warnings(w: _Watch) -> None:
     for kind, text in w.warned.new(early_warnings(w.spec.paths)):
-        diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {text}", kind=kind, agent=w.spec.agent)
+        shown = "内容は起動の出力に残す" if w.spec.private else text
+        diag(f"[{w.spec.agent}] 早期の警告（{kind}）: {shown}", kind=kind, agent=w.spec.agent)
 
 
 def _out_usage_limit(spec: Launch) -> Optional[str]:
@@ -299,13 +303,26 @@ def _start(spec: Launch) -> subprocess.Popen:
 
 
 def _start_and_watch(spec: Launch, poll: Optional[float]) -> AgentStatus:
-    """起動して見る。起動できない（実行ファイルが無い・実行権が無い）ときは `AgentState.FAILED` を返す。"""
+    """起動して見る。起動できない（実行ファイルが無い・実行権が無い）ときは `AgentState.FAILED` を返す。
+
+    監視が割り込まれたら（Ctrl+C など）、子の組を止めてから割り込みを伝える。子は別セッションで端末の割り込みが届かず、
+    残すと監視の上限が効かないまま動き、起動のスロットを返した後や呼び元が入力を片付けた後も動き続ける。停止を待つ間にもう一度
+    割り込まれたら、猶予を打ち切って組へ SIGKILL を送る（呼び元は、子が止まった前提で出力を保存する）。
+    割り込みが届くのはメインスレッドで監視する起動だけである。"""
     try:
         proc = _start(spec)
     except OSError as exc:
         # 文面はログ・実行ファイルの絶対パスを含み得るので、公開用はファイル名と理由だけにする（PR 4461 の r2-1）
         return AgentStatus(spec.agent, AgentState.FAILED, None, f"起動できない: {exc}", (), public=f"起動できない: {_os_error_public(exc)}")
-    return watch(proc, spec, poll)
+    try:
+        return watch(proc, spec, poll)
+    except BaseException:
+        try:
+            process_group.stop_group(proc)
+        except BaseException:
+            process_group.signal_group(proc.pid, signal.SIGKILL)  # `start_new_session` なので組の番号は子の pid
+            raise
+        raise
 
 
 def _os_error_public(exc: OSError) -> str:
