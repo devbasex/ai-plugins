@@ -470,6 +470,11 @@ def read_events(conn: sa.Connection, machine_id: str, after: int = 0) -> list[mo
     return [_event(r) for r in conn.execute(q)]
 
 
+def last_seq(conn: sa.Connection, machine_id: str) -> int:
+    """最後の事象の番号（事象が無ければ 0）。事象を読まずに、追記が増えたかを確かめる。"""
+    return conn.execute(sa.select(sa.func.max(EVENTS.c.seq)).where(EVENTS.c.machine_id == machine_id)).scalar() or 0
+
+
 def read_machine(conn: sa.Connection, machine_id: str) -> Optional[dict[str, Any]]:
     row = conn.execute(sa.select(MACHINES).where(MACHINES.c.id == machine_id)).first()
     return dict(row._mapping) if row is not None else None

@@ -197,6 +197,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 - 取り消しの行の記録の識別子の末尾には、承認を記録した事象の番号を入れる。利用者の回答では `answered`、MVV 判定が通した承認では判定の結果を保存した `step_recorded` の番号である。MVV 判定が通した承認は、利用者の回答が無くても取り消しの対象になる。同じ対象の承認が複数あれば、開き直す工程の順で最後の事象の工程と番号を使う
 - 承認を指す値は、利用者の回答なら証跡の記録の識別子である。MVV 判定が通した承認は、判定のコマンドの出力 `mvv_gate.note_url`（証跡を書いたコメントの URL）である。今の MVV の証跡は判定のコメントに入り、記録の識別子 `mvv:<ゲート>:<HEAD>` は別のステートマシンの判定と同じになる。証跡を別のコメントに分けて識別子へ質問の id を入れる変更（Task 3）では、照らす値も記録の識別子に変える
 - `committed_reopen(v, *, trigger, later, reason) -> list[Event]`（`progress/reopening.py`）は、送り直しの判定に使う開き直しの事象を返す
+- `waiting_revocations(root, v, stage)`（`progress/gate/answering.py`）は、記録した承認に、今待っている質問の提示への承認を足した取り消し対象を返す。`reread` と `_append_hand_finish` が使う
+- `last_seq(conn, machine_id)`（`progress/store.py`）は、最後の事象の番号を返す。`_append_hand_finish` が排他を取った後の確かめに使う
 - `approval_lock(store, machine_id)`（`progress/store.py`）は、承認を書く操作と取り消す操作が共有する排他である。`answer`・`_cmd_retry`・`_send_back`・`_reopen_unbound`・`reread`・`_append_hand_finish`（回答待ちを書くとき）・`consume_held`（質問し直すとき）が使う
 - `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は開き直さない。ただし、開き直す工程がリリースしないで終えて無効にした工程（`disabled` の `cause: no_release` と工程名が一致する）には、`later` の値によらず `enabled` を足す
 - `core/merge_approval.py` の証跡の読み取りは、担い手 `reopen` を却下の行でだけ数える。`失効する承認:`（承認を指す値の JSON の並び）を持つ却下は、指した承認だけを取り消す。値を読めなければ、先の承認をすべて取り消す却下として数える

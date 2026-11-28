@@ -15,7 +15,7 @@ import pytest
 from result_json import last_result
 
 from ndf.core import merge_approval
-from ndf.progress import command, gate, invoke, run, store
+from ndf.progress import command, gate, invoke, model, run, store
 from ndf.progress.gate import answering, finishing, release, targets
 
 ISSUE = 4520
@@ -523,3 +523,27 @@ def test_a_hand_finish_waits_for_an_answer_being_written(repo, st, env, capsys, 
 
     assert out["status"] == "ok" and len(waits) == 1, out
     assert "finish_held" in _kinds(st, tid, DESIGN)
+
+
+def test_a_hand_finish_revokes_an_approval_whose_answer_was_not_recorded(repo, st, env, capsys):
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    shown = _next(st, tid, repo, env)
+    write = answering.github_post(repo, hub=lambda: env.hub)
+
+    def post_then_fail(row) -> bool:
+        write(row)
+        raise model.Refused("確定に失敗")
+
+    with pytest.raises(model.Refused, match="確定に失敗"):
+        _answer(st, tid, repo, env, shown, post=post_then_fail)
+
+    def judged():
+        target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+        return merge_approval.merge_judgment(merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer()), target)
+
+    assert judged() is not None
+
+    out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
+
+    assert out["status"] == "ok" and judged() is None, out

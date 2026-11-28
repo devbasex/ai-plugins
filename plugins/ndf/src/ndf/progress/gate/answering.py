@@ -484,6 +484,25 @@ def standing(reader: TargetReader, root: Path) -> approval_decide.StandingOf:
     return of
 
 
+def waiting_revocations(root: Path, v: run.View, stage: str) -> list[merge_approval.Revocation]:
+    """工程の待ちを書き直すときに取り消す承認。記録した承認（`approval_decide.stage_revocations`）に、今待っている質問の
+    提示への承認を足す。回答は証跡を投稿した後の DB の確定に失敗しうるので、記録の無い承認は提示の記録から指す。"""
+    found = approval_decide.stage_revocations(v, stage)
+    q = waiting(v)
+    if q is None or q.stage != stage or q.gate not in (DESIGN_GATE, RELEASE_GATE):
+        return found
+    shown = read_presented(root, q)
+    target = shown.binding()
+    if target is None or not shown.production:
+        return found  # 承認の証跡は、本番へ反映される対象を提示した質問への回答だけが書く
+    record = presented_id(replace(q, target=shown))
+    for i, held in enumerate(found):
+        if held.target.same(target):
+            found[i] = held._replace(approvals=held.approvals | {record})
+            return found
+    return [*found, merge_approval.Revocation(target, frozenset({record}), f"reopen:{v.machine_id}:{stage}:{record}")]
+
+
 def no_revoke(revocations: list[merge_approval.Revocation]) -> None:
     """承認の取り消しを書かない口（PR を読まないテスト）。"""
 
@@ -736,7 +755,7 @@ def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[st
     with _driving(st, machine_id), store.approval_lock(st, machine_id):
         latest = run.read(st, machine_id)
         if build(latest):
-            env.revoke(approval_decide.stage_revocations(latest, stage.name))
+            env.revoke(waiting_revocations(st.root, latest, stage.name))
         written = run.append(st, machine_id, build)
     if not written:
         summary = "確認をやり直す前に回答が書かれた。書かれた回答は ndf progress next で読む"

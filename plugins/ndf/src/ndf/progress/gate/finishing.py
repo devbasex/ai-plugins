@@ -18,7 +18,7 @@ from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, definition, model, reopening, run, stages, store
-from ndf.progress.gate.answering import shared_hub, standing
+from ndf.progress.gate.answering import shared_hub, standing, waiting_revocations
 from ndf.progress.gate.targets import TargetReader
 from ndf.progress.run_view import FINISH_HELD
 from ndf.progress.records import github_records, sync_records
@@ -292,9 +292,11 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
     model.check_event("sprint", model.rows_for("sprint", v.events, drafts[0]), v.whole, drafts[0])
     # 取り消してから追記するまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
     with _after_answer(st, a.machine_id):
-        if run.read(st, a.machine_id).events[-1].seq != v.events[-1].seq:
+        with store.transaction(st) as conn:
+            moved = store.last_seq(conn, a.machine_id) != v.events[-1].seq
+        if moved:
             raise store.Conflict("排他を待つ間に事象が増えた")  # 確定した回答を読み直して、取り消す前に決め直す
-        revoker(shared_hub(cwd), "回答待ちを書かない")(approval_decide.stage_revocations(v, a.stage))
+        revoker(shared_hub(cwd), "回答待ちを書かない")(waiting_revocations(st.root, v, a.stage))
         return append()
 
 
