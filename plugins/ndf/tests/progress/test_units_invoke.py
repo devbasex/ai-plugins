@@ -6,15 +6,20 @@
 
 from __future__ import annotations
 
+import argparse
+import importlib.util
 import json
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import sprint_fixture
 import strategy_fixture
+from result_json import last_result
 
+from ndf import process_group
 from ndf.adapters import git, github
 from ndf.contracts import result
 from ndf.core import durable
@@ -23,7 +28,7 @@ from ndf.core.plan import units_decide as ud
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import Unit
-from ndf.progress import design_record, issue_values, plan_runs, units_invoke
+from ndf.progress import command, definition, design_record, gate, invoke, issue_values, plan_runs, run, store, units_cli, units_invoke
 from ndf.progress.plan_runs import StageRun
 from ndf.progress.units_invoke import RoundState
 
@@ -697,3 +702,262 @@ def test_a_task_heading_that_appears_twice_has_no_body():
     plan = FILE_PLAN.replace("### Task 2: 書く", "### Task 1: 書く")
 
     assert review_units_decide.task_bodies(plan)[1] is None
+
+
+# --- 実装を流すコマンド（ndf progress units run。#3702 の決定 12） ---------------------------------------------
+
+
+def _load_lanes():
+    spec = importlib.util.spec_from_file_location("lanes", Path(__file__).with_name("lanes.py"))
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+lanes = _load_lanes()
+IMPL = "実装"
+BEFORE_IMPL = ("設計", "詳細設計", "ドキュメント再構成", "ドキュメントレビュー", "計画")
+
+
+def _ready(capsys, repo: Path, tmp_path: Path, *, done=BEFORE_IMPL) -> str:
+    """作業場所の用意と `done` の工程まで終えたステートマシン（承認ゲートを持つ工程は無効にできないので、手で終える）。"""
+    assert command.main(["new", "s1", "--mode", "standard", "--issues", "3702"]) == 0
+    tid = last_result(capsys.readouterr().out)["metrics"]["machine_id"]
+    out = tmp_path / "stage.json"
+    values = lanes.values(repo, BRANCH)
+    stage_defs = definition.load_definition("standard")
+    for stage in ("要求と受け入れ条件", "作業場所の用意", *done):
+        outputs = {k: values[k] for k in stage_defs.stage(stage).outputs}
+        out.write_text(json.dumps({"steps": [], "summary": "手で行った", **({"outputs": outputs} if outputs else {})}))
+        assert command.main(["finish", tid, stage, "--output", str(out), "--reason", "手で行った"]) == 0, capsys.readouterr().out
+    capsys.readouterr()
+    return tid
+
+
+@pytest.fixture
+def flow(repo):
+    """偽の作業で流す `Env`。`calls` は呼んだステップと回答、`script` はステップ → 先に返す結果の並び。"""
+    values = lanes.values(repo, BRANCH)
+    got = SimpleNamespace(calls=[], script={}, launched=[])
+
+    def invoker(r, cwd, work_dir, answer):
+        got.calls.append((r.step, answer))
+        queued = got.script.get(r.step)
+        return queued.pop(0)(r) if queued else lanes.ok_result(r, values)
+
+    got.env = run.Env(
+        facts=lambda words, ctx, cwd: {w: True for w in words},
+        launch=lambda st_, tid, cwd: got.launched.append(tid),
+        invoker=invoker,
+        prepare=lambda r, work_dir, cwd: None,
+        records=lambda cwd: lanes._NoRecords(),
+        sleep=lambda _s: None,
+    )
+    return got
+
+
+def _kinds(st, tid: str) -> list[str]:
+    return [e.draft.kind for e in run.read(st, tid).row_events(IMPL)]
+
+
+def test_units_run_flows_only_the_implement_stage_with_the_events_of_next(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+    out = units_cli.run_implement(st, tid, repo, flow.env)
+    assert out["status"] == "ok" and out["next"]["argv"] == ["ndf", "progress", "next", tid], out
+    assert [step for step, _ in flow.calls] == ["implement", "gathered"] and flow.launched == []
+    v = run.read(st, tid)
+    assert v.rows[IMPL].state == "finished" and v.context()["gathered"] == "0" * 40
+    assert _kinds(st, tid)[1] == "started" and run.decide(v).stage.name != IMPL
+
+
+def test_units_run_does_not_start_before_the_implement_stage_is_next(repo, st, flow, capsys, tmp_path):
+    # 承認の回答の後に設計 PR のマージや design-sync が残る間は、次の工程が「ドキュメントレビュー」なので始まらない
+    tid = _ready(capsys, repo, tmp_path, done=BEFORE_IMPL[:3])
+    out = units_cli.run_implement(st, tid, repo, flow.env)
+    assert out["status"] == "stopped" and out["cause"]["kind"] == "precondition", out
+    assert "ドキュメントレビュー" in out["cause"]["detail"] and "start" in out["cause"]["detail"]
+    assert flow.calls == []
+
+
+def test_a_failed_units_run_stays_failed_until_retry(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+    flow.script["implement"] = [lambda r: invoke.StageResult(result.stopped("plan", "test_failed", "落ちた"), {})]
+    first = units_cli.run_implement(st, tid, repo, flow.env)
+    assert first["status"] == "stopped" and first["cause"]["kind"] == "test_failed" and "retry" in first["routes"]
+    again = units_cli.run_implement(st, tid, repo, flow.env)
+    assert again["cause"] == first["cause"] and [step for step, _ in flow.calls] == ["implement"]
+    assert run.advance(st, tid, repo, flow.env)["cause"] == first["cause"]
+    assert command.main(["retry", tid, IMPL, "--reason", "直した"]) == 0
+    assert units_cli.run_implement(st, tid, repo, flow.env)["status"] == "ok"
+    assert [step for step, _ in flow.calls] == ["implement", "implement", "gathered"]
+
+
+def test_the_commands_of_units_run_keep_the_target_repository_from_another_directory(repo, st, flow, capsys, tmp_path, monkeypatch):
+    tid = _ready(capsys, repo, tmp_path)
+    flow.script["implement"] = [lambda r: invoke.StageResult(result.stopped("plan", "test_failed", "落ちた"), {})]
+    units_cli.run_implement(st, tid, repo, flow.env)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    target = ["--cwd", str(repo.resolve())]
+    capsys.readouterr()
+
+    gate.progress_main(["units", "run", tid, *target])
+    retry = last_result(capsys.readouterr().out)["routes"]["retry"]["argv"]
+    assert retry[-2:] == target
+    assert gate.progress_main([*retry[2:], "--reason", "直した"]) == 0, capsys.readouterr().out
+
+    with store.run_lock(st, tid):
+        capsys.readouterr()
+        assert gate.progress_main(["units", "run", tid, *target]) == 0
+    wait = last_result(capsys.readouterr().out)["next"]["argv"]
+    assert wait == ["ndf", "progress", "wait", tid, *target]
+    assert gate.progress_main(wait[2:]) == 0, capsys.readouterr().out
+
+
+def test_the_commands_after_wait_and_a_reapproval_answer_keep_the_target_repository(repo, st, flow, capsys, tmp_path, monkeypatch):
+    tid = _ready(capsys, repo, tmp_path)
+    routes = {"approved": result.command("plan", "next", "x"), "rejected": None}
+    flow.script["implement"] = [lambda r: invoke.StageResult(result.result("plan", "gate", "再承認が要る", routes=routes), {})]
+    units_cli.run_implement(st, tid, repo, flow.env)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    target = ["--cwd", str(repo.resolve())]
+    capsys.readouterr()
+
+    gate.progress_main(["wait", tid, *target])
+    waited = last_result(capsys.readouterr().out)
+    assert waited["status"] == "gate", waited
+    approved = waited["routes"]["approved"]["argv"]
+    assert approved[-2:] == target
+    assert gate.progress_main([*approved[2:], "--reason", "人が回答した"]) == 0
+    assert last_result(capsys.readouterr().out)["next"]["argv"] == ["ndf", "progress", "next", tid, *target]
+
+
+def test_the_target_repository_is_added_only_to_the_commands_that_take_it(tmp_path, capsys):
+    routes = {"approved": result.command("answer", "m1", "--gate", "q"), "rejected": result.command("plan", "next", "x")}
+
+    def dispatch(a, cwd):
+        return result.result("progress", result.GATE, "回答を待つ", routes=routes)
+
+    parser = argparse.ArgumentParser()
+    command.add_cwd([parser])
+    command.run_main(parser, dispatch, ["--cwd", str(tmp_path)])
+    got = last_result(capsys.readouterr().out)["routes"]
+    assert got["approved"]["argv"][-2:] == ["--cwd", str(tmp_path.resolve())]
+    assert got["rejected"]["argv"] == ["ndf", "plan", "next", "x"]
+    given = [*got["approved"]["argv"][2:], "--result", "approved", "--reason", "r", "--by", "human", "--key", "k"]
+    assert gate.entry.parser().parse_args(given).cwd == tmp_path.resolve()
+
+
+@pytest.mark.parametrize("writable", [True, False])
+def test_units_run_repeated_after_success_returns_the_first_result_without_touching_the_records(repo, st, flow, capsys, tmp_path, writable):
+    tid = _ready(capsys, repo, tmp_path)
+    opened = []
+
+    def records(cwd):
+        opened.append(cwd)
+        if not writable:
+            raise github.GitHubError("応答の本文", status=403)
+        return lanes._NoRecords()
+
+    first = units_cli.run_implement(st, tid, repo, replace(flow.env, records=records))
+    assert any("HTTP 403" in w for w in first.get("warnings", [])) is not writable, first
+    # 例外の文（GitHub の応答本文）は結果にも進捗の DB にも残さない
+    assert "応答の本文" not in json.dumps([first, [e.as_dict() for e in run.read(st, tid).events]], ensure_ascii=False)
+    synced = len(opened)
+    # 打ち直しの時点では書けても、返すのは初回の警告である
+    writable = True
+    again = units_cli.run_implement(st, tid, repo, replace(flow.env, records=records))
+    assert again == first and again["status"] == "ok", again
+    assert len(opened) == synced and [step for step, _ in flow.calls] == ["implement", "gathered"]
+
+
+def test_units_run_interrupted_while_syncing_warns_on_the_next_run(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+
+    def interrupted(cwd):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        units_cli.run_implement(st, tid, repo, replace(flow.env, records=interrupted))
+    again = units_cli.run_implement(st, tid, repo, flow.env)
+    assert again["status"] == "ok" and any(f"ndf progress resync {tid}" in w for w in again["warnings"]), again
+
+
+def test_units_run_warns_from_the_latest_result_of_resync(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+
+    def failing(status):
+        def records(cwd):
+            raise github.GitHubError("届かない", status=status)
+
+        return replace(flow.env, records=records)
+
+    units_cli.run_implement(st, tid, repo, failing(403))
+    run.resync(st, tid, repo, failing(502))
+    assert any("HTTP 502" in w for w in units_cli.run_implement(st, tid, repo, flow.env)["warnings"])
+    run.resync(st, tid, repo, flow.env)
+    events = len(run.read(st, tid).events)
+    run.resync(st, tid, repo, flow.env)
+    assert len(run.read(st, tid).events) == events
+    assert units_cli.run_implement(st, tid, repo, flow.env).get("warnings", []) == []
+
+
+def test_a_waiting_answer_of_units_run_is_carried_over_to_next(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+    routes = {"approved": result.command("plan", "next", "x"), "rejected": None}
+    flow.script["implement"] = [lambda r: invoke.StageResult(result.result("plan", "gate", "再承認が要る", routes=routes), {})]
+    first = units_cli.run_implement(st, tid, repo, flow.env)
+    assert first["status"] == "gate" and set(first["routes"]) == {"approved", "rejected"}, first
+    asked = run.advance(st, tid, repo, flow.env)
+    assert (asked["status"], asked["routes"], asked["metrics"]) == ("gate", first["routes"], first["metrics"])
+    assert units_cli.run_implement(st, tid, repo, flow.env)["status"] == "gate"
+    assert [step for step, _ in flow.calls] == ["implement"] and flow.launched == []
+    run.answer(st, tid, IMPL, "approved", "人が回答した", None)
+    assert units_cli.run_implement(st, tid, repo, flow.env)["status"] == "ok"
+    assert flow.calls[1] == ("implement", "approved")
+
+
+def test_units_run_waits_for_the_work_that_next_launched_before_it_takes_the_lock(repo, st, flow, capsys, tmp_path, monkeypatch):
+    tid = _ready(capsys, repo, tmp_path)
+    run.advance(st, tid, repo, flow.env)
+    mark = run.launch_path(st.root, tid)
+    mark.parent.mkdir(parents=True, exist_ok=True)
+    mark.write_text(json.dumps({"pid": 12345}))
+    monkeypatch.setattr(process_group, "group_alive", lambda pid: True)
+    out = units_cli.run_implement(st, tid, repo, flow.env)
+    assert out["status"] == "ok" and out["next"]["argv"] == ["ndf", "progress", "wait", tid] and flow.calls == []
+
+
+def test_units_run_returns_wait_while_another_holds_the_lock(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+    with store.run_lock(st, tid):
+        out = units_cli.run_implement(st, tid, repo, flow.env)
+    assert out["next"]["argv"] == ["ndf", "progress", "wait", tid] and flow.calls == []
+
+
+def test_units_run_skips_the_stage_whose_condition_is_false_without_running_it(repo, st, flow, capsys, tmp_path, monkeypatch):
+    tid = _ready(capsys, repo, tmp_path)
+    monkeypatch.setattr(run, "_when_off", lambda d, v, s: "code_in_diff")
+    out = units_cli.run_implement(st, tid, repo, flow.env)
+    assert out["status"] == "ok" and "code_in_diff" in out["summary"], out
+    assert units_cli.run_implement(st, tid, repo, flow.env) == out
+    assert flow.calls == [] and _kinds(st, tid) == ["created", "skipped"]
+
+
+def test_the_progress_entry_point_takes_units_run_with_the_env_of_next(repo, st, capsys, tmp_path, monkeypatch):
+    tid = _ready(capsys, repo, tmp_path)
+    seen = []
+
+    def fake(st_, machine_id, cwd, env):
+        seen.append((machine_id, cwd, env))
+        return result.result("progress", result.OK, "流した")
+
+    monkeypatch.setattr(units_cli, "run_implement", fake)
+    assert gate.progress_main(["units", "run", tid, "--cwd", str(repo)]) == 0
+    ((machine_id, cwd, env),) = seen
+    assert (machine_id, cwd) == (tid, repo.resolve()) and env.in_lane is not run.Env(facts=command.facts_of).in_lane
+    assert env.facts is command.facts_of

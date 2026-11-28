@@ -95,6 +95,15 @@ def command(*args: str, ask: tuple[str, ...] = ()) -> dict[str, Any]:
     return out
 
 
+def carry_cwd(out: dict[str, Any], cwd: object, tools: tuple[str, ...]) -> None:
+    """結果の後続コマンド（`next`・`routes`）のうち、サブコマンドが `tools` のものへ `--cwd <cwd>` を足す。"""
+    routes = list(out["routes"].values()) if "routes" in out else []
+    nxt = [out["next"]] if "next" in out else []
+    for cmd in [*nxt, *routes]:
+        if cmd is not None and cmd["argv"][1] in tools:
+            cmd["argv"] = [*cmd["argv"], "--cwd", str(cwd)]
+
+
 def answer_errors(routes: object) -> list[str]:
     """routes のキーのうち、回答の語彙（事実の表 answers）に無いもの（1 つにつき 1 行。キーは文に入れない）。形の誤りはスキーマが報告する。"""
     if not isinstance(routes, dict):

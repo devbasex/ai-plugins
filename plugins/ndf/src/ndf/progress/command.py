@@ -12,8 +12,10 @@ ndf progress cancel <ステートマシンの ID> --reason <理由>
 ndf progress restore --from <バックアップ>
 ndf progress docs-only --base <ベースブランチ> [--remote <リモート名>]
 ndf progress gathered [--branch <スプリントブランチ>] [--remote <リモート名>]
+ndf progress units run <ステートマシンの ID>   # 工程「実装」だけを流す（`ndf.progress.units_cli`）
 
-どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。
+どのサブコマンドも今の位置（`--cwd`。既定はカレントディレクトリ）のリポジトリを対象にする。`--cwd` を指定したときは、結果の後続コマンド
+（`next`・`routes` の `ndf progress` と `ndf answer`）にも同じ指定を足し、別の場所からそのまま打てるようにする。
 
 結果は結果 JSON の 1 行で返す。このサブコマンドを打つのはレーンの conductor で、書く事象の書き手は conductor になる。
 `check` だけは何も書かず、工程の出力を書いた supervisor が `finish` と同じ規則で確かめるために打つ。
@@ -839,7 +841,8 @@ def add_stage_target(p: argparse.ArgumentParser, *, reason: bool = True) -> None
         p.add_argument("--reason", required=True)
 
 
-def parser() -> argparse.ArgumentParser:
+def parser(extra: Iterable[Callable[[Any], None]] = ()) -> argparse.ArgumentParser:
+    """`extra` は、上の層が持つサブコマンドを並びへ足す関数（`units_cli.add_parsers`）。"""
     ap = argparse.ArgumentParser(prog=f"ndf {TOOL}", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="action", required=True)
     new = sub.add_parser("new", help="スプリントのステートマシンを作る")
@@ -877,6 +880,8 @@ def parser() -> argparse.ArgumentParser:
         "machine_id"
     )  # 受けるのは gate.entry
     add_cwd(sub.choices.values())
+    for add in extra:
+        add(sub)
     return ap
 
 
@@ -985,8 +990,10 @@ def run_main(ap: argparse.ArgumentParser, dispatch: Callable[[argparse.Namespace
         out = dispatch(a, _target_cwd(a))
     except STOPPABLE as exc:
         out = stopped_from(exc)
+    if getattr(a, "cwd", None) is not None:
+        result.carry_cwd(out, _target_cwd(a), (TOOL, "answer"))
     return result.emit(out)
 
 
-def main(argv: list[str]) -> int:
-    return run_main(parser(), _dispatch, argv)
+def main(argv: list[str], extra: Iterable[Callable[[Any], None]] = ()) -> int:
+    return run_main(parser(extra), _dispatch, argv)

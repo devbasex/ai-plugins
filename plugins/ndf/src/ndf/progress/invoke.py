@@ -40,7 +40,7 @@ from ndf import contracts, identity
 from ndf.adapters import claude, git, github
 from ndf.adapters.git import GitError
 from ndf.cli import PACKAGE, child_encoding, ndf_command
-from ndf.contracts import facts, internal, limits, result, worker_paths
+from ndf.contracts import causes, facts, internal, limits, result, worker_paths
 from ndf.contracts.worker_kinds import VALUES_FILE, kind_gaps, read_values, write_values
 from ndf.core import durable, production_merge, route
 from ndf.core.plan import cli as plan_cli
@@ -741,6 +741,24 @@ def same_run(before: StageResult, after: StageResult) -> bool:
     """2 つの結果が同じプランの回の結果か（打ち直しても回が変わらず、プランがバックアップの結果を返した）。"""
     run_id = before.report["run_id"] if "run_id" in before.report else None
     return isinstance(run_id, str) and "run_id" in after.report and after.report["run_id"] == run_id
+
+
+def retrying(call: Callable[[bool], StageResult], sleep: Callable[[float], None]) -> StageResult:
+    """打ち直しで直る止まりを方針どおりに打ち直す。`call(again)` の `again` は打ち直しか（プランは止まったステップから
+    新しい回を始める。`plan_start`・`plan_attempt`）。
+
+    打ち直しても同じプランの回の結果が返った（回が変わらず、バックアップの結果を返した）なら、それ以上は打ち直さない。
+    """
+    used = 0
+    res = call(False)
+    while res.status == result.STOPPED and (delay := causes.retry_delay(res.cause, used)) is not None:
+        sleep(delay)
+        used += 1
+        again = call(True)
+        if same_run(res, again):
+            return again
+        res = again
+    return res
 
 
 def _from_process(run: StageRun, done: subprocess.CompletedProcess[str]) -> StageResult:

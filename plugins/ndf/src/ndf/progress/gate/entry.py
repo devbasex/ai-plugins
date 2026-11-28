@@ -32,7 +32,7 @@ from ndf.adapters.git import Git, GitError
 from ndf.contracts import result, worker_paths
 from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
-from ndf.progress import command, invoke, model, run, store
+from ndf.progress import command, invoke, model, run, store, units_cli
 from ndf.progress.gate import design
 from ndf.progress.gate.answering import (
     Answer,
@@ -425,6 +425,7 @@ def parser() -> argparse.ArgumentParser:
         help="利用者に示した承認資料を識別する値。提示時に承認対象の PR が特定され、routes にこの値が入っている場合は必須。提示時のコマンドから値をそのまま渡す（資料を出し直すと変わる）",
     )
     ap.add_argument("--drop", type=int, nargs="*", default=[], help="設計承認ゲートで外す課題の番号")
+    command.add_cwd([ap])
     return ap
 
 
@@ -519,14 +520,26 @@ def main(argv: list[str]) -> int:
     return command.run_main(parser(), lambda a, cwd: command.with_store(cwd, _cmd_give, a), argv)
 
 
+def _progress_units(argv: list[str]) -> int:
+    """`ndf progress units`。`ndf progress next` と同じ `Env` を `units_cli` へ渡す。"""
+    env = lane_env(run.Env(facts=command.facts_of))
+    return command.run_main(
+        command.parser((units_cli.add_parsers,)),
+        lambda a, cwd: command.with_store(cwd, units_cli.dispatch, run.with_env(a, env)),
+        argv,
+    )
+
+
 def progress_main(argv: list[str]) -> int:
     """サブコマンド `ndf progress`（サブコマンドの表の `progress` の行が `ndf.progress.gate.progress_cli` を指す）。
 
     `reread` は承認ゲートの待ちの出し直し（#4446）。工程を流すサブコマンド（next・wait・answer・resync・work・show）は、スプリントの完了と同じトランザクションでレーンの行を
-    終える `Env`（`lane_env`。決定 17）で流す。ほか（new・disable など）は `command` へ渡す。P1b（`run`）はレーンを読まない
+    終える `Env`（`lane_env`。決定 17）で流し、`units`（`units_cli`）にも同じ `Env` を渡す。ほか（new・disable など）は `command` へ渡す。P1b（`run`）はレーンを読まない
     """
     if argv and argv[0] in run.COMMANDS:
         return command.run_main(run.parser(), lambda a, cwd: command.with_store(cwd, _progress, a), argv)
     if argv and argv[0] == "reread":
         return command.run_main(reread_parser(), lambda a, cwd: command.with_store(cwd, _cmd_reread, a), argv[1:])
-    return command.main(argv)
+    if argv and argv[0] == "units":
+        return _progress_units(argv)
+    return command.main(argv, (units_cli.add_parsers,))

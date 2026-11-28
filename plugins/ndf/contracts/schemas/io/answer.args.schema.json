@@ -62,6 +62,10 @@
             "type": "integer"
           },
           "description": "設計承認ゲートで外す課題の番号"
+        },
+        "--cwd": {
+          "type": "string",
+          "description": "対象のリポジトリの中の位置（既定はカレントディレクトリ）"
         }
       },
       "required": [

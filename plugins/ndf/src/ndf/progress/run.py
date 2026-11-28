@@ -23,7 +23,7 @@ import hashlib
 import json
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -37,7 +37,7 @@ from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
 from ndf.progress import command, definition, design_record, invoke, issue_values, model, plan_runs, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
-from ndf.progress.records import Records, github_records, sync_records
+from ndf.progress.records import Records, SyncFailure, github_records, sync_records
 from ndf.progress.run_view import (
     ACTOR,
     ANSWERED,
@@ -48,10 +48,14 @@ from ndf.progress.run_view import (
     STARTED,
     STEP_EVENT,
     View,
+    completion_sync_drafts,
+    last_event,
     migrated_order,
     migration_drafts,
     event_payload,
     read_accepted_head,
+    resync_drafts,
+    sync_warnings,
 )
 
 TOOL = __package__.rpartition(".")[2]
@@ -134,14 +138,6 @@ class Move:
     event: Optional[model.Event] = None
 
 
-def _last(events: Iterable[model.Event], kind: str) -> Optional[model.Event]:
-    found = None
-    for ev in events:
-        if ev.draft.kind == kind:
-            found = ev
-    return found
-
-
 def _void_answer(v: View, ev: Optional[model.Event], gate: Optional[str]) -> bool:
     """回答 `ev` が、回答として数えない MVV 判定の回答か（`model.mvv_answer_void`）。"""
     return ev is not None and model.mvv_answer_void(event_payload(ev), gate)
@@ -189,7 +185,7 @@ def decide(v: View) -> Move:
         if model.is_terminal(state):
             continue
         if state == "failed":
-            return Move(Action.FAILED, s, event=_last(v.row_events(s.name), FAILED))
+            return Move(Action.FAILED, s, event=last_event(v.row_events(s.name), FAILED))
         if state == "running":
             return _running_move(v, s)
         return Move(Action.START, s)
@@ -346,8 +342,11 @@ def work_root(root: Path, machine_id: str) -> Path:
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     v = read(st, machine_id)
     items, errors = sync_records(v, cwd, env.records)
+    implement, stored = design_record.IMPLEMENT_DEFINITION.stem, [e.stored() for e in errors]
+    if resync_drafts(v, implement, stored):  # 同期の前に工程「実装」が終わっていて、残した結果が変わる
+        append(st, machine_id, lambda now: resync_drafts(now, implement, stored))
     if errors:
-        return result.stopped(TOOL, "transient", "; ".join(errors), items=items, next=_cmd("resync", machine_id))
+        return result.stopped(TOOL, "transient", "; ".join(map(str, errors)), items=items, next=_cmd("resync", machine_id))
     return result.result(TOOL, result.OK, f"ステートマシン {machine_id} の進捗記録を揃えた（{len(items)} 件）", items=items)
 
 
@@ -368,10 +367,11 @@ class Drive:
     def write(self, *drafts: model.EventDraft) -> None:
         _write(self.st, self.machine_id, *drafts)
 
-    def synced(self) -> None:
-        """行を終えた後に進捗記録を書き直す。記録の失敗は工程を止めず警告に載せる。"""
+    def synced(self) -> list[SyncFailure]:
+        """行を終えた後に進捗記録を書き直す。記録の失敗は工程を止めず警告に載せ、返す。"""
         _, errors = sync_records(read(self.st, self.machine_id), self.cwd, self.env.records)
-        self.warnings.extend(errors)
+        self.warnings.extend(map(str, errors))
+        return errors
 
 
 def _forced(v: View, stage: str) -> bool:
@@ -538,13 +538,28 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     assert m.stage is not None
     if not d.inline:
         return _launched(d, v, m)
+    mark = len(d.warnings)
     if m.step is None:
         _finish_stage(d, v, m.stage)
     else:
         d.write(*_run_step(d, v, m.stage, m.step))
     if decide(read(d.st, d.machine_id)).stage != m.stage:
-        d.synced()
+        _synced_stage(d, m.stage, mark)
     return None
+
+
+def _synced_stage(d: Drive, s: stages.StageDef, mark: int) -> None:
+    """工程を終えた後の同期。打ち直した `units run` が読む工程「実装」だけ、結果を残す（`completion_sync_drafts`）。
+
+    残す前に中断すれば、終了の事象だけが残り、同期を確かめていないと分かる。例外の文は保存せず、警告も残す値から組む。
+    """
+    before = d.warnings[mark:]
+    failed = d.synced()
+    if s.id != design_record.IMPLEMENT_DEFINITION.stem:
+        return
+    stored = [f.stored() for f in failed]
+    append(d.st, d.machine_id, lambda v: completion_sync_drafts(v, s.name, before, stored))
+    d.warnings[mark:] = [*before, *sync_warnings(d.machine_id, stored)]
 
 
 Hand = Callable[[Drive, View, Move], Optional[dict[str, Any]]]
@@ -557,7 +572,7 @@ _HANDS: dict[Action, Hand] = {
 }
 
 
-def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
+def play_move(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     """1 手を打つ。続けて次の手を決めるなら None。"""
     play = _HANDS.get(m.action)
     return play(d, v, m) if play is not None else report(v, m)
@@ -569,23 +584,27 @@ def _drive(d: Drive) -> dict[str, Any]:
     # 足す。手の数はこの数を超えない。工程の無いステートマシン（開発ループの行。#3558）も完了の 1 手で終わる
     for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps())) + 1):
         v = read(d.st, d.machine_id)
-        out = _step(d, v, decide(v))
+        out = play_move(d, v, decide(v))
         if out is not None:
             return command.with_warnings(out, before=d.warnings)
     raise AssertionError("手の数が行とステップの数を超えた")
 
 
+def working_report(machine_id: str) -> dict[str, Any]:  # 流す作業が動いていて、何も流さないときの結果
+    summary = f"ステートマシン {machine_id} を流す作業が動いている。終わりは wait で待つ"
+    return result.result(TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=_cmd("wait", machine_id))
+
+
 def advance(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     """`next`: 排他を取り、終わるか待つか作業を起動するまで手を進める。作業が動いていれば `wait` を返す。"""
     if is_live(st, machine_id):
-        summary = f"ステートマシン {machine_id} を流す作業が動いている。終わりは wait で待つ"
-        return result.result(TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=_cmd("wait", machine_id))
+        return working_report(machine_id)
     with store.run_lock(st, machine_id):
         migrate_definition(st, machine_id)
         return _drive(Drive(st, machine_id, cwd, env, inline=False))
 
 
-def _launching(st: store.Store, machine_id: str) -> bool:
+def launching(st: store.Store, machine_id: str) -> bool:
     """起動した作業がまだ排他を取っていないか（起動のマーカーがあり、マーカーの組が生きている）。"""
     try:
         raw = json.loads(launch_path(st.root, machine_id).read_text(encoding="utf-8"))
@@ -599,7 +618,7 @@ def is_live(st: store.Store, machine_id: str) -> bool:
     """同じステートマシンを流す作業（か `next`）が動いているか。排他を取れないか、起動した作業がまだ排他を取っていなければ動いている。"""
     try:
         with store.run_lock(st, machine_id):
-            held = _launching(st, machine_id)
+            held = launching(st, machine_id)
     except model.Refused:
         held = True
     return held
@@ -684,24 +703,6 @@ def answer(st: store.Store, machine_id: str, stage: str, value: str, reason: str
 
 
 # --- work（next が起動する作業） ----------------------------------------------------------------
-
-
-def _retrying(call: Callable[[bool], invoke.StageResult], sleep: Callable[[float], None]) -> invoke.StageResult:
-    """打ち直しで直る止まりを方針どおりに打ち直す。`call(again)` の `again` は打ち直しか（プランは止まったステップから
-    新しい回を始める。`invoke.plan_start`・`invoke.plan_attempt`）。
-
-    打ち直しても同じプランの回の結果が返った（回が変わらず、バックアップの結果を返した）なら、それ以上は打ち直さない。
-    """
-    used = 0
-    res = call(False)
-    while res.status == result.STOPPED and (delay := causes.retry_delay(res.cause, used)) is not None:
-        sleep(delay)
-        used += 1
-        again = call(True)
-        if invoke.same_run(res, again):
-            return again
-        res = again
-    return res
 
 
 def _failed_with(s: stages.StageDef, step: Optional[str], rev: int, cause: dict[str, Any]) -> model.EventDraft:
@@ -869,7 +870,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if step.kind == stages.READING_KIND:
         work_dir.mkdir(parents=True, exist_ok=True)
         run = _reading_run(v, s, step, run, work_dir)
-    res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
+    res = invoke.retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
 
 
