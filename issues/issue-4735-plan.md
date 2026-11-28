@@ -45,7 +45,7 @@
 ### Task 1: Issue の本文の書き換えを共通にする
 
 - **対象ファイル:** `core/issue_body.py`（新設）、`progress/records.py`、`domains/records/cleanup_stage.py`、`domains/loop/acceptance.py`（ロックのパスの移動）、テスト `core/test_issue_body.py`（新設）
-- **変更内容:** 先に、進行とクリーンアップの記録の今の振る舞いを退行テストで固定する。次に `BodyStore`・`GitHubBodies`・`lock_path`・`rewrite` を `core` に置き、本文を書く 3 つの処理をそこへ寄せる。ロックのパスは変えない
+- **変更内容:** 先に、進行とクリーンアップの記録の今の振る舞いを退行テストで固定する。次に `BodyStore`・`GitHubBodies`・`BodyLocks`・`rewrite` を `core` に置き、本文を書く 3 つの処理をそこへ寄せる。ロックのパスは変えない
 - **満たす受け入れ条件:** 10
 - **進め方:** 退行テスト → 失敗するテスト → 通す最小実装 → 整理
 

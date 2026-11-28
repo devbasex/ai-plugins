@@ -2,7 +2,7 @@
 
 クリーンアップの本体（`ndf worktree merged`）が終わった後に呼ぶ。課題ごとに本文の進行のセクションを読み、行が未チェックなら
 チェックを付けて本文を書き直す（確認の記録・進捗記録と同じ `ndf.core.issue_body.rewrite` を通す）。記録済みの課題は
-打ち直さない。読めない・書けない・本文のロックを取れない課題は failed にし、クリーンアップの本体は戻さない（結果は欠けの
+打ち直さない。読めない・書けない・本文のロックを用意できないか取れない課題は failed にし、クリーンアップの本体は戻さない（結果は欠けの
 残る終わり）。
 """
 
@@ -41,11 +41,11 @@ def _stamp() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
 
 
-def record_issue(store: issue_body.BodyStore, cwd: Path, issue: int, stamp: str) -> dict[str, Any]:
+def record_issue(store: issue_body.BodyStore, locks: issue_body.BodyLocks, issue: int, stamp: str) -> dict[str, Any]:
     """課題 1 件に工程「クリーンアップ」の記録を付け、結果の項目を返す。"""
     try:
-        got = issue_body.rewrite(store, cwd, issue, lambda body: cd.mark_stage(body, cd.CLEANUP_STAGE, stamp) or body)
-    except (GitError, GitHubError, Timeout) as exc:
+        got = issue_body.rewrite(store, locks, issue, lambda body: cd.mark_stage(body, cd.CLEANUP_STAGE, stamp) or body)
+    except (GitError, GitHubError, Timeout, issue_body.LockError) as exc:
         return {"issue": issue, "result": FAILED, "reason": str(exc)}
     if not got.wrote:
         return {"issue": issue, "result": SKIPPED, "reason": "記録済みか、進行のセクションに工程の行が無い"}
@@ -73,4 +73,5 @@ def record_cleanup_stage(hub: GitHub, prs: Iterable[int], cwd: Path) -> list[dic
         for issue in closing[pr]:
             seen.setdefault(issue, None)
     store = issue_body.GitHubBodies(hub)
-    return [record_issue(store, cwd, issue, stamp) for issue in seen]
+    locks = issue_body.BodyLocks(cwd)
+    return [record_issue(store, locks, issue, stamp) for issue in seen]

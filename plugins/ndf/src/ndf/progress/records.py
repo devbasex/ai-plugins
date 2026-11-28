@@ -102,10 +102,11 @@ def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[l
     except (GitError, GitHubError) as exc:
         return [], [f"進捗記録を書けない: {exc}"]
     items, errors = [], []
+    locks = issue_body.BodyLocks(cwd)
     for kind, number, heading, content in _targets(v):
         try:
-            got = issue_body.rewrite(records, cwd, number, partial(replace_section, heading=heading, content=content))
+            got = issue_body.rewrite(records, locks, number, partial(replace_section, heading=heading, content=content))
             items.append({"kind": kind, "number": number, "changed": got.wrote})
-        except (GitError, GitHubError, Timeout) as exc:
+        except (GitError, GitHubError, Timeout, issue_body.LockError) as exc:
             errors.append(f"{kind} #{number} の進捗記録を書けない: {exc}")
     return items, errors

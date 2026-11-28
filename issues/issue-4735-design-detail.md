@@ -70,7 +70,7 @@ plugins/ndf/src/ndf/
 | `core/requirements_docs.py` | 新設 | Issue の番号から要求仕様書を探して返す | `core/issue_docs`・`core/requirements_decide`・`core/requirements_history`・`contracts/worker_paths`・`adapters/git` | モジュール | `base_commit`・`worktree_candidates`・`tree_candidates`・`lookup`・`find` |
 | `core/requirements_history.py` | 新設 | 消えた要求仕様書の最終版と、配布した版の要求仕様書を git の履歴から選ぶ | `core/requirements_decide`・`adapters/git` | モジュール | `Touch`・`final_version`・`branch_deleted`・`release_docs` |
 | `core/run_trailer_decide.py` | 新設 | スプリント PR の「通した工程」に書く実行の行を組み立て、読む | 無し | `Trailer`・モジュール | `TRAILER_WORDS`（定数）・`run_lines`・`parse_trailer` |
-| `core/issue_body.py` | 新設 | Issue の本文を、番号ごとのロックの中で読んで自分のセクションだけ差し替える | `adapters/github`・`filelock` | モジュール | `BodyStore`・`GitHubBodies`・`Rewritten`・`lock_path`・`rewrite` |
+| `core/issue_body.py` | 新設 | Issue の本文を、番号ごとのロックの中で読んで自分のセクションだけ差し替える | `adapters/github`・`filelock` | モジュール | `BodyStore`・`GitHubBodies`・`Rewritten`・`BodyLocks`・`LockError`・`rewrite` |
 | `core/plan/inputs_decide.py` | 変更 | 実行と要求仕様書の組ごとの確認の表を読む（`progress` と `domains` が共に使う） | 無し | `TableRow`・`RunTable`・モジュール | 新設 `RUN_HEADING`（定数）・`read_tables`・`counted` |
 | `core/plan/review_units_decide.py` | 変更 | 実装計画の版の行と単位の外の行を読み、単位に版を持たせる | `core/requirements_decide` の型 | `Unit`・モジュール | 新設 `criteria_versions`・`outside_units`・`stamped`。変更 `Unit`・`lineup`・`acceptance_args` |
 | `core/route/__init__.py` | 変更 | テンプレートの差し込み `acceptance` の自動の組み立てに実行の印とモードを足し、`pr` の前に置くコマンドを値で付け外す | `core/requirements_decide` | モジュール | 変更 `launch_values`・`check_acceptance`・`rendered`。新設 `_by_body_from` |
@@ -395,7 +395,7 @@ plugins/ndf/src/ndf/
 
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
-| 並行する実装の単位の `record` | 代表の Issue の本文 | `issue_body.lock_path(cwd, 代表の番号)` のファイルロック（同じリポジトリの worktree が共有） | 同じ入力で打ち直すと同じ本文になる |
+| 並行する実装の単位の `record` | 代表の Issue の本文 | `issue_body.BodyLocks(cwd).path(代表の番号)` のファイルロック（同じリポジトリの worktree が共有） | 同じ入力で打ち直すと同じ本文になる |
 | `record` と進行・クリーンアップの記録 | 同じ Issue の本文 | 同じロック（番号ごと） | 各自のセクションだけを差し替える |
 | `prune` の打ち直し | Issue のコメント | 識別子のコメントの有無 | 投稿済みなら本文の更新から再開する |
 
@@ -443,8 +443,9 @@ plugins/ndf/src/ndf/
 | `BodyStore` | `core/issue_body.py` | 新設（型） | `Protocol`（`read(number: int) -> str`・`write(number: int, body: str) -> None`） | 本文の読み書きの差し替え口 |
 | `GitHubBodies` | `core/issue_body.py` | 新設（型） | `dataclass(hub: GitHub)` | `BodyStore` の GitHub の実装（読みは `issue_body`、書きは REST の PATCH） |
 | `Rewritten` | `core/issue_body.py` | 新設（型） | `NamedTuple(body: str, wrote: bool, settled: bool)` | 最後に読んだ本文・1 度でも書いたか・確かめが通ったか |
-| `lock_path` | `core/issue_body.py` | 新設（`domains/loop/acceptance.lock_path` から移す） | `(cwd: Path, issue: int) -> Path` | Git の共通ディレクトリの下の、番号ごとのロックのパス |
-| `rewrite` | `core/issue_body.py` | 新設 | `(store: BodyStore, cwd: Path, issue: int, change: Callable[[str], str], *, verify: Optional[Callable[[str], bool]] = None, retries: int = 0) -> Rewritten` | ロックの中で読み、`change` で差し替え、変わったときだけ PATCH し、`verify` があれば読み直して確かめる |
+| `BodyLocks` | `core/issue_body.py` | 新設（型。`domains/loop/acceptance.lock_path` から移す） | `dataclass(cwd: Path)`（`path(issue: int) -> Path`） | Git の共通ディレクトリの下の、番号ごとのロックのパス。共通ディレクトリは最初の 1 回だけ求める |
+| `LockError` | `core/issue_body.py` | 新設（型） | `OSError` の下位 | ロックのディレクトリかファイルを用意できない |
+| `rewrite` | `core/issue_body.py` | 新設 | `(store: BodyStore, locks: BodyLocks, issue: int, change: Callable[[str], str], *, verify: Optional[Callable[[str], bool]] = None, retries: int = 0) -> Rewritten` | ロックの中で読み、`change` で差し替え、変わったときだけ PATCH し、`verify` があれば読み直して確かめる |
 
 - `rewrite`
   - 事後条件: 本文が変わらなければ読み 1 回で終わる。変われば読み 1 回・PATCH 1 回、`verify` があれば読み直し 1 回。`verify` が偽なら `retries` 回まで読んだ本文からやり直す
@@ -455,6 +456,7 @@ plugins/ndf/src/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `rewrite` | ロックを取れない | 別の書き手が長く持つ | `filelock.Timeout` | 呼び出し元へ返す | 呼び出し元が `store_in_use`（今の確認の記録と同じ） | 打ち直せる |
+| `rewrite` | ロックを用意できない | Git の共通ディレクトリに書き込めない | ディレクトリの作成とロックの取得の `OSError` | `LockError` にして呼び出し元へ返す | 進行の記録は対象ごとの誤り、クリーンアップは対象ごとの `failed` の項目。確認の記録はほかの `OSError` と同じ扱い | 書き込めるようにして打ち直せる |
 | `rewrite` | 読み・書きの失敗 | GitHub の失敗 | `GitHubError` | 呼び出し元へ返す | 呼び出し元の今の扱い（進行の記録は誤りに載せる、クリーンアップは `failed` の項目） | 打ち直せる |
 | `rewrite` | 上限まで確かめが通らない | ロックの外の書き手 | `verify` | 呼び出し元へ返す（`settled=False`） | 呼び出し元が `incomplete` | 打ち直せる |
 
@@ -469,7 +471,7 @@ plugins/ndf/src/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `BodyStore`・`GitHubBodies` | `progress/records.Records`・`GitHubRecords` | `progress/records.py` を読んだ | 使う（`core` へ移し、`progress/records` はここを読む） |
-| `lock_path` | `domains/loop/acceptance.lock_path` | `domains/loop/acceptance.py` を読んだ | 使う（移す。ロックのパスは変えない） |
+| `BodyLocks` | `domains/loop/acceptance.lock_path` | `domains/loop/acceptance.py` を読んだ | 使う（移す。ロックのパスは変えない） |
 | `rewrite` | `domains/loop/acceptance._reapply` | 同上 | 使う（当て直しの形を一般にして移す） |
 
 ### 単体テストの観点
@@ -613,8 +615,8 @@ plugins/ndf/src/ndf/
 | `run_lines` | `core/run_trailer_decide.py` | 新設 | `(issues: Sequence[int], tables: Sequence[tuple[int, str]], run: str, mode: str) -> str` | 「通した工程」に足す `対象の Issue`・`確認の表`・`実行`・`モード` の行を作る |
 | `pr_section` | `progress/records.py` | 変更 | `(v: View, tables: Sequence[tuple[int, str]]) -> str` | 今の工程の行の前に `run_trailer_decide.run_lines` の行を置く |
 | `sync_records` | `progress/records.py` | 変更 | 今のまま | 書き先ごとに `issue_body.rewrite` で書く。PR の書き先では `requirements_docs.lookup` で `tables` を作る |
-| `record_issue` | `domains/records/cleanup_stage.py` | 変更 | `(store: BodyStore, cwd: Path, issue: int, stamp: str) -> dict[str, Any]` | `issue_body.rewrite` で工程「クリーンアップ」の記録を付ける |
-| `record_cleanup_stage` | `domains/records/cleanup_stage.py` | 変更 | `(hub: GitHub, prs: Iterable[int], cwd: Path) -> list[dict[str, Any]]` | `record_issue` へストアと作業場所を渡す |
+| `record_issue` | `domains/records/cleanup_stage.py` | 変更 | `(store: BodyStore, locks: BodyLocks, issue: int, stamp: str) -> dict[str, Any]` | `issue_body.rewrite` で工程「クリーンアップ」の記録を付ける |
+| `record_cleanup_stage` | `domains/records/cleanup_stage.py` | 変更 | `(hub: GitHub, prs: Iterable[int], cwd: Path) -> list[dict[str, Any]]` | `record_issue` へストアと、実行で 1 つの `BodyLocks` を渡す |
 
 - `sync_records`
   - 事後条件: 本文が変わらない書き先は読み 1 回で終わる（今と同じ回数）

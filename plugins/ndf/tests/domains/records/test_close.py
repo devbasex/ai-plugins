@@ -291,6 +291,7 @@ class Hub:
     repo: str = "o/r"
     bodies: dict[int, str] = field(default_factory=dict)
     closing: dict[int, list[int]] = field(default_factory=dict)
+    read: list[int] = field(default_factory=list)
     patched: list[int] = field(default_factory=list)
     broken: set[int] = field(default_factory=set)
 
@@ -298,6 +299,7 @@ class Hub:
         return {n: {"closingIssuesReferences": {"nodes": [{"number": i} for i in self.closing[n]]}} for n in numbers}
 
     def issue_body(self, number: int) -> Authored:
+        self.read.append(number)
         if number in self.broken:
             raise GitHubError("読めない")
         return Authored("octocat", "OWNER", self.bodies[number])
@@ -313,7 +315,7 @@ def test_record_cleanup_stage_records_skips_and_fails_per_issue(tmp_path: Path) 
     hub = Hub(bodies={1: _body(" "), 2: _body("x"), 3: ""}, closing={10: [1, 2], 11: [2, 3]}, broken={3})
     got = cleanup_stage.record_cleanup_stage(hub, [11, 10], tmp_path)  # type: ignore[arg-type]
     assert [(i["issue"], i["result"]) for i in got] == [(1, "recorded"), (2, "skipped"), (3, "failed")]
-    assert hub.patched == [1] and "- [x] クリーンアップ" in hub.bodies[1]
+    assert hub.read == [1, 2, 3] and hub.patched == [1] and "- [x] クリーンアップ" in hub.bodies[1]
 
 
 def test_item_name_uses_the_issue_and_falls_back_to_the_pr() -> None:

@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import NamedTuple, Optional, Protocol
 
-from filelock import FileLock
+from filelock import FileLock, Timeout
 
 from ndf import identity
 from ndf.adapters.git import Git
@@ -50,14 +51,30 @@ class Rewritten(NamedTuple):
     settled: bool
 
 
-def lock_path(cwd: Path, issue: int) -> Path:
-    """番号ごとの本文のロック。Git の共通ディレクトリの下に置き、同じリポジトリの worktree のすべてが共有する。"""
-    return Git(cwd).common_dir() / identity.load().name / f"acceptance-{int(issue)}.lock"
+class LockError(OSError):
+    """ロックのディレクトリかファイルを用意できない（権限が無いなど）。"""
+
+
+@dataclass
+class BodyLocks:
+    """番号ごとの本文のロックの保存先。Git の共通ディレクトリの下に置き、同じリポジトリの worktree のすべてが共有する。
+
+    まとめて書く側は 1 つを作って全部の番号に使い回す。共通ディレクトリを求める git の起動は、最初に使うときの 1 回で済む。
+    """
+
+    cwd: Path
+
+    @cached_property
+    def directory(self) -> Path:
+        return Git(self.cwd).common_dir() / identity.load().name
+
+    def path(self, issue: int) -> Path:
+        return self.directory / f"acceptance-{int(issue)}.lock"
 
 
 def rewrite(
     store: BodyStore,
-    cwd: Path,
+    locks: BodyLocks,
     issue: int,
     change: Callable[[str], str],
     *,
@@ -67,12 +84,19 @@ def rewrite(
     """番号のロックの中で本文を読み、`change` で差し替え、変わったときだけ PATCH する。
 
     `verify` を渡すと、読んだ本文が通れば書かず、書いた後は読み直して確かめ、通らなければ読んだ本文から `retries` 回まで
-    やり直す。`change` は同じ入力で同じ本文を返すこと。ロックを取れなければ `filelock.Timeout`、読み書きの失敗は `store` の
-    例外（GitHub は `GitHubError`）をそのまま返す。
+    やり直す。`change` は同じ入力で同じ本文を返すこと。ロックを待ち切れなければ `filelock.Timeout`、ロックを用意できなければ
+    `LockError`、読み書きの失敗は `store` の例外（GitHub は `GitHubError`）をそのまま返す。
     """
-    path = lock_path(cwd, issue)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with FileLock(str(path), timeout=limits.seconds("locks.append")):
+    path = locks.path(issue)
+    lock = FileLock(str(path), timeout=limits.seconds("locks.append"))
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock.acquire()
+    except Timeout:  # `Timeout` は `OSError` の下位なので、先に通す
+        raise
+    except OSError as exc:
+        raise LockError(f"本文のロックを用意できない: {exc}") from exc
+    try:
         body, wrote = store.read(issue), False
         for _ in range(1 + retries):
             if verify is not None and verify(body):
@@ -86,3 +110,5 @@ def rewrite(
                 return Rewritten(new, True, True)
             body = store.read(issue)
         return Rewritten(body, wrote, verify is None or verify(body))
+    finally:
+        lock.release()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -101,31 +102,47 @@ def test_progress_records_report_a_store_that_cannot_be_made(cwd: Path) -> None:
     assert records.sync_records(_view([1]), cwd, make) == ([], ["進捗記録を書けない: 認証が無い"])
 
 
-@pytest.mark.parametrize(
-    ("body", "broken", "result", "calls"),
-    [
-        (PROGRESS, "", "recorded", ["read", "write"]),
-        (PROGRESS.replace("- [ ]", "- [x]"), "", "skipped", ["read"]),
-        (PROGRESS, "broken_read", "failed", ["read"]),
-        (PROGRESS, "broken_write", "failed", ["read", "write"]),
-    ],
-)
-def test_cleanup_record_reads_once_and_writes_only_an_unmarked_stage(
-    cwd: Path, body: str, broken: str, result: str, calls: list[str]
-) -> None:
-    store = Store(bodies={1: body}, **({broken: {1}} if broken else {}))
+def test_cleanup_record_reports_a_failed_write(cwd: Path) -> None:
+    store = Store(bodies={1: PROGRESS}, broken_write={1})
     got = cleanup_stage.record_cleanup_stage(Hub(store), [10], cwd)  # type: ignore[arg-type]
-    assert [(i["issue"], i["result"]) for i in got] == [(1, result)]
-    assert [kind for kind, _ in store.calls] == calls
+    assert [(i["issue"], i["result"]) for i in got] == [(1, "failed")]
+    assert store.calls == [("read", 1), ("write", 1)]
+
+
+def test_a_batch_resolves_the_git_common_dir_once(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 番号ごとに解決すると、対象の件数だけ git の起動が増える
+    resolved: list[Path] = []
+    original = issue_body.Git.common_dir
+
+    def common_dir(git: Any) -> Path:
+        resolved.append(git.cwd)
+        return original(git)
+
+    monkeypatch.setattr(issue_body.Git, "common_dir", common_dir)
+    store = Store()
+    assert records.sync_records(_view([1, 2], pr=3), cwd, lambda _: store)[1] == []
+    assert len(resolved) == 1
+
+    class TwoIssues(Hub):
+        def nodes(self, numbers: Any, node: str, fields: str) -> dict[int, dict]:
+            return {n: {"closingIssuesReferences": {"nodes": [{"number": 1}, {"number": 2}]}} for n in numbers}
+
+    resolved.clear()
+    assert len(cleanup_stage.record_cleanup_stage(TwoIssues(store), [10], cwd)) == 2  # type: ignore[arg-type]
+    assert len(resolved) == 1
 
 
 # --- 共通の書き換え ---
 
 
+def _lock_path(cwd: Path, issue: int) -> Path:
+    return issue_body.BodyLocks(cwd).path(issue)
+
+
 def _held(cwd: Path, issue: int) -> bool:
     """番号のロックを誰かが持っているか（待たずに取ってみる）。"""
     try:
-        with FileLock(str(issue_body.lock_path(cwd, issue)), timeout=0):
+        with FileLock(str(_lock_path(cwd, issue)), timeout=0):
             return False
     except Timeout:
         return True
@@ -156,19 +173,19 @@ def _append(line: str) -> Any:
 
 
 def test_lock_path_is_shared_by_the_repository(cwd: Path) -> None:
-    assert issue_body.lock_path(cwd, 7) == cwd.resolve() / ".git" / "ndf" / "acceptance-7.lock"
+    assert _lock_path(cwd, 7) == cwd.resolve() / ".git" / "ndf" / "acceptance-7.lock"
 
 
 def test_rewrite_reads_once_and_writes_nothing_when_the_body_does_not_change(cwd: Path) -> None:
     store = Store(bodies={7: "本文\n"})
-    got = issue_body.rewrite(store, cwd, 7, lambda body: body)
+    got = issue_body.rewrite(store, issue_body.BodyLocks(cwd), 7, lambda body: body)
     assert got == issue_body.Rewritten("本文\n", False, True)
     assert store.calls == [("read", 7)]
 
 
 def test_rewrite_patches_a_changed_body_without_reading_it_again(cwd: Path) -> None:
     store = Store(bodies={7: "本文\n"})
-    got = issue_body.rewrite(store, cwd, 7, _append("追記"))
+    got = issue_body.rewrite(store, issue_body.BodyLocks(cwd), 7, _append("追記"))
     assert got == issue_body.Rewritten("本文\n追記\n", True, True)
     assert store.calls == [("read", 7), ("write", 7)]
 
@@ -176,14 +193,14 @@ def test_rewrite_patches_a_changed_body_without_reading_it_again(cwd: Path) -> N
 def test_rewrite_reads_and_patches_only_while_holding_the_lock_of_the_number(cwd: Path) -> None:
     # ロックの外で読んだ本文を PATCH すると、並行する書き手のセクションが消える
     store = Watched(bodies={7: "本文\n"}, cwd=cwd)
-    issue_body.rewrite(store, cwd, 7, _append("確認"), verify=lambda body: "確認" in body)
+    issue_body.rewrite(store, issue_body.BodyLocks(cwd), 7, _append("確認"), verify=lambda body: "確認" in body)
     assert [kind for kind, _ in store.calls] == ["read", "write", "read"] and store.unlocked == []
     assert not _held(cwd, 7)
 
 
 def test_rewrite_does_not_write_a_body_that_is_already_settled(cwd: Path) -> None:
     store = Store(bodies={7: "確認\n"})
-    got = issue_body.rewrite(store, cwd, 7, lambda body: f"{body}追記", verify=lambda body: "確認" in body, retries=3)
+    got = issue_body.rewrite(store, issue_body.BodyLocks(cwd), 7, lambda body: f"{body}追記", verify=lambda body: "確認" in body, retries=3)
     assert got == issue_body.Rewritten("確認\n", False, True)
     assert store.calls == [("read", 7)]
 
@@ -204,7 +221,7 @@ class Reverted(Store):
 @pytest.mark.parametrize(("times", "settled", "writes"), [(1, True, 2), (3, True, 4), (4, False, 4)])
 def test_rewrite_reapplies_to_the_read_body_up_to_the_limit(cwd: Path, times: int, settled: bool, writes: int) -> None:
     store = Reverted(bodies={7: "本文\n"}, times=times)
-    got = issue_body.rewrite(store, cwd, 7, _append("確認"), verify=lambda body: "確認" in body, retries=3)
+    got = issue_body.rewrite(store, issue_body.BodyLocks(cwd), 7, _append("確認"), verify=lambda body: "確認" in body, retries=3)
     assert (got.wrote, got.settled) == (True, settled)
     assert [kind for kind, _ in store.calls].count("write") == writes
     assert got.body == ("他の書き手\n確認\n" if settled else "他の書き手\n")
@@ -212,18 +229,18 @@ def test_rewrite_reapplies_to_the_read_body_up_to_the_limit(cwd: Path, times: in
 
 def test_rewrite_is_not_settled_when_the_change_cannot_satisfy_the_check(cwd: Path) -> None:
     store = Store(bodies={7: "本文\n"})
-    got = issue_body.rewrite(store, cwd, 7, lambda body: body, verify=lambda body: False, retries=3)
+    got = issue_body.rewrite(store, issue_body.BodyLocks(cwd), 7, lambda body: body, verify=lambda body: False, retries=3)
     assert got == issue_body.Rewritten("本文\n", False, False)
     assert store.calls == [("read", 7)]
 
 
 def test_rewrite_leaves_a_busy_lock_to_the_caller(cwd: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(issue_body.limits, "seconds", lambda name: 0)
-    path = issue_body.lock_path(cwd, 7)
+    path = _lock_path(cwd, 7)
     path.parent.mkdir(parents=True)
     store = Store()
     with FileLock(str(path)), pytest.raises(Timeout):
-        issue_body.rewrite(store, cwd, 7, _append("追記"))
+        issue_body.rewrite(store, issue_body.BodyLocks(cwd), 7, _append("追記"))
     assert store.calls == []
 
 
@@ -246,13 +263,21 @@ def test_the_three_writers_take_the_same_lock_and_keep_each_others_sections(
         assert kept in store.bodies[1]
 
 
+@pytest.mark.parametrize("cause", ["busy", "unusable"])
 @pytest.mark.parametrize("writer", ["progress", "cleanup"])
-def test_a_busy_lock_is_reported_without_touching_the_body(cwd: Path, monkeypatch: pytest.MonkeyPatch, writer: str) -> None:
+def test_an_unavailable_lock_is_reported_per_target_without_touching_the_body(
+    cwd: Path, monkeypatch: pytest.MonkeyPatch, writer: str, cause: str
+) -> None:
     monkeypatch.setattr(issue_body.limits, "seconds", lambda name: 0)
-    path = issue_body.lock_path(cwd, 1)
-    path.parent.mkdir(parents=True)
+    path = _lock_path(cwd, 1)
     store = Store(bodies={1: PROGRESS})
-    with FileLock(str(path)):
+    if cause == "busy":
+        path.parent.mkdir(parents=True)
+        held: Any = FileLock(str(path))
+    else:
+        path.parent.write_text("ディレクトリを作れない")
+        held = nullcontext()
+    with held:
         if writer == "progress":
             errors = records.sync_records(_view([1]), cwd, lambda _: store)[1]
             assert len(errors) == 1 and errors[0].startswith("issue #1 の進捗記録を書けない: ")

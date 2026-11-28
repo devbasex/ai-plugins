@@ -123,7 +123,7 @@ def _record(a: argparse.Namespace) -> dict[str, Any]:
 
     got = issue_body.rewrite(
         _Bodies(a.cwd),
-        a.cwd,
+        issue_body.BodyLocks(a.cwd),
         a.issue,
         lambda body: acc.recorded_body(body, pre, a.post_release),
         verify=lambda body: not unsettled(body),
