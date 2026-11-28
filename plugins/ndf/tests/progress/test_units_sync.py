@@ -308,6 +308,16 @@ def test_an_uncommitted_edit_is_kept(world):
     assert PLAN in out["summary"] and (world.work / PLAN).read_text(encoding="utf-8") == "手元の編集\n"
 
 
+def test_an_ignored_file_at_a_target_path_is_kept(world):
+    _write(world.work, {".git/info/exclude": f"{PLAN}\n", PLAN: "手元だけのファイル\n"})
+    _snapshot(world)
+
+    out = _sync(world)
+
+    _untouched(world, out, "precondition")
+    assert (world.work / PLAN).read_text(encoding="utf-8") == "手元だけのファイル\n"
+
+
 def test_a_merge_in_progress_stops(world):
     (world.work / ".git" / "MERGE_HEAD").write_text(world.head + "\n", encoding="utf-8")
     _snapshot(world)

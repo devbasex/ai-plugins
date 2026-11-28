@@ -282,7 +282,7 @@ def _differing(s: _Sync, commit: str, files: Sequence[str]) -> list[str]:
 
 def _tip_after_checks(s: _Sync, files: Sequence[str], tip: Optional[str]) -> tuple[str, str]:
     """ファイルを書き換える前に作業場所を確かめ、送り先の HEAD と手元の HEAD の SHA を返す。"""
-    dirty = parse_status_z(s.git.run("status", "--porcelain", "-z", "--untracked-files=all", "--", *files))
+    dirty = parse_status_z(s.git.run("status", "--porcelain", "-z", "--untracked-files=all", "--ignored", "--", *files))
     if dirty:
         raise _Stop("precondition", f"対象のファイルに未コミットの変更がある: {', '.join(sorted(dirty))}")
     if s.git.commit_or_none("MERGE_HEAD") is not None:
