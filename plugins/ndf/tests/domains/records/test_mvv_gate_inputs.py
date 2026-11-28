@@ -337,6 +337,9 @@ def test_expect_pr_of_the_design_gate_judges_only_the_branch_pr(
     out = _cli_gate(repo, capsys, "design", "--expect-pr", "6")
     assert (out["status"], out["cause"]["kind"]) == ("stopped", "not_applicable") and notes == []
     assert "5" not in out["summary"] and "6" not in out["summary"]
+    # 承認でない回答が残る手の finish は --no-skip も渡す。併せて渡しても番号を照らす（#4520）
+    out = _cli_gate(repo, capsys, "design", "--no-skip", "--expect-pr", "6")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "not_applicable") and notes == []
     monkeypatch.setattr(cli, "_hub", _hub(5, DOCS))
     monkeypatch.setattr(mvv_gate, "gate", partial(mvv_gate.gate, ask=Ask(FOLLOW)))
     out = _cli_gate(repo, capsys, "design", "--expect-pr", "5")

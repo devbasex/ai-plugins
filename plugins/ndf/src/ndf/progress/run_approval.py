@@ -248,16 +248,20 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
             d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
         d.warn(why)
         return None
+    ran: list[Optional[dict[str, Any]]] = []  # 終了の確かめを打ったら 1 件（終了を書いたら None）
     if event_payload(m.event).get("by") != model.MVV_SERVICE:
-        return _finish_held_stage(d, v, m, got)
-    # MVV 判定の承認は、マージの確かめの前に証跡を書く（設計 PR のマージが読む）
-    stopped: list[Optional[dict[str, Any]]] = []
-    _confirm_mvv(d, v, m, lambda: stopped.append(_finish_held_stage(d, v, m, got)))
-    return stopped[0] if stopped else None
+        ran.append(_finish_held_stage(d, v, m, got))
+    else:
+        # MVV 判定の承認は、マージの確かめの前に証跡を書く（設計 PR のマージが読む）
+        _confirm_mvv(d, v, m, lambda: ran.append(_finish_held_stage(d, v, m, got)))
+    if ran == [None]:
+        d.synced()  # 進捗記録の書き直しは、回答と共有する排他を放してから行う
+    return ran[0] if ran else None
 
 
 def _finish_held_stage(d: Hands, v: View, m: Move, got: approval_decide.Standing) -> Optional[dict[str, Any]]:
-    """有効な承認を読んだ手で終えた回答待ちの工程に終了を書く。設計の PR が未マージなら、終了を書かずに止まる結果を返す。"""
+    """有効な承認を読んだ手で終えた回答待ちの工程に終了を書く。設計の PR が未マージなら、終了を書かずに止まる結果を返す。
+    進捗記録は呼び手が書き直す。"""
     assert m.stage is not None and m.step is not None and m.progress is not None and m.progress.held_finish is not None
     assert m.event is not None
     if m.step.gate == approval_decide.DESIGN_GATE and not got.merged:
@@ -268,7 +272,6 @@ def _finish_held_stage(d: Hands, v: View, m: Move, got: approval_decide.Standing
     reason = f"手で終えた工程の承認（回答の事象 {m.event.seq}）を読んだ"
     payload = {"output": m.progress.held_finish["output"], "approval": m.event.seq}
     d.write(model.EventDraft(FINISHED, ACTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
-    d.synced()
     return None
 
 

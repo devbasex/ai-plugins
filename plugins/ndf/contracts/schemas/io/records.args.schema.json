@@ -294,7 +294,7 @@
         },
         "--expect-pr": {
           "type": "integer",
-          "description": "承認する PR の番号。判定に使う PR（release は入力の pr、design は作業場所のブランチの PR）と違えば、PR の中身を読まず判定もコメントもせずに not_applicable で止まる"
+          "description": "承認する PR の番号。判定に使う PR（release は入力の pr。design は入力の worktree のブランチの開いた PR で、worktree が無ければ対象のリポジトリのルートのブランチの開いた PR）と違えば、PR の中身を読まず判定もコメントもせずに not_applicable で止まる"
         },
         "--no-skip": {
           "type": "boolean",

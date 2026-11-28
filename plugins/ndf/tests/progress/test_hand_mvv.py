@@ -125,6 +125,26 @@ def test_a_skipping_verdict_is_approved_by_the_next_calls_and_finishes_after_the
     assert len(judge.runs) == 1 and "design" not in env.calls
 
 
+def test_the_progress_sync_runs_after_the_answer_lock_is_released(repo, st, env, judge, capsys):
+    tid = _auto(capsys, repo)
+    _finish_design(capsys, repo, tid)
+    _trail(env)
+    manual._merge(env)
+    manual._next(st, tid, repo, env)  # MVV の承認を記録する
+    synced: list[str] = []
+
+    def records(_cwd):
+        with store.approval_lock(st, tid):  # 排他が持たれていれば Refused
+            synced.append(manual._state(st, tid, DESIGN))
+        return manual.lanes._NoRecords()
+
+    env.env = replace(env.env, records=records)
+
+    manual._next(st, tid, repo, env)
+
+    assert synced and synced[0] == "finished", synced
+
+
 @pytest.mark.parametrize("changed", ["head", "base", "production", "no_target"])
 def test_a_verdict_of_another_target_is_not_approved(repo, st, env, judge, capsys, changed):
     tid = _auto(capsys, repo)

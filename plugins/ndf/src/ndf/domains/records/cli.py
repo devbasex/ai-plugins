@@ -289,7 +289,7 @@ def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     warnings: list[dict[str, Any]] = []
     if args.no_skip:
         inputs = {**inputs, mvv_gate.NO_SKIP: True}
-    elif args.expect_pr is not None:
+    if args.expect_pr is not None:
         # 設計の判定する PR は作業場所のブランチで決まるので、gate の中で PR の中身を読む前に比べる
         inputs = {**inputs, mvv_gate.EXPECT_PR: args.expect_pr}
     try:
@@ -497,8 +497,9 @@ def _add_mvv(sub: Any) -> None:
         "--expect-pr",
         type=int,
         default=None,
-        help="承認する PR の番号。判定に使う PR（release は入力の pr、design は作業場所のブランチの PR）と違えば、"
-        "PR の中身を読まず判定もコメントもせずに not_applicable で止まる",
+        help="承認する PR の番号。判定に使う PR（release は入力の pr。design は入力の worktree のブランチの開いた PR で、"
+        "worktree が無ければ対象のリポジトリのルートのブランチの開いた PR）と違えば、PR の中身を読まず判定もコメントもせずに "
+        "not_applicable で止まる",
     )
     gate.add_argument("--no-skip", action="store_true", help="承認ゲートを省かない（承認でない回答が残るとき）")
     gate.set_defaults(handler=_mvv_gate)
