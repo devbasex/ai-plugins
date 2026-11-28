@@ -102,8 +102,8 @@ def _inside(path: Path, tree: Path) -> bool:
 def read_settings(main: Path, worktree: Path) -> ReviewSettings:
     """`main` の下の `.ndf/review.json`。無ければ秒と費用の上限の既定だけを持つ。読めない・形が違えば `ReviewDeclInvalid`。
 
-    `fixer_sessions` が真の設定は、たどった先の実体がレビューする `worktree` の外にあるときだけ受ける（PR が書き換えられる
-    場所の値で会話の保存を有効にしない。#4013）。"""
+    `fixer_sessions` が真の設定と `limits` キーのある設定は、たどった先の実体がレビューする `worktree` の外にあるときだけ
+    受ける（PR が書き換えられる場所の値で会話の保存を有効にせず、上限も変えない。#4013・#2468）。"""
     path = settings_path(main, "review")  # 表 ndf-files の行
     try:
         present = participants.setting_present(path)
@@ -121,10 +121,11 @@ def read_settings(main: Path, worktree: Path) -> ReviewSettings:
     saved = criteria_decide.fixer_sessions_of(parsed, str(path))
     declared = criteria_decide.project_limits_of(parsed, str(path))
     tree = Path(os.path.realpath(worktree))
-    if saved and _inside(real, tree):
+    guarded = [key for key, used in ((criteria_decide.FIXER_SESSIONS, saved), ("limits", "limits" in parsed)) if used]
+    if guarded and _inside(real, tree):
         raise criteria_decide.ReviewDeclInvalid(
             f"{path} の実体 {real} がレビューする worktree {tree} の中にある。PR が書き換えられる場所の "
-            f"{criteria_decide.FIXER_SESSIONS} で会話の保存を有効にしないので、メインディレクトリに通常のファイルとして置く"
+            f"{'・'.join(guarded)} は使わないので、メインディレクトリに通常のファイルとして置く"
         )
     return ReviewSettings(focus, raw, saved, _with_defaults(declared))
 

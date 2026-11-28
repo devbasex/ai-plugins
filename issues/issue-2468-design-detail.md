@@ -112,7 +112,7 @@ plugins/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `limits_of` | `criteria_decide.py` | 新設 | `limits_of(raw: Mapping[str, Any], where: str) -> ProjectLimits` | `version: 1` の `limits` を読み、形の違いは `ReviewDeclInvalid` |
-| `read_settings` | `settings.py` | 変更 | シグネチャは変えない | `ReviewSettings.limits` に読んだ値を入れる |
+| `read_settings` | `settings.py` | 変更 | シグネチャは変えない | `ReviewSettings.limits` に読んだ値を入れる。実体がレビューする worktree の中にある設定は、`fixer_sessions` が真の場合と同じく `limits` キーがあれば拒む |
 | `outside_checkout` | `settings.py` | 変更 | シグネチャは変えない | `budget_states` も worktree の外にあることを確かめ、実体のパスに置き換える |
 
 `outside_checkout` を `--budget-state` にも当てるのは、worktree の中の状態ファイルは PR の作成者が書き換えられ、上限の合計を増減できるためである。
@@ -122,6 +122,7 @@ plugins/ndf/
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `limits_of` | 形が違う | 負の数・文字列・知らないキー・真偽値 | 値の検査 | 止める | `invalid`（今の `focus` の誤りと同じ） | 設定を直して打ち直す |
+| `read_settings` | `limits` を持つ設定の実体がレビューする worktree の中 | メインディレクトリの `.ndf` か `review.json` が worktree の中を指すリンク。PR が上限を変えられる | 実体のパスの比較（`fixer_sessions` と同じ判定） | 止める（`limits` キーが無ければ `focus` を読んで続ける） | `invalid` | 通常のファイルとして置いて打ち直す |
 | `outside_checkout` | 保存先が worktree の中 | `--budget-state` の指定 | 実体のパスの比較 | 止める | `precondition` | 外の保存先を渡す |
 
 ### 内部のデータと定数
@@ -146,6 +147,7 @@ plugins/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `limits_of` | 3 キーを読む | `limits` の無い `version: 1` が読める（受け入れ条件 6）。1 つだけ | `rounds` が 0・小数・真偽値、`seconds` が 0・負、知らないキー |
+| `read_settings` | worktree の外を指すリンクの `limits` を読む | 実体が worktree の中でも `limits` キーが無ければ読む | worktree の中の `limits`（空のオブジェクトを含む）は `invalid` |
 | `outside_checkout` | 外の保存先はそのまま | 同じ保存先を 2 回 | worktree の中のリンクは `precondition` |
 
 ## 使った量と上限の判断（budget_decide）
