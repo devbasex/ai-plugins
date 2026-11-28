@@ -952,10 +952,8 @@ class GitHub:
         return QueueHolder(account_id_of(entry.get("enqueuer")), *target_of(node), queue_entry_of(node))
 
     def dequeue(self, number: int, entry: str = "") -> bool:
-        """PR `number` をマージキューから外す（入っていなければ何もしない）。
-
-        `entry`（項目の ID）を渡したときは、今の項目が違えば外さずに偽を返す。GitHub の取り外しは PR を指定するので、
-        項目の読み取りと取り外しの要求の間に入れ替わった項目は区別できない。"""
+        """PR `number` をマージキューから外す（入っていなければ何もしない）。`entry`（項目の ID）が今の項目と違えば、外さずに偽を返す。
+        GitHub の取り外しは PR を指定するので、項目の読み取りと取り外しの要求の間に入れ替わった項目は区別できない。"""
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
         if not (isinstance(node, dict) and node["isInMergeQueue"]):
             return True

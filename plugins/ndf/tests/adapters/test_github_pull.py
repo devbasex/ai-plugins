@@ -37,6 +37,7 @@ _GRAPHQL = {
     "title": "題",
     "isInMergeQueue": True,
     "isCrossRepository": True,
+    "mergeQueueEntry": {"id": "entry-id"},
 }
 _EXPECTED = {
     "number": 7,
@@ -53,6 +54,7 @@ _EXPECTED = {
     "queued": False,
     "title": "題",
     "cross_repository": False,
+    "queue_entry": "",
 }
 # 文字列でない値（null）は空文字になる
 _EMPTIED = {"head_sha": "", "head_ref": "", "base_ref": "", "body": "", "merge_state": "", "author": "", "association": "", "title": ""}
@@ -83,7 +85,8 @@ def test_from_rest_empties_null_values_and_allows_missing_optional_keys() -> Non
 
 
 def test_from_graphql_fills_every_field() -> None:
-    assert github.Pull.from_graphql(_GRAPHQL)._asdict() == {**_EXPECTED, "queued": True, "cross_repository": True}
+    expected = {**_EXPECTED, "queued": True, "cross_repository": True, "queue_entry": "entry-id"}
+    assert github.Pull.from_graphql(_GRAPHQL)._asdict() == expected
 
 
 @pytest.mark.parametrize(("state", "expected"), [("OPEN", "open"), ("CLOSED", "closed"), ("MERGED", "closed"), (None, "closed")])
