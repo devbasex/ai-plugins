@@ -218,3 +218,10 @@ def test_the_example_in_a_comment_inside_an_html_block_is_not_a_record(opening):
 
     example = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | 例 |\n"
     assert read_checks(f"{opening}{example}-->\n</details>\n") == {}
+
+
+def test_the_row_in_a_comment_following_the_table_is_not_a_record():
+    from ndf.domains.loop.acceptance_decide import read_checks
+
+    table = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | pytest | <!--\n| 2 | マージ前 | 未実行 |\n-->\n"
+    assert list(read_checks(table)) == [1]

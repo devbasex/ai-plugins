@@ -75,19 +75,16 @@ def _sentence(text: str) -> str:
     リストに属する字下げだけを除いて残す。
     """
     first, *rest = text.split("\n")
-    # 先頭の行は記号を除いてあるので、同じ字下げになるリスト項目の行を代わりに置いて、続きの行のコードブロックを読む
-    code = inputs_decide.code_lines(["- x", *rest])
+    # 先頭の行は記号を除いてあるので、同じ字下げになるリスト項目の行にして、続きの行のコードブロックを読む
     marker = "- x "
-    bare = inputs_decide.uncommented([marker + first, *rest])
-    head = (bare[0] or "")[len(marker) :].strip()
+    (head, _), *body = inputs_decide.uncommented([marker + first, *rest])
+    head = head[len(marker) :].strip()
     lines = [head] if head else []
-    for i, (line, cut) in enumerate(zip(rest, bare[1:]), 1):
-        if cut is None:
-            continue
-        if i in code and cut == line:
-            lines.append(code[i])
-        elif cut.strip():
-            lines.append(cut.strip())
+    for line, is_code in body:
+        if is_code:
+            lines.append(line)
+        elif line.strip():
+            lines.append(line.strip())
     return _NUMBER.sub("", "\n".join(lines).rstrip("\n"), count=1)
 
 

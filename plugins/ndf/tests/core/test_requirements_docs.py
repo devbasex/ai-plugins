@@ -107,6 +107,26 @@ def test_criteria_keep_the_comment_mark_written_as_code() -> None:
 
 
 @pytest.mark.parametrize(
+    "literal",
+    ["`入力例\n    の <!-- {0} --> を扱う`", "`入力例\n      <!-- {0} -->`", "表示は \\<!-- {0} -->", "\\<!-- {0} -->"],
+)
+def test_criterion_digest_keeps_the_literal_comment_mark(literal: str) -> None:
+    got = [rd.criteria_of(_doc_text(criteria=f"- [ ] {literal.format(word)}\n"))[0] for word in ("例", "本番")]
+    assert "例" in got[0].text.replace("入力例", "")
+    assert got[0].digest != got[1].digest
+
+
+def test_a_fence_in_a_comment_does_not_hide_the_following_criteria() -> None:
+    got = rd.criteria_of(_doc_text(criteria="- [ ] 甲\n\n<details><!--\n\n```\n-->\n</details>\n\n- [ ] 乙\n"))
+    assert [c.text.split("\n", 1)[0] for c in got] == ["甲", "乙"]
+
+
+def test_a_comment_line_before_the_code_does_not_change_the_digest() -> None:
+    code = "\n      a\n      b"
+    assert rd.criterion_digest(f"- [ ] 甲\n<!-- メモ -->{code}") == rd.criterion_digest(f"- [ ] 甲{code}")
+
+
+@pytest.mark.parametrize(
     "example",
     [
         "```markdown\n## 受け入れ条件\n\n- [ ] 例\n```\n\n",
