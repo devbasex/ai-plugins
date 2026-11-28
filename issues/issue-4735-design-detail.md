@@ -4,6 +4,8 @@
 
 新設する関数が 2 つ以上あり、既存の関数のシグネチャも変えるので、詳細設計を別ファイルにした。
 
+「実行の印」（1 回の作業を指す 12 桁の値）の出し方は設計文書の「データ構造」に、「信用する書き手」などの工程の言葉は設計文書の「この文書で使う工程の言葉」にある。
+
 ## 地図
 
 パッケージ・モジュール構成（触るファイルだけ。`*` は新設）:
@@ -40,9 +42,9 @@ plugins/ndf/src/ndf/
                  acceptance_record.py *, acceptance_record_decide.py *}
 ```
 
-依存の向きは、層の並び（`checks/rules.json` の `structure.layers`。`contracts` → `adapters` → `core` → `progress` → `domains`）の上から下への一方向だけで、循環は無い。要求仕様書の読み出し（`core/requirements_docs.py`・`core/requirements_history.py`）と本文の書き換え（`core/issue_body.py`）は `core` に置く。`progress` と `domains` の呼ぶ側がそこを使う。`core` から `progress` を呼ばないため、起点コミットの解決は `progress.command.base_ref` を使わずに `Git.commit_or_none` で行う。構成要素の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
+依存は一方向だけで、循環は無い。層は `checks/rules.json` の `structure.layers` の順に `contracts`・`adapters`・`core`・`progress`・`domains` と並び、各層は並びで前にある層に依存する。要求仕様書の読み出し（`core/requirements_docs.py`・`core/requirements_history.py`）と本文の書き換え（`core/issue_body.py`）は `core` に置く。`progress` と `domains` の呼ぶ側がそこを使う。`core` から `progress` を呼ばないため、起点コミットの解決は `progress.command.base_ref` を使わずに `Git.commit_or_none` で行う。構成要素の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
 
-**新設のモジュールを設計文書の構成要素より 6 つ多く置く。** `progress/command.py` は行数の上限（`checks/rules.json` の `structure.max_lines` の 1,000 行）にちょうど達していて、行を足せない。ほかの 5 つは、1 つのモジュールに置くと、上限に近づくか、判断だけの関数と I/O が同じモジュールに混ざるためである。判断だけの関数は、名前が `_decide` で終わるモジュールに置き、外部の I/O を持たない。新設のモジュールは設計文書の「設計の結果」の触るファイルに足した。
+**新設のモジュールを設計文書の構成要素より 6 つ多く置く。** 6 つは `core/requirements_history.py`・`progress/requirements_stage.py`・`domains/records/requirements_cmd.py`・`domains/loop/acceptance_release.py`・`domains/release/acceptance_record.py`・`domains/release/acceptance_record_decide.py` である。`progress/requirements_stage.py` を分けるのは、`progress/command.py` が行数の上限（`checks/rules.json` の `structure.max_lines` の 1,000 行）にちょうど達していて、行を足せないためである。ほかの 5 つは、1 つのモジュールに置くと、上限に近づくか、判断だけの関数と I/O が同じモジュールに混ざるためである。判断だけの関数は、名前が `_decide` で終わるモジュールに置き、外部の I/O を持たない。新設のモジュールは設計文書の「設計の結果」の触るファイルに足した。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
@@ -55,7 +57,7 @@ plugins/ndf/src/ndf/
 | `core/issue_body.py` | 新設 | Issue の本文を、番号ごとのロックの中で読んで自分のセクションだけ差し替える | `adapters/github`・`filelock` | モジュール | `BodyStore`・`GitHubBodies`・`Rewritten`・`lock_path`・`rewrite` |
 | `core/plan/inputs_decide.py` | 変更 | 実行と要求仕様書の組ごとの確認の表を読む（`progress` と `domains` が共に使う） | 無し | `TableRow`・`RunTable`・モジュール | 新設 `RUN_HEADING`（定数）・`read_tables`・`counted` |
 | `core/plan/review_units_decide.py` | 変更 | 実装計画の版の行と単位の外の行を読み、単位に版を持たせる | `core/requirements_docs` の型 | `Unit`・モジュール | 新設 `criteria_versions`・`outside_units`・`stamped`。変更 `Unit`・`lineup`・`acceptance_args` |
-| `core/route/__init__.py` | 変更 | `acceptance` の補いに実行の印とモードを足す | 無し | モジュール | 変更 `launch_values`・`check_acceptance` |
+| `core/route/__init__.py` | 変更 | テンプレートの差し込み `acceptance` を値が無いときに自動で組む処理で、実行の印とモードを足す | 無し | モジュール | 変更 `launch_values`・`check_acceptance` |
 | `core/worker.py` | 変更 | 確認の記録の手順の文を要求仕様書と実行の印の形にする | 無し | モジュール | 変更 `ACCEPTANCE_RULES`（定数） |
 | `progress/command.py` | 変更 | 文脈に実行の印を持たせ、要求の工程の出力を新設のモジュールへ渡す | `progress/requirements_stage` | モジュール | 変更 `_prepare_new`・`_cmd_finish`・`parser`。削除 `_requirements` |
 | `progress/requirements_stage.py` | 新設 | 実行の印、要求の工程の出力の記録、要求仕様書の移送を持つ | `core/requirements_docs`・`progress/store`・`contracts/worker_paths` | モジュール | `run_mark`・`context_run`・`recorded_docs`・`creation_finish`・`finish_requirements`・`MoveStep`・`resume_step`・`move_one`・`move_requirements`・`add_parser` |
@@ -180,7 +182,7 @@ plugins/ndf/src/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `DIGEST_CHARS` | 定数 | `core/requirements_docs.py` | `12`（条件の版・条件一覧の版・実行の印・確認対象の版で共有する。ほかのモジュールはここを読む） |
-| `SOURCES` | 定数 | `core/requirements_docs.py` | `("worktree", "history", "tree", "release")`（結果 JSON の `source` の値。スキーマの列挙は `records.result.schema.json` が持ち、ここはそれを読む） |
+| `SOURCES` | 定数 | `core/requirements_docs.py` | `("worktree", "history", "tree", "release")`（結果 JSON の `source` の値。値の一覧はスキーマ `records.result.schema.json` の列挙が持ち、この定数はその列挙を読む） |
 
 ### 既存の部品の再利用
 
@@ -336,7 +338,7 @@ plugins/ndf/src/ndf/
 | `_new_run` | `domains/loop/acceptance.py` | 新設 | `(a: argparse.Namespace) -> dict[str, Any]` | 無作為な実行の印を `outputs.run` で返す |
 | `add_parsers` | `domains/loop/acceptance.py` | 変更 | 今のまま | `--run`・`--criteria-digest`・`--mode`・`new-run`・`prune`・`show` の追加の引数を登録する |
 | `show_release` | `domains/loop/acceptance_release.py` | 新設 | `(a: argparse.Namespace) -> dict[str, Any]` | 対応の記録と `--records` の版を照らし、配布した要求仕様書と Issue・実行ごとの区分を返す |
-| `prune` | `domains/loop/acceptance_release.py` | 新設 | `(a: argparse.Namespace) -> dict[str, Any]` | 閉じた Issue の本文から確認の表を消し、コピーの無い表はコメントへ退避する |
+| `prune` | `domains/loop/acceptance_release.py` | 新設 | `(a: argparse.Namespace) -> dict[str, Any]` | 閉じた Issue の本文から確認の表を消し、対応の記録にコピーの無い表はコメントへ退避する |
 | `_prune_one` | `domains/loop/acceptance_release.py` | 新設 | `(hub: GitHub, bodies: BodyStore, cwd: Path, issue: int, copies: Mapping[tuple[str, str], str]) -> dict[str, Any]` | Issue 1 件の表の退避と削除 |
 
 - `_record`
@@ -404,7 +406,7 @@ plugins/ndf/src/ndf/
 | `_check` | `--criteria` の和集合。指定の無い Issue が混ざれば全条件 | `--no-criteria` は今のまま | 無い番号で失敗。本文の「進行」が `legacy-refactor` でも `--mode` が違えば止まる |
 | `_new_run` | 12 桁の 16 進 | 2 回で違う値 | `record`・`check` は `--run` が無ければ `invalid` |
 | `show_release` | まとめた要求仕様書の 2 つの Issue が別の実行なら本文 1 本・記録は Issue と実行ごと | すべての実行が `legacy-refactor` の Issue だけが「要求仕様書なし」 | 訂正の後の `--records`、Issue が足されただけの訂正で止まる |
-| `prune` | コピーと同じ表は消え、コピーの無い表は退避してから消える | `--no-release` はすべて退避 | 指定が無いと何も変えない。信用しない書き手の同じ識別子では投稿を省かない。退避の間の本文の変更が残る |
+| `prune` | 対応の記録のコピーと同じ表は消え、コピーの無い表は退避してから消える | `--no-release` はすべて退避 | 指定が無いと何も変えない。信用しない書き手の同じ識別子では投稿を省かない。退避の間の本文の変更が残る |
 
 ## Issue の本文の書き換え（`core/issue_body.py`）
 
@@ -522,7 +524,7 @@ plugins/ndf/src/ndf/
 ```
 
 - 2 つのテンプレートの `params` に `refs` と `mode` を足し、`params.json` の `mode` の既定は空の文字列にする。`ndf progress` から組むと、`refs` は工程の入力のすべての Issue（今の `invoke._fill_refs`）、`mode` は工程の入力が入る。単位の経路の実装のプランも同じ値になる。`invoke` と `units_invoke` はこのために変えない
-- `issue_values` は変えない。プランを組む時点では今のまま Issue の本文を `body_file` に書き、`legacy-refactor` ではそれがそのまま PR の本文になる。ほかのモードはステップが置き換える。組む時点で要求仕様書を読まないのは、その時点の `HEAD` が PR の head ではなく、worker のコミットの前の内容を指すためである
+- `issue_values` が、プランを組む時点に本文のファイルを書く処理は変えない（このモジュールに足すのは `requirements_refs` である）。プランを組む時点では今のまま Issue の本文を `body_file` に書き、`legacy-refactor` ではそれがそのまま PR の本文になる。ほかのモードはステップが置き換える。組む時点で要求仕様書を読まないのは、その時点の `HEAD` が PR の head ではなく、worker のコミットの前の内容を指すためである
 - `ndf route render`・`run` の単発の利用で `refs` を省くと、ステップは何もせず、渡した `body_file` がそのまま本文になる。`refs` を渡すと `body_file` を置き換えるので、`params.json` の `body_file` の説明に書く
 - 打ち直しは止まったステップから始まり、`push` を通らない。直したコミットを push せずに打ち直すと PR の head に無い内容へのリンクができるので、ステップがリモートの head と照らす
 - PR が既にあれば、今のまま `pr` のステップの `probe` がその番号を使い、本文は書き換えない。ステップはその場合も流れ、要求仕様書を読めなければ止まる
@@ -616,7 +618,7 @@ plugins/ndf/src/ndf/
 | `parse_trailer` | 同上 | 新設 | `(body: str) -> Optional[Trailer]` | PR の本文の「通した工程」から実行の行を読む |
 | `canonical` | 同上 | 新設 | `(value: Any) -> bytes` | キーを名前順、空白なし、UTF-8 の JSON。`tables` はパス、`rows` は条件の版の順に並べる |
 | `target_digest` | 同上 | 新設 | `(*parts: Any) -> str` | `canonical` をつないだものの SHA-256 の先頭 12 桁 |
-| `first_targets` | 同上 | 新設 | `(m: AcceptanceMap) -> dict[int, str]` | 最初の記録の Issue ごとの版（`commit`・番号・選ぶ実行の値） |
+| `first_targets` | 同上 | 新設 | `(m: AcceptanceMap) -> dict[int, str]` | 最初の記録の Issue ごとの版（`commit`・番号・選ぶ実行の値。入力は設計文書の「確認対象の版」） |
 | `corrected_targets` | 同上 | 新設 | `(prev: Mapping[int, str], before: Mapping[int, Any], after: Mapping[int, Any]) -> dict[int, str]` | 訂正の前後の読み出し結果を比べ、同じなら引き継ぎ、違えば前の版とつないで新しい版にする |
 | `chosen_run` | 同上 | 新設 | `(m: AcceptanceMap, issue: int) -> Optional[RunEntry]` | その Issue を含み、マージが最も新しい実行（`merged_at` が空なら最も新しい） |
 | `valid_map` | 同上 | 新設 | `(comments: Sequence[tuple[Authored, bool]], version: str, unit: Optional[str]) -> Optional[AcceptanceMap]` | 信用する書き手の記録のうち、訂正が無ければ最初、あれば最も新しい訂正を選ぶ。編集されたものがあれば例外 |
@@ -636,7 +638,7 @@ plugins/ndf/src/ndf/
 | `cmd_records`・`cmd_verification_record`・`_parser`・`_records_selection` | `domains/release/cli.py` | 変更 | 今のまま | `--records` の受け渡しと `record-acceptance` の登録 |
 | `current_rows` | `domains/records/close_decide.py` | 新設 | `(issue: int, rows: Sequence[Mapping[str, Any]], target: Optional[str]) -> tuple[list[Mapping[str, Any]], bool]` | 版が今と同じ行と、版の違う行か版の無い行があるかを返す |
 | `records_verdict`・`_targets_verdict`・`_last_check` | 同上 | 変更 | 今のまま | `view` の `acceptance_targets` があれば、設計文書の `close-check` の 2 つの表で判定する |
-| `_skipped_deploy` | `domains/records/cli.py` | 新設 | `(root: Path, machine_id: str, issue: int, rows: Sequence[Mapping[str, Any]]) -> Optional[str]` | デプロイの工程が飛ばされ、Issue が入力にあり、記録の `state_machine` が同じかを確かめ、違えば止める理由を返す |
+| `_skipped_deploy` | `domains/records/cli.py` | 新設 | `(root: Path, machine_id: str, issue: int, rows: Sequence[Mapping[str, Any]]) -> Optional[str]` | `machine_id` のステートマシンでデプロイの工程が飛ばされ、Issue がその入力にあり、記録の `state_machine` が `machine_id` と同じかを確かめ、違えば止める理由を返す |
 | `_judged`・`_add_close_check` | 同上 | 変更 | 今のまま | `--verification` に `--skipped-deploy` を必須にする |
 
 - `build_map`
@@ -660,10 +662,10 @@ plugins/ndf/src/ndf/
 
 | 関数 | 条件の組み合わせ | 結果 |
 | --- | --- | --- |
-| `records_verdict` | 数える行がある | 版を持つリポジトリは最後の 1 件、持たないリポジトリは `pair_verdict` でまとめる |
+| `records_verdict` | 数える行がある | バージョン番号を持つリポジトリは最後の 1 件、持たないリポジトリは `pair_verdict` でまとめる |
 | `records_verdict` | 数える行が無く、版の違う行か版の無い行がある | 閉じない（「再検証待ち」） |
 | `records_verdict` | 数える行が無く、`--require` が有効で条件を外していない | 閉じない |
-| `records_verdict` | 数える行が無く、訂正で版が変わったか足された Issue で、同じリリースと単位にテストの記録が 1 件以上 | 閉じない（条件を外していれば当てない） |
+| `records_verdict` | 次のすべてに当たる。数える行が無い。訂正でその Issue の確認対象の版が変わったか、訂正でその Issue が足された。同じリリースと単位にテストの記録が 1 件以上ある | 閉じない（条件を外していれば当てない） |
 | `records_verdict` | ほか | 今の「その Issue の行が無い」扱い |
 
 ### 内部のデータと定数
@@ -703,6 +705,8 @@ plugins/ndf/src/ndf/
 ## 実行の印と要求の工程の出力（`progress/command.py`・`progress/requirements_stage.py`）
 
 満たす決定: 決定 2・決定 3・決定 4、受け入れ条件 1・7、不変条件 I5
+
+ここでの移送は、メインディレクトリの要求仕様書を worktree へ移すことである。順 1〜6 は設計文書の「要求仕様書の移送」にある。
 
 ### 関数の仕様
 
@@ -859,12 +863,12 @@ plugins/ndf/src/ndf/
 
 | 保存先 | 変える中身 |
 | --- | --- |
-| `skills/requirements-design/SKILL.md`・`references/spec-template.md`・`references/document-roles.md` | 本文へ要求を書く手順と一致の確かめを消し、要求仕様書に `元の Issue:` の行を書く。不具合は「今の姿」に根本原因を書く。「進行中の作業」の手順を置く |
+| `skills/requirements-design/SKILL.md`・`references/spec-template.md`・`references/document-roles.md` | 本文へ要求を書く手順と一致の確かめを消し、要求仕様書に `元の Issue:` の行を書く。不具合は「今の姿」に根本原因を書く。設計文書の「進行中の作業」の手順を置く |
 | `skills/design/SKILL.md`・`references/design-template.md`・`references/deliverables.md` | 手順 7 の「仕様のコピーが課題の本文と一致しているか」を消し、要求仕様書を読む |
 | `skills/development-workflow/SKILL.md`・`references/approval-request.md`・`references/agent-layers.md`・`references/glossary.md` | 出所の表を要求仕様書にし、「種類と影響」の行を足す。手で組むプランの例に `--run`・`--mode` を足す |
 | `skills/progress-tracking/SKILL.md` | 受け入れ条件のマーカーを付ける手順を消し、閉じた後の照合し直しと `prune` を置く |
 | `skills/quality-gates/SKILL.md`・`references/design-match.md`・`references/definition-of-done.md`・`skills/fix/SKILL.md`・`skills/pr-review/SKILL.md`・`skills/pr/SKILL.md` | 要求への指摘の直しと実装で変えた条件の直しを要求仕様書の差分にする。PR の本文を要求仕様書へのリンクと `Refs` にする |
-| `skills/release-verification/SKILL.md`・`skills/release/SKILL.md`・`references/release-steps.md` | `acceptance show --release` を 1 回打つ手順、マージの前の証跡を使う条件の確かめ（`git cat-file --batch-check` と `git --literal-pathspecs diff --quiet`）、`record-acceptance`、旧方式の Issue の手順 |
+| `skills/release-verification/SKILL.md`・`skills/release/SKILL.md`・`references/release-steps.md` | `acceptance show --release` を 1 回打つ手順、マージの前の証跡を使う条件の確かめ（`git cat-file --batch-check` と `git --literal-pathspecs diff --quiet`）、`record-acceptance`、旧方式の Issue（設計文書の「マージ済みで残るのがリリース後テストだけの場合」）の手順 |
 | `skills/worktree/SKILL.md`・`skills/document-rebuild/SKILL.md`・`skills/implementation-plan/SKILL.md` | `move-requirements` を打つ手順、まとめた要求仕様書を組にすること、`stamp` を打つ手順と「単位の外」の行 |
 | `docs/glossary/glossary.json`・`docs/glossary.md`・`docs/glossary/ndf-design.md`・`docs/glossary/ndf-workflow.md` | 設計文書の「用語」の表のとおり足す・意味を変える・外す（`ndf records glossary render` で作り直す） |
 | `docs/contracts/commands.md`・`docs/contracts/files.md`・`contracts/domains/ndf-files.json` | 新しいサブコマンドと、要求仕様書・退避先のファイル |
