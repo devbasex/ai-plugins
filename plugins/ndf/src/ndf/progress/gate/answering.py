@@ -621,17 +621,27 @@ def verifier(
     docs_only: DocsOnly,
     revoke: Callable[[list[merge_approval.Revocation]], None],
     forget: Callable[[], None],
+    take: Callable[[], Optional[str]] = lambda: None,
 ) -> Callable[[str, Optional[int]], Optional[str]]:
     """`run.Env.verify`: 工程を進める操作の `recheck` を、作業の排他の中で打つ。排他を待つ間や、回答が作業の排他を取らずに
     書かれる間に対象が変わりうるためである。照らす前に読んだ対象を捨て、ここで読んだ結果を後の判定が使う。同じ回答は
-    照らし直さない。"""
+    照らし直さない。
+
+    `take`（リリースのリクエストへの回答を承認ゲートの回答として書く）は初回に 1 度だけ、照らす前に打つ。`take` が読んだ対象を
+    `recheck` も使い、`take` の知らせと `recheck` の理由をまとめて返す。"""
     checked: set[int] = set()
+    pending = [take]
 
     def verify(machine_id: str, seq: Optional[int]) -> Optional[str]:
         if seq in checked:
             return None
         forget()
-        return recheck(st, machine_id, observe, docs_only, revoke, Recheck(checked=checked, locked=True))
+        took = pending.pop()() if pending else None
+        why = recheck(st, machine_id, observe, docs_only, revoke, Recheck(checked=checked, locked=True))
+        found = [text for text in (took, why) if text is not None]
+        if not found:
+            return None
+        return " / ".join(found)
 
     return verify
 

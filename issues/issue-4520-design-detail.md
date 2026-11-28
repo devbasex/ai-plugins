@@ -451,7 +451,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `approved_seen` | `progress/run_approval.py` | 変更 | `(answers: StageAnswers, root: Path) -> dict \| None` | 直近の開き直しより後で、工程の対象の PR を見た承認だけを返す |
 | `ensure` | `progress/gate/mvv_trail.py` | 新設 | `(hub: GitHub, v: View, answered: Event, now: Target) -> bool` | 記録した `service:mvv` の承認がまだ有効なら、判定の記録へのリンクと担い手 `mvv` の行を持つ証跡を書く |
 | `recheck` | `progress/gate/answering.py` | 変更 | `(st, machine_id, observe, docs_only=never_docs_only, revoke=no_revoke, how=Recheck()) -> str \| None` | 承認の対象を持つ回答は、マージ先と本番への反映を比べる。`how` は、書くか、比べた回答の番号の控え先、呼び手が作業の排他を持つかを渡す |
-| `verifier` | `progress/gate/answering.py` | 新設 | `(st, observe, docs_only, revoke, forget) -> (machine_id, seq) -> str \| None` | `run.Env.verify` に渡す。`next`・`work` の駆動が、最初の手と回答を読む手の前に、作業の排他の中で対象を読んで `recheck` を打つ |
+| `verifier` | `progress/gate/answering.py` | 新設 | `(st, observe, docs_only, revoke, forget, take=…) -> ((machine_id: str, seq: int \| None) -> str \| None)` | 戻り値の関数を `run.Env.verify` に渡す。`next`・`work` の駆動は、作業の排他の中で、最初の手と回答を読む手の前にこの関数を呼ぶ。最初の手では、読む回答が無くても `seq=None` で呼ぶ。関数は対象を読んで `recheck` を打つ。`take`（リリースのリクエストへの回答を承認ゲートの回答として書く）は初回の `recheck` の前に 1 度だけ打ち、読み取りを共有する |
 | `_reading_skipped` | `progress/run.py` | 変更 | `(d, v, s, step, prog) -> list[EventDraft] \| None` | 有効な先の承認がある設計では、読み手役のステップを打たない |
 | `_run_step` | `progress/run.py` | 変更 | `(d: Drive, v: View, s: StageDef, step: StepDef) -> list[EventDraft]` | 否定の回答が残る間は設計の判定のステップの `argv` に `--no-skip` を足し、設計の工程の入力を作り直し用の作業場所へ差し替える |
 

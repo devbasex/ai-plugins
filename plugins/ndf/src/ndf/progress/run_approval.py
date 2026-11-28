@@ -70,7 +70,7 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
 
     省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。同じ呼び出しは判定の前に読んだ対象を持ちうるので、
     続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が読み直して照らしてから読む。
-    読む回答は、呼び手（`run._verified`）が作業の排他の中で対象と照らしてある。
+    読む回答は、呼び手（`run._compared_move`）が作業の排他の中で対象と照らしてある。
     数えない MVV 判定の回答（`model.mvv_answer_void`）と、省けると決めた判定の無い手は、事象を書かずに承認ゲートの待ちを返す（#3959）。
     """
     assert m.stage is not None and m.step is not None and m.progress is not None

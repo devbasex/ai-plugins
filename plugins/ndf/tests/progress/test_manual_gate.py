@@ -628,3 +628,19 @@ def test_an_answer_is_compared_with_the_target_read_under_the_work_lock(repo, st
 
     m = run.decide(run.read(st, tid))
     assert (m.action, m.stage.name) == (run.Action.GATE, DESIGN)
+
+
+def test_the_verifier_takes_the_reply_once_after_dropping_the_earlier_reads(st, env, capsys):
+    tid = _new(capsys)
+    calls: list[str] = []
+    verify = answering.verifier(
+        st,
+        answering.no_observe,
+        answering.never_docs_only,
+        lambda r: None,
+        lambda: calls.append("forget"),
+        lambda: calls.append("take") or "書いた",
+    )
+
+    assert (verify(tid, None), verify(tid, None)) == ("書いた", None)
+    assert calls == ["forget", "take", "forget"]

@@ -522,7 +522,7 @@ def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     return play(d, v, m) if play is not None else report(v, m)
 
 
-def _verified(d: Drive, first: bool) -> tuple[View, Move]:
+def _compared_move(d: Drive, first: bool) -> tuple[View, Move]:
     """次の 1 手を決める。駆動の最初の手と回答を読む手は、先に `Env.verify` で対象と照らし、記録が変われば決め直す。
 
     最初の手でも照らすのは、読んだ後でマージの前の承認を待ちへ戻すことがあるためである。"""
@@ -542,7 +542,7 @@ def _drive(d: Drive) -> dict[str, Any]:
     # 1 手ごとに行かステップが 1 つ進む（行ごとに始めと終わり、ステップごとに流すと回答の読み取り）に、最後の完了の 1 手を
     # 足す。手の数はこの数を超えない。工程の無いステートマシン（開発ループの行。#3558）も完了の 1 手で終わる
     for n in range(3 * (len(first.snap.stages) + len(first.snap.steps())) + 1):
-        v, m = _verified(d, n == 0)
+        v, m = _compared_move(d, n == 0)
         out = _step(d, v, m)
         if out is not None:
             return command.with_warnings(out, before=d.warnings)
