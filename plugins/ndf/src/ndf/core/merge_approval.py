@@ -69,11 +69,13 @@ class MergeRow(NamedTuple):
 
 class Revocation(NamedTuple):
     """取り消す承認。`approvals` は開き直す工程が書いた承認を指す値（回答は記録の識別子、MVV 判定はコメントの URL）、
-    `record_id` は取り消しの行の記録の識別子。"""
+    `record_id` は取り消しの行の記録の識別子。`unconfirmed` は、投稿を試みたことしか分からない承認（回答が DB に確定して
+    いない）で、PR に証跡か失効の行がある場合だけ取り消す。"""
 
     target: MergeTarget
     approvals: frozenset[str]
     record_id: str
+    unconfirmed: bool = False
 
 
 def presented_record_id(gate_id: str, presentation: str | None) -> str:
@@ -212,6 +214,9 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     後で編集・削除されても、取り消した承認を数え直さないためである。`approvals` の承認が無いか、担い手 `reopen` の行で
     失効済みなら書かない（`_not_voided`）。
 
+    `unconfirmed` の取り消しは、PR に指した承認の行か失効の行が無ければ（投稿の前に失敗した）、行も書かず、キューから
+    外すかの判定にも使わない（`_traced`）。
+
     キューから外すのは、残る承認の無い PR と、別のアカウントが `approvals` を今も承認と数える PR（キューに入れたのが
     どの承認かは分からない）。ただし PR の今のマージ先と HEAD が取り消す対象と違い、有効な承認を持つ PR は外さない
     （`_queued_on_another`）。行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
@@ -229,10 +234,14 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     read: dict[int, list[tuple[Authored, MergeRow]]] = {}
     leaving: dict[int, None] = {}
     others: dict[str, None] = {}
-    for target, approvals, record_id in revocations:
+    applied: list[MergeTarget] = []
+    for target, approvals, record_id, unconfirmed in revocations:
         if target.number not in read:
             read[target.number] = list(_unedited_rows(hub.comments(target.number)))
         found = read[target.number]
+        if unconfirmed and not _traced(found, target, approvals, record_id):
+            continue
+        applied.append(target)
         mine = [row for c, row in found if same_writer(c, viewer)]
         live = _live_approvals(mine, target)
         holders = _other_holders(found, viewer, target, approvals)
@@ -246,11 +255,23 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
             row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id, voids=voids)
             publisher.comment(target.number, render_merge_row(row))
     for number in leaving:
-        revoked = [r.target for r in revocations if r.target.number == number]
+        revoked = [t for t in applied if t.number == number]
         hub.dequeue(number, keep=_queued_on_another(hub.repo, number, viewer, read[number], revoked))
     if others:
         names = "・".join(others)
         raise TrailError(f"取り消す承認の証跡を別のアカウント（{names}）が書いている。承認を書いたアカウントで打ち直す")
+
+
+def _traced(found: Sequence[tuple[Authored, MergeRow]], target: MergeTarget, approvals: frozenset[str], record_id: str) -> bool:
+    """`target` への `approvals` の承認の行か、その失効の行（キューから外すのに失敗した打ち直し）が PR にあるか。書き手は問わない。"""
+    for _, row in found:
+        if not row.target.same(target):
+            continue
+        if row.answer == APPROVED and _points_at(approvals, row):
+            return True
+        if row.by == REOPEN_BY and (row.record_id == record_id or not row.voids.isdisjoint(approvals)):
+            return True
+    return False
 
 
 def _queued_on_another(

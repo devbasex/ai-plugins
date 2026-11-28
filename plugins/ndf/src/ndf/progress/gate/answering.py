@@ -30,11 +30,14 @@ from ndf.progress.gate.asking import (
     Target,
     material_path,
     material_sha256,
+    note_posted,
     presented_id,
     question,
+    read_posted,
     read_presented,
     release_request_of,
     waiting,
+    write_posted,
 )
 from ndf.progress.gate.records import record_answer, rejections_path
 from ndf.progress.gate.targets import TargetReader
@@ -264,15 +267,19 @@ def _relayed_by_organizer(conn: Any, q: Question, a: Answer) -> bool:
     return ORGANIZER_ANSWERS.get(str(reply.get("result"))) == a.value
 
 
-def _post_trail(q: Question, a: Answer, seen: Target, by: str, post: Post) -> None:
+def _post_trail(root: Path, q: Question, a: Answer, seen: Target, by: str, post: Post) -> None:
     """照らした承認の対象と提示ごとの識別子（`presented_id`）で証跡の行を作り、`post` で書く。
 
-    同じ提示への送り直しだけが重なりとして書かれない。資料を出し直した後の回答は、出し直す前の提示の証跡があっても書く。"""
+    同じ提示への送り直しだけが重なりとして書かれない。資料を出し直した後の回答は、出し直す前の提示の証跡があっても書く。
+    本番へ反映される承認は、投稿の前に控える（`note_posted`）。"""
     target = seen.binding()
     if target is None or a.value not in _TRAIL_ANSWERS:
         return
     record = presented_id(replace(q, target=seen))
-    post(merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, record))
+    row = merge_approval.MergeRow(_TRAIL_ANSWERS[a.value], by, target, seen.production is True, record)
+    if row.answer == approval_words.APPROVED and row.production:
+        note_posted(root, q.machine_id, q.stage, target, record)
+    post(row)
 
 
 def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]:
@@ -294,7 +301,7 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
             v = run.view(conn, machine_id)
             held = _answered_with_key(v, a.key)
             if held is not None:
-                return _same(held, a, machine_id, lambda: _ensure_trail(conn, v, held, a, post))
+                return _same(held, a, machine_id, lambda: _ensure_trail(st.root, conn, v, held, a, post))
             q, seen = _refusal(v, a, observe, st.root)
             # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
             q = replace(q, target=seen)
@@ -302,7 +309,7 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
             closes = q.gate == RELEASE_GATE and run.step_progress(v, q.stage).held_finish is not None
             by = _trail_by(conn, q, a, seen)
             if by is not None and not (closes and a.value == run.APPROVED):
-                _post_trail(q, a, seen, by, post)
+                _post_trail(st.root, q, a, seen, by, post)
             carried = _carry(conn, machine_id, a.drop, a.reason)
             rejected = _reject_release(conn, q, a)
             extra = {
@@ -350,7 +357,7 @@ def _outputs(v: run.View, q: Question, a: Answer) -> list[model.EventDraft]:
     return [model.EventDraft(stages.OUTPUTS_EVENT, run.ACTOR, q.stage, payload=payload, rev=v.rev)]
 
 
-def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:
+def _ensure_trail(root: Path, conn: Any, v: run.View, held: model.Event, a: Answer, post: Post) -> None:
     """記録済みの回答の証跡が無ければ書く（証跡の後・記録の前でなく、記録の後に止まった送り直し）。
 
     担い手は記録した回答した者（事象の `by`）から決める。送り直しの `a.by` は `_same` が記録と同じことを確かめている。
@@ -377,7 +384,7 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
     )
     by = _trail_by(conn, q, replace(a, by=str(p.get("by"))), seen)
     if by is not None:
-        _post_trail(q, a, seen, by, post)
+        _post_trail(root, q, a, seen, by, post)
 
 
 def _same(held: model.Event, a: Answer, machine_id: str, ensure: Callable[[], None] = lambda: None) -> dict[str, Any]:
@@ -485,22 +492,37 @@ def standing(reader: TargetReader, root: Path) -> approval_decide.StandingOf:
 
 
 def waiting_revocations(root: Path, v: run.View, stage: str) -> list[merge_approval.Revocation]:
-    """工程の待ちを書き直すときに取り消す承認。記録した承認（`approval_decide.stage_revocations`）に、今待っている質問の
-    提示への承認を足す。回答は証跡を投稿した後の DB の確定に失敗しうるので、記録の無い承認は提示の記録から指す。"""
+    """工程の待ちを書き直すときに取り消す承認。記録した承認（`approval_decide.stage_revocations`）に、投稿を試みて回答が
+    記録されていない承認を足す。回答は証跡を投稿した後の DB の確定に失敗しうるので、記録の無い承認は投稿の前の控え
+    （`read_posted`）から指す。控えは資料を出し直しても残る。"""
     found = approval_decide.stage_revocations(v, stage)
-    q = waiting(v)
-    if q is None or q.stage != stage or q.gate not in (DESIGN_GATE, RELEASE_GATE):
-        return found
-    shown = read_presented(root, q)
-    target = shown.binding()
-    if target is None or not shown.production:
-        return found  # 承認の証跡は、本番へ反映される対象を提示した質問への回答だけが書く
-    record = presented_id(replace(q, target=shown))
-    for i, held in enumerate(found):
-        if held.target.same(target):
-            found[i] = held._replace(approvals=held.approvals | {record})
-            return found
-    return [*found, merge_approval.Revocation(target, frozenset({record}), f"reopen:{v.machine_id}:{stage}:{record}")]
+    recorded = _answered_records(v)
+    for held_stage, target, record in read_posted(root, v.machine_id):
+        if held_stage != stage or record in recorded:
+            continue
+        for i, held in enumerate(found):
+            if held.target.same(target):
+                found[i] = held._replace(approvals=held.approvals | {record})
+                break
+        else:
+            reopen_id = f"reopen:{v.machine_id}:{stage}:{record}"
+            found.append(merge_approval.Revocation(target, frozenset({record}), reopen_id, unconfirmed=True))
+    return found
+
+
+def _answered_records(v: run.View) -> set[str]:
+    """記録した回答の、証跡の記録の識別子。"""
+    answered = (run.event_payload(ev) for ev in v.events if ev.draft.kind == run.ANSWERED)
+    return {merge_approval.presented_record_id(str(p.get("gate_id")), Target.from_dict(p.get("seen")).presentation) for p in answered}
+
+
+def forget_posted(root: Path, machine_id: str, revoked: Sequence[merge_approval.Revocation]) -> None:
+    """取り消し終えた承認を控えから消す（次の `reread`・`finish` が、取り消し済みの承認で PR をキューから外さない）。"""
+    done = {record for r in revoked for record in r.approvals}
+    rows = read_posted(root, machine_id)
+    kept = [row for row in rows if row[2] not in done]
+    if len(kept) != len(rows):
+        write_posted(root, machine_id, kept)
 
 
 def no_revoke(revocations: list[merge_approval.Revocation]) -> None:
@@ -755,7 +777,9 @@ def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[st
     with _driving(st, machine_id), store.approval_lock(st, machine_id):
         latest = run.read(st, machine_id)
         if build(latest):
-            env.revoke(waiting_revocations(st.root, latest, stage.name))
+            revoked = waiting_revocations(st.root, latest, stage.name)
+            env.revoke(revoked)
+            forget_posted(st.root, machine_id, revoked)
         written = run.append(st, machine_id, build)
     if not written:
         summary = "確認をやり直す前に回答が書かれた。書かれた回答は ndf progress next で読む"

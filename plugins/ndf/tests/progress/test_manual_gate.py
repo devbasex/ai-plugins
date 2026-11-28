@@ -547,3 +547,44 @@ def test_a_hand_finish_revokes_an_approval_whose_answer_was_not_recorded(repo, s
     out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
 
     assert out["status"] == "ok" and judged() is None, out
+
+
+def _fail_answer(st, tid, repo, env, shown: dict, write=lambda row: True) -> None:
+    """`write` で証跡を扱った後に、回答の確定を失敗させる。"""
+
+    def post_then_fail(row) -> bool:
+        write(row)
+        raise model.Refused("確定に失敗")
+
+    with pytest.raises(model.Refused, match="確定に失敗"):
+        _answer(st, tid, repo, env, shown, post=post_then_fail)
+
+
+@pytest.mark.parametrize("tried", [False, True])
+def test_a_hand_finish_keeps_the_queue_when_no_approval_was_posted(repo, st, env, capsys, tried):
+    """提示しただけの質問と、証跡を投稿する前に失敗した回答は、PR をキューから外さない。"""
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    shown = _next(st, tid, repo, env)
+    if tried:
+        _fail_answer(st, tid, repo, env, shown)
+
+    out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
+
+    assert out["status"] == "ok" and env.hub.dequeued == [] and env.hub.comments_of == {}, out
+
+
+def test_a_hand_finish_revokes_an_unrecorded_approval_after_the_material_was_presented_again(repo, st, env, capsys):
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    shown = _next(st, tid, repo, env)
+    _fail_answer(st, tid, repo, env, shown, answering.github_post(repo, hub=lambda: env.hub))
+    env.hub.files["develop"] = env.hub.files["main"]
+    env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, base="develop")
+    _next(st, tid, repo, env)
+
+    out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})
+
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+    rows = merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer())
+    assert out["status"] == "ok" and merge_approval.merge_judgment(rows, target) is None, out
