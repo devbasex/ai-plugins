@@ -24,7 +24,6 @@ import errno
 import functools
 import os
 import select
-import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -54,6 +53,7 @@ from ndf.domains.relay import (
     stop_signal,
     switch_decide,
     wrapper_fetch,
+    wrapper_winsize,
 )
 from ndf.domains.relay.lane_question import AskPlan
 from ndf.domains.relay.launch_target import Choice, Target
@@ -247,11 +247,7 @@ def spawn_pty(argv: list[str], env: Mapping[str, str], cwd: Path, pass_fds: tupl
     if found is None:
         raise launch_target.NotFound(errno.ENOENT, NOT_FOUND.format(exe=argv[0]))
     argv = [found, *argv[1:]]
-    try:
-        size = os.get_terminal_size(sys.stdout.fileno())
-        dims = (size.lines, size.columns)
-    except OSError:  # 端末でなければ既定の大きさで起動する
-        dims = DEFAULT_DIMS
+    dims = wrapper_winsize.dims() or DEFAULT_DIMS  # 端末でなければ既定の大きさで起動する
     enter = functools.partial(_enter, cwd, tuple(pass_fds))
     return PtyProcess.spawn(argv, env=dict(env), dimensions=dims, preexec_fn=enter, pass_fds=pass_fds)
 
@@ -322,7 +318,8 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
             if not mix.ok:
                 return Ended("precondition", mix.reason)
             try:
-                return self._loop(prompt)
+                with wrapper_winsize.following(lambda: None if self.section is None else self.section.child):
+                    return self._loop(prompt)
             finally:
                 # 例外で抜けても取得のスレッドを残さない（始めた OAuth の更新が資格情報を書き終えるまで待つ）
                 if self.fetcher is not None:
@@ -682,6 +679,7 @@ class Wrapper(GuardSteps, AuthSteps, StopSteps, LaunchSteps, FetchSteps, BusySte
         if target.helper is not None:
             self.section.held = [] if target.held is None else [StopSteps.typed(target.held)]
         self.section.wall_started = begun
+        wrapper_winsize.fit(child)  # 起動の途中で端末の大きさが変わった分を取りこぼさない
         self._advance(prev, req.kind, target.account, started)
         self._write_state("running", f"セグメント {req.number} を始めた")
         log = {"kind": "section", "section": req.number, "session_id": req.session_id, "account": target.account, "resume": req.resume}
