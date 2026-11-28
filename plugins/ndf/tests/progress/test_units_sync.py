@@ -163,10 +163,19 @@ def test_the_approved_documents_are_committed_and_pushed(world):
 
 def test_a_branch_that_already_has_the_approved_head_needs_no_pull_request(world):
     _sh(world.work, "merge", "-q", "--ff-only", "design")
+    _sh(world.work, "push", "-q", str(world.bare), f"HEAD:refs/heads/{SPRINT}")
     _snapshot(world)
 
     assert _sync(world)["status"] == "ok"
     assert world.read == [] and (_sh(world.work, "rev-parse", "HEAD"), _remote(world)) == world.before
+
+
+def test_an_approved_head_only_in_the_local_branch_is_not_taken_as_delivered(world):
+    _sh(world.work, "merge", "-q", "--ff-only", "design")
+    world.pull.merged = False
+    _snapshot(world)
+
+    _untouched(world, _sync(world), "precondition")
 
 
 def test_a_machine_without_an_approval_stops(world):

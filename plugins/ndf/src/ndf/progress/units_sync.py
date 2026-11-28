@@ -136,6 +136,7 @@ class _Sync(NamedTuple):
     branch: str
     record: Mapping[str, Any]
     saved: Path
+    listings: dict[str, dict[str, tuple[str, str, str]]]  # 読んだ一覧。キーは完全な SHA なので、中身は変わらない
 
     @property
     def head(self) -> str:
@@ -167,7 +168,7 @@ def _import_documents(st: store.Store, machine_id: str, cwd: Path, hub: Hub) -> 
     root = Path(git.run("rev-parse", "--show-toplevel").strip())
     saved = run_view.work_root(st.root, machine_id) / DESIGN_SYNC_FILE
     # パスは根からの相対なので、以後の git は根で打つ
-    s = _Sync(Git(root), root, url, str(record["sprint_branch"]), record, saved)
+    s = _Sync(Git(root), root, url, str(record["sprint_branch"]), record, saved, {})
 
     tip: Optional[str] = None
     commit = _recorded_commit(s)
@@ -179,14 +180,17 @@ def _import_documents(st: store.Store, machine_id: str, cwd: Path, hub: Hub) -> 
             _ensure_head(s)
             return _push_documents(s, _documents(s), tip)
     if s.git.commit_or_none(s.head) is not None and s.git.is_ancestor(s.head, "HEAD"):
-        return f"{s.branch} は承認した HEAD を含むので、反映するものは無い"
+        # 手元は古いことがあるので、届いたかは送り先の HEAD で決める
+        tip = tip if tip is not None else _tip(s)
+        if s.git.contained([s.head], tip):
+            return f"{s.branch} は承認した HEAD を含むので、反映するものは無い"
     _check_merged(s, hub)
     _ensure_head(s)
     files = _documents(s)
     if not files:
         return "承認した HEAD に反映する文書が無い"
-    tip = _tip_after_checks(s, files, tip)
-    _commit(s, files)
+    tip, local = _tip_after_checks(s, files, tip)
+    _commit(s, files, local)
     return _push_documents(s, files, tip)
 
 
@@ -249,8 +253,11 @@ def _check_merged(s: _Sync, hub: Hub) -> None:
 
 
 def _listing(s: _Sync, commit: str) -> dict[str, tuple[str, str, str]]:
-    """コミットの `issues/` の直下の項目（(モード, 種類, id)）。"""
-    return {path: entry for path, entry in units_files.Tree(s.root, commit).listing().items() if entry is not None}
+    """コミットの `issues/` の直下の項目（(モード, 種類, id)）。`commit` は完全な SHA で、同じ SHA は 1 回だけ読む。"""
+    if commit not in s.listings:
+        found = units_files.Tree(s.root, commit).listing()
+        s.listings[commit] = {path: entry for path, entry in found.items() if entry is not None}
+    return s.listings[commit]
 
 
 def _documents(s: _Sync) -> list[str]:
@@ -273,20 +280,21 @@ def _differing(s: _Sync, commit: str, files: Sequence[str]) -> list[str]:
     return [path for path in files if now.get(path) != approved.get(path)]
 
 
-def _tip_after_checks(s: _Sync, files: Sequence[str], tip: Optional[str]) -> str:
-    """ファイルを書き換える前に作業場所を確かめ、送り先の HEADを返す。"""
+def _tip_after_checks(s: _Sync, files: Sequence[str], tip: Optional[str]) -> tuple[str, str]:
+    """ファイルを書き換える前に作業場所を確かめ、送り先の HEAD と手元の HEAD の SHA を返す。"""
     dirty = parse_status_z(s.git.run("status", "--porcelain", "-z", "--untracked-files=all", "--", *files))
     if dirty:
         raise _Stop("precondition", f"対象のファイルに未コミットの変更がある: {', '.join(sorted(dirty))}")
     if s.git.commit_or_none("MERGE_HEAD") is not None:
         raise _Stop("precondition", "作業場所がマージの途中である。終えるか中止してから打ち直す")
-    base, ours = _listing(s, s.git.merge_base("HEAD", s.head)), _listing(s, "HEAD")
-    conflicts = [path for path in _differing(s, "HEAD", files) if ours.get(path) != base.get(path)]
+    local = s.git.rev_parse("HEAD")
+    base, ours = _listing(s, s.git.merge_base(local, s.head)), _listing(s, local)
+    conflicts = [path for path in _differing(s, local, files) if ours.get(path) != base.get(path)]
     if conflicts:
         raise _Stop("base_conflict", f"{s.branch} の側も変えていて、承認した中身と違う: {', '.join(conflicts)}")
     tip = tip if tip is not None else _tip(s)
-    _check_outgoing(s, files, tip, s.git.rev_parse("HEAD"))
-    return tip
+    _check_outgoing(s, files, tip, local)
+    return tip, local
 
 
 def _check_outgoing(s: _Sync, files: Sequence[str], tip: str, head: str) -> None:
@@ -295,9 +303,9 @@ def _check_outgoing(s: _Sync, files: Sequence[str], tip: str, head: str) -> None
         raise _Stop("refused", "手元のコミットを公開できないので送らない: " + "; ".join(found))
 
 
-def _commit(s: _Sync, files: Sequence[str]) -> None:
+def _commit(s: _Sync, files: Sequence[str], local: str) -> None:
     """承認した HEAD の中身を、対象のファイルだけのコミットにする。コミットの直後に中断した打ち直しは、コミットしない。"""
-    if _differing(s, "HEAD", files):
+    if _differing(s, local, files):
         s.git.checkout_paths(s.head, files)
         s.git.run("commit", "-q", "-m", _COMMIT_MESSAGE.format(head=s.head), "--", *files)
     plan_files.write_json(s.saved, {"record_head": s.head, "commit": s.git.rev_parse("HEAD")})
