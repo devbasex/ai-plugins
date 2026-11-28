@@ -149,7 +149,7 @@ plugins/ndf/src/ndf/
 | `Doc` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(path: str, source: str, commit: Optional[str], issues: tuple[int, ...], body: str, criteria: tuple[Criterion, ...], criteria_digest: str)` | 読んだ要求仕様書 1 本 |
 | `Lookup` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(docs: dict[int, Doc], missing: tuple[int, ...])` | 番号ごとの要求仕様書と、見つからない番号 |
 | `RequirementsError` | `core/requirements_decide.py` | 新設（例外） | `(cause: str, detail: str, gaps: Sequence[dict[str, str]] = ())` | 読めない理由を結果 JSON の `cause` で持つ |
-| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(text: str) -> str` | 条件の文を設計書の「条件の版を計算する文」の順に整え、SHA-256 の先頭 12 桁を返す |
+| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(block: str) -> str` | `- [ ]` で始まる条件の行（続きの行を含む。書かれたまま）を受け、設計書の「条件の版を計算する文」の順に整えて SHA-256 の先頭 12 桁を返す。記号の無い入力は `ValueError` |
 | `criteria_of` | `core/requirements_decide.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを、字下げした継続の行を含めて上から番号を振って読み、文の重なりを断る |
 | `criteria_list_digest` | `core/requirements_decide.py` | 新設 | `(criteria: Sequence[Criterion]) -> str` | 条件の版を番号の順に改行でつないだ文字列の SHA-256 の先頭 12 桁を返す |
 | `parse_doc` | `core/requirements_decide.py` | 新設 | `(path: str, raw: bytes, *, source: str, commit: Optional[str], repo: str) -> Doc` | バイト列を UTF-8 で読み、元の Issue の行と条件を確かめて `Doc` にする |
@@ -208,7 +208,7 @@ plugins/ndf/src/ndf/
 | --- | --- | --- | --- |
 | `criteria_of` | `core/plan/inputs_decide.criteria` | `core/plan/inputs_decide.py` を読んだ | 使う（番号の数え方を共有する。条件の文は、同じモジュールの `criteria_blocks` で継続の行まで読む） |
 | `criterion_digest`・`criteria_list_digest` | `hashlib.sha256`・`domains/loop/acceptance_decide` の今の表 | `grep -rn sha256 src/ndf/core` | 使う（`hashlib`）。今の確認の表は版を持たないので、版を計算する既存の関数は無い |
-| `parse_doc` | markdown-it-py（`domains/materials/collect._tokens`） | `grep -rn MarkdownIt src/ndf` | 使わない（`inputs_decide.criteria` が行で読んでおり、数え方を変えないため） |
+| `parse_doc` | markdown-it-py（`domains/materials/collect._tokens`） | `grep -rn MarkdownIt src/ndf` | コードブロックの範囲だけに使う（`inputs_decide` が読む）。条件の行は `inputs_decide.criteria` が行で読み、数え方を変えない |
 | `worktree_candidates` | `contracts/worker_paths.open_workdir`・`read_bytes`・`check_owned`・`check_unshared`・`has_acl` | `contracts/worker_paths_open.py` を読んだ | 使う |
 | `tree_candidates` | `Git.blobs`・`adapters/git.REGULAR_MODES` | `adapters/git.py` を読んだ | 使う。ツリーの一覧は新設の `Git.tree_entries` |
 | `base_commit` | `progress.command.base_ref` | `progress/command.py` を読んだ | 使えない（`progress` の層にあり、`core` から呼ぶと層の向きに反する）。`Git.commit_or_none` を使う |

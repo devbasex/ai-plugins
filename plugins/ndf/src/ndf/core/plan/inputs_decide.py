@@ -15,13 +15,16 @@ import re
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional, TypeVar
 
+from markdown_it import MarkdownIt
+from markdown_it.token import Token
+
 HEADING = "## 受け入れ条件"
 CHECKS_HEADING = "## 受け入れ条件の確認"
 CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
-# コードブロックの開閉の行（字下げは 3 つまで）
-_FENCE = re.compile(r"^\s{0,3}(```|~~~)")
+# コードブロックの範囲を読む（リスト項目の中の字下げは、行頭からの字下げの数では判定できない）
+_MARKDOWN = MarkdownIt("commonmark")
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
@@ -72,26 +75,36 @@ def section_lines(body: str, heading: str) -> Optional[list[str]]:
     return out
 
 
-def outside_fences(lines: Iterable[str]) -> Iterator[tuple[int, str]]:
-    """囲み（`_FENCE` に当たる行で開く）の外の行を `(添字 0 始まり, 行)` で返す。囲みの開閉の行は返さない。
+def _code_tokens(lines: Sequence[str], *kinds: str) -> list[Token]:
+    """`lines` のコードブロックのトークン（`kinds` の種類）。`map` は行の添字の範囲。"""
+    # 行の中に残った CR は改行と数えられるので、添字がずれないように空白にする
+    text = "\n".join(line.replace("\r", " ") for line in lines)
+    return [t for t in _MARKDOWN.parse(text) if t.type in kinds and t.map]
 
-    閉じるのは、開いた行と同じ記号が同じ数以上並び、後ろが空白だけの行。
+
+def outside_fences(lines: Iterable[str]) -> Iterator[tuple[int, str]]:
+    """囲み（` ``` ` か `~~~` のコードブロック）の外の行を `(添字 0 始まり, 行)` で返す。囲みの開閉の行は返さない。
+
+    囲みの範囲は CommonMark の解析（markdown-it-py）で決める。リスト項目の中の囲みは、項目の本文の位置から字下げを数える。
     """
-    opened = ""
-    for i, line in enumerate(lines):
-        found = _FENCE.match(line)
-        if found:
-            rest = line[found.start(1) :]
-            after = rest.lstrip(rest[0])
-            marks = rest[: len(rest) - len(after)]
-            if not opened:
-                opened = marks
-                continue
-            if marks.startswith(opened) and not after.strip():
-                opened = ""
-                continue
-        if not opened:
+    found = list(lines)
+    fenced = {i for t in _code_tokens(found, "fence") for i in range(*t.map)}
+    for i, line in enumerate(found):
+        if i not in fenced:
             yield i, line
+
+
+def code_lines(lines: Sequence[str]) -> dict[int, str]:
+    """コードブロックの中身の行の {添字: コードの行}。囲みの開閉の行は含めない。
+
+    コードの行は、リストと囲みに属する字下げだけを除いたもので、コード本体の相対的な字下げと空行は残る。
+    """
+    out: dict[int, str] = {}
+    for token in _code_tokens(lines, "fence", "code_block"):
+        start = token.map[0] + (token.type == "fence")
+        content = token.content.removesuffix("\n").split("\n") if token.content else []
+        out.update(enumerate(content, start))
+    return out
 
 
 def criteria(body: str) -> list[str]:

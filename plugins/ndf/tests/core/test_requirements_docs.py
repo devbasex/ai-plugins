@@ -21,25 +21,25 @@ def _parse(raw: bytes) -> rd.Doc:
 
 
 def test_criterion_digest_is_the_head_of_the_sha256_of_the_sentence() -> None:
-    assert rd.criterion_digest("甲が動く") == hashlib.sha256("甲が動く".encode()).hexdigest()[: rd.DIGEST_CHARS]
+    assert rd.criterion_digest("- [ ] 甲が動く") == hashlib.sha256("甲が動く".encode()).hexdigest()[: rd.DIGEST_CHARS]
     assert rd.DIGEST_CHARS == 12
 
 
-@pytest.mark.parametrize("text", ["  甲が動く  ", "1. 甲が動く", "- [ ] 甲が動く", "- [x] 12. 甲が動く"])
+@pytest.mark.parametrize("text", ["- [ ]   甲が動く  ", "- [ ] 1. 甲が動く", "- [X] 甲が動く", "- [x] 12. 甲が動く"])
 def test_criterion_digest_ignores_the_mark_the_number_and_the_spaces(text: str) -> None:
-    assert rd.criterion_digest(text) == rd.criterion_digest("甲が動く")
+    assert rd.criterion_digest(text) == rd.criterion_digest("- [ ] 甲が動く")
 
 
 def test_criterion_digest_changes_with_the_sentence() -> None:
-    assert rd.criterion_digest("甲が動く") != rd.criterion_digest("甲が動き")
+    assert rd.criterion_digest("- [ ] 甲が動く") != rd.criterion_digest("- [ ] 甲が動き")
     # バージョン番号のような、空白の続かない先頭の数字は文の一部
-    assert rd.criterion_digest("11.0 で動く") != rd.criterion_digest("0 で動く")
+    assert rd.criterion_digest("- [ ] 11.0 で動く") != rd.criterion_digest("- [ ] 0 で動く")
 
 
 def test_criteria_of_numbers_the_checkboxes_from_the_top() -> None:
     got = rd.criteria_of(_doc_text(criteria="- [ ] 1. 甲\n- [x] 乙\n- [ ] 3. 丙\n"))
     assert [(c.number, c.text) for c in got] == [(1, "甲"), (2, "乙"), (3, "丙")]
-    assert [c.digest for c in got] == [rd.criterion_digest(t) for t in "甲乙丙"]
+    assert [c.digest for c in got] == [rd.criterion_digest(f"- [ ] {t}") for t in "甲乙丙"]
 
 
 @pytest.mark.parametrize(("operation", "outcome"), [("取り消す", "公開される"), ("公開する", "下書きのまま")])
@@ -54,15 +54,36 @@ def test_criteria_digests_change_with_the_continuation_lines(operation: str, out
 
 
 def test_criteria_keep_the_brackets_of_the_sentence() -> None:
-    lines = ["- [ ] [x] を表示する", "- [ ] [ ] を表示する"]
+    lines = ["- [ ] [x] を表示する", "- [ ] [ ] を表示する", "- [ ] - [ ] を表示する"]
     got = rd.criteria_of(_doc_text(criteria="".join(f"{line}\n" for line in lines)))
-    assert [c.text for c in got] == ["[x] を表示する", "[ ] を表示する"]
+    assert [c.text for c in got] == ["[x] を表示する", "[ ] を表示する", "- [ ] を表示する"]
     assert [c.digest for c in got] == [rd.criterion_digest(line) for line in lines]
 
 
 def test_criteria_include_the_indented_code_block() -> None:
     got = rd.criteria_of(_doc_text(criteria="- [ ] 次を出力する\n  ```\n  - [ ] OK\n  ## OK\n  ```\n- [ ] 乙\n"))
     assert [c.text for c in got] == ["次を出力する\n```\n- [ ] OK\n## OK\n```", "乙"]
+
+
+def test_criterion_digest_rejects_a_sentence_without_the_mark() -> None:
+    with pytest.raises(ValueError):
+        rd.criterion_digest("甲が動く")
+
+
+def test_criteria_read_the_code_block_deeper_than_the_list_item() -> None:
+    # 項目の本文から 2 つ字下げした囲みの中の `~~~` は中身で、後ろの条件は残る
+    got = rd.criteria_of(_doc_text(criteria="- [ ] 次を出力する\n    ```\n  ~~~\n    ```\n- [ ] 乙\n"))
+    assert [c.text for c in got] == ["次を出力する\n```\n~~~\n```", "乙"]
+
+
+def test_criteria_keep_the_indent_and_the_blank_lines_of_the_code() -> None:
+    def read(code: str) -> rd.Criterion:
+        return rd.criteria_of(_doc_text(criteria=f"- [ ] 次を出力する\n  ```python\n{code}  ```\n"))[0]
+
+    inside = read("  if a:\n      f()\n      g()\n")
+    assert inside.text == "次を出力する\n```python\nif a:\n    f()\n    g()\n```"
+    assert inside.digest != read("  if a:\n      f()\n  g()\n").digest
+    assert inside.digest != read("  if a:\n      f()\n\n      g()\n").digest
 
 
 @pytest.mark.parametrize(

@@ -163,8 +163,8 @@ def test_current_section_lines_fences_headings_and_boundaries():
         "前\n## 対象\r\na\n   ```\n## 囲みの中ではない\nb\n   ```\n```\n## 囲みの中\n~~~\nc\n~~~\n```\n"
         "### 小見出し\n# 上の見出し\nd\n## 対象\ne\n"
     )
-    # 字下げした囲みは囲みとして扱わない。最初の見出しのセクションだけを読み、`#` / `##` の見出しで終わる
-    assert section_lines(body, "## 対象") == ["a", "   ```"]
+    # 字下げが 3 つまでの囲みも囲みとして扱う。最初の見出しのセクションだけを読み、`#` / `##` の見出しで終わる
+    assert section_lines(body, "## 対象") == ["a", "### 小見出し"]
     assert section_lines("## 対象\n", "## 対象") == [""]
     assert section_lines("x", "## 対象") is None
     assert section_lines("## 対象x\n", "## 対象") is None

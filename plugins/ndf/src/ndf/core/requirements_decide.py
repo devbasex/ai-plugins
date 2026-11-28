@@ -1,7 +1,8 @@
 """要求仕様書の型と、読んだバイト列の解析、受け入れ条件のハッシュ値の計算（外部の I/O を持たない。#4735 の決定 2・決定 10）。
 
 条件のハッシュ値は条件の文の SHA-256 の先頭 `DIGEST_CHARS` 桁で、チェックボックスの記号と先頭の番号は文に数えない。
-条件の文は字下げした継続の行（`操作:`・`結果:` など）を含み、各行の前後の空白と空行は数えない。
+条件の文は字下げした継続の行（`操作:`・`結果:` など）を含み、各行の前後の空白と空行は数えない。ただしコードブロックの中は、
+コード本体の相対的な字下げと空行を数える。
 並べ替えとチェックの付け外しでは変わらず、文を直すと変わる。条件一覧のハッシュ値は、条件のハッシュ値を番号の順に
 つないだもののハッシュ値である。
 """
@@ -68,14 +69,32 @@ def _digest(text: str) -> str:
 
 
 def _sentence(text: str) -> str:
-    """チェックボックスの記号より後ろの文を、各行の前後の空白と空行を落とし、先頭の番号を除いた条件の文にする。"""
-    joined = "\n".join(line.strip() for line in text.split("\n") if line.strip())
-    return _NUMBER.sub("", joined, count=1)
+    """チェックボックスの記号より後ろの文を、条件の文にする。
+
+    各行の前後の空白と空行を落とし、先頭の番号を除く。コードブロックの中の行は、リストに属する字下げだけを除いて残す。
+    """
+    first, *rest = text.split("\n")
+    # 先頭の行は記号を除いてあるので、同じ字下げになるリスト項目の行を代わりに置いて、続きの行のコードブロックを読む
+    code = inputs_decide.code_lines(["- x", *rest])
+    lines = [first.strip()] if first.strip() else []
+    for i, line in enumerate(rest, 1):
+        if i in code:
+            lines.append(code[i])
+        elif line.strip():
+            lines.append(line.strip())
+    return _NUMBER.sub("", "\n".join(lines).rstrip("\n"), count=1)
 
 
-def criterion_digest(text: str) -> str:
-    """条件のハッシュ値。`text` は `- [ ] ` から始まる条件の行（続きの行を含めてよい）か、その記号より後ろの文。"""
-    return _digest(_sentence(_CHECKBOX.sub("", text, count=1)))
+def criterion_digest(block: str) -> str:
+    """条件のハッシュ値。`block` は要求仕様書に書かれたままの、`- [ ] ` から始まる条件の行（続きの行を含めてよい）。
+
+    除く記号は行頭の 1 つだけ。記号より後ろの文（`Criterion.text`）は受け取らない（文の先頭の `- [ ]` と区別できない）。
+    行頭に記号が無ければ `ValueError`。
+    """
+    found = _CHECKBOX.match(block)
+    if not found:
+        raise ValueError(f"チェックボックスの行でない: {block!r}")
+    return _digest(_sentence(block[found.end() :]))
 
 
 def criteria_of(body: str) -> tuple[Criterion, ...]:
