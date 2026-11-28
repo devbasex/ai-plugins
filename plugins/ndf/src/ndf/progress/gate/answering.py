@@ -509,9 +509,12 @@ def with_unrecorded(
     """取り消す承認 `revocations` に、工程 `names` で投稿を試みて回答が記録されていない承認を足す。回答は証跡を投稿した後の
     DB の確定に失敗しうるので、記録の無い承認は投稿の前に書いたファイル（`read_posted`）から指す。資料を出し直しても残る。"""
     found = list(revocations)
+    posted = [row for row in read_posted(root, v.machine_id) if row[0] in names]
+    if not posted:
+        return found  # 突き合わせる行が無ければ、回答の記録を走査しない
     recorded = _answered_records(v)
-    for stage, target, record in read_posted(root, v.machine_id):
-        if stage not in names or record in recorded:
+    for stage, target, record in posted:
+        if record in recorded:
             continue
         for i, held in enumerate(found):
             if held.target.same(target):
@@ -570,7 +573,7 @@ def recheck(
     操作と同じ排他（`_driving`）と、回答と共有する排他（`store.approval_lock`）の中で行う。工程を進めない呼び出し（`how.advancing` が偽。`show` など）は、何も取り消さず書かずに、
     違いと次の操作を返す。
 
-    `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
+    `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。工程を進める操作（`next`・`work`）は、作業の排他の中で打つ（`verifier`）。待ちへ戻すのは承認ゲートのステップの
     待ちの記録で、回答はその後の回答だけが読まれる（`run.StepProgress`）。回答が課題を外していれば、同じトランザクションで
     文脈の `issues` を回答の前へ戻し、外した課題を入れたレーンの行を取り消す（回答し直しで同じ課題を外せる）。
     設計 PR に結び付けずに記録した設計の承認（#4495 の直しの前のバージョンの承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
@@ -618,12 +621,13 @@ def verifier(
     docs_only: DocsOnly,
     revoke: Callable[[list[merge_approval.Revocation]], None],
     forget: Callable[[], None],
-    checked: set[int],
-) -> Callable[[str, int], Optional[str]]:
-    """`run.Env.verify`: 作業の排他の中で読む回答のうち、排他の前の `recheck` が照らしていないもの（`checked` に無い番号）を、
-    読み直した対象と照らす。回答は作業の排他を取らないので、`recheck` の後に書かれうる。"""
+) -> Callable[[str, Optional[int]], Optional[str]]:
+    """`run.Env.verify`: 工程を進める操作の `recheck` を、作業の排他の中で打つ。排他を待つ間や、回答が作業の排他を取らずに
+    書かれる間に対象が変わりうるためである。照らす前に読んだ対象を捨て、ここで読んだ結果を後の判定が使う。同じ回答は
+    照らし直さない。"""
+    checked: set[int] = set()
 
-    def verify(machine_id: str, seq: int) -> Optional[str]:
+    def verify(machine_id: str, seq: Optional[int]) -> Optional[str]:
         if seq in checked:
             return None
         forget()

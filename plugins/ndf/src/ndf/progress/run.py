@@ -324,8 +324,9 @@ class Env:
     forget: Callable[[], None] = lambda: None
     # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
     revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None
-    # 読む直前の承認の回答（ステートマシンと事象の番号）を、作業の排他の中で対象と照らす口。待ちへ戻したか繰り上げたら理由を返す
-    verify: Callable[[str, int], Optional[str]] = lambda _machine_id, _seq: None
+    # 回答を対象と照らす口（ステートマシンと、読む回答の事象の番号。回答を読まない最初の手は None）。作業の排他の中で打ち、
+    # 待ちへ戻したか繰り上げたら理由を返す
+    verify: Callable[[str, Optional[int]], Optional[str]] = lambda _machine_id, _seq: None
 
 
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
@@ -521,13 +522,28 @@ def _step(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     return play(d, v, m) if play is not None else report(v, m)
 
 
+def _verified(d: Drive, first: bool) -> tuple[View, Move]:
+    """次の 1 手を決める。駆動の最初の手と回答を読む手は、先に `Env.verify` で対象と照らし、記録が変われば決め直す。
+
+    最初の手でも照らすのは、読んだ後でマージの前の承認を待ちへ戻すことがあるためである。"""
+    while True:
+        v = read(d.st, d.machine_id)
+        m = decide(v)
+        seq = m.event.seq if m.action == Action.CONSUME and m.event is not None else None
+        why = d.env.verify(d.machine_id, seq) if first or seq is not None else None
+        if why is None:
+            return v, m
+        d.warn(why)
+        first = False
+
+
 def _drive(d: Drive) -> dict[str, Any]:
     first = read(d.st, d.machine_id)
     # 1 手ごとに行かステップが 1 つ進む（行ごとに始めと終わり、ステップごとに流すと回答の読み取り）に、最後の完了の 1 手を
     # 足す。手の数はこの数を超えない。工程の無いステートマシン（開発ループの行。#3558）も完了の 1 手で終わる
-    for _ in range(3 * (len(first.snap.stages) + len(first.snap.steps())) + 1):
-        v = read(d.st, d.machine_id)
-        out = _step(d, v, decide(v))
+    for n in range(3 * (len(first.snap.stages) + len(first.snap.steps())) + 1):
+        v, m = _verified(d, n == 0)
+        out = _step(d, v, m)
         if out is not None:
             return command.with_warnings(out, before=d.warnings)
     raise AssertionError("手の数が行とステップの数を超えた")

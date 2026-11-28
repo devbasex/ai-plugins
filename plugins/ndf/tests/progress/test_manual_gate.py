@@ -614,15 +614,15 @@ def test_a_recorded_approval_leaves_no_posted_note(repo, st, env, capsys):
     assert env.hub.comments_of and answering.read_posted(st.root, tid) == []
 
 
-def test_an_answer_written_after_the_recheck_is_compared_before_it_is_consumed(repo, st, env, capsys):
-    """回答は作業の排他を取らないので、`recheck` の後に書かれた回答は `consume` が対象と照らす。"""
+def test_an_answer_is_compared_with_the_target_read_under_the_work_lock(repo, st, env, capsys):
+    """作業の排他を取る前に読んだ対象は使わず、排他の中で読み直して承認を照らす。"""
     tid = _new(capsys)
     _before_design(capsys, repo, tid)
-    _answer(st, tid, repo, env, _next(st, tid, repo, env))
+    _answer(st, tid, repo, env, _next(st, tid, repo, env))  # 回答の確かめが対象を読み、`env.reader` に残る
     env.hub.files["develop"] = env.hub.files["main"]
     env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, base="develop")
     observe = answering.github_observe(repo, st.root, reader=env.reader)
-    verify = answering.verifier(st, observe, answering.never_docs_only, lambda r: None, env.reader.forget, set())
+    verify = answering.verifier(st, observe, answering.never_docs_only, lambda r: None, env.reader.forget)
 
     lanes.turn(st, tid, repo, replace(env.env, verify=verify))
 

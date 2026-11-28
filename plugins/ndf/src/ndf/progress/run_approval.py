@@ -68,9 +68,9 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
 def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     """承認ゲートの回答を読む。回答が無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。
 
-    省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。回答を読む前の検証（`gate.recheck`）はサブコマンドの
-    エントリポイントでだけ打つため、続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が検証を通してから読む。
-    承認は、作業の排他の前の検証より後に書かれたものなら、読む前に対象と照らす（`run.Env.verify`）。
+    省いた回答を書いたら、同じ駆動では読まずに `next` を返して止まる。同じ呼び出しは判定の前に読んだ対象を持ちうるので、
+    続けて読むと判定の後に進んだ PR の head でも承認ゲートを省いてしまう。次の `next` が読み直して照らしてから読む。
+    読む回答は、呼び手（`run._verified`）が作業の排他の中で対象と照らしてある。
     数えない MVV 判定の回答（`model.mvv_answer_void`）と、省けると決めた判定の無い手は、事象を書かずに承認ゲートの待ちを返す（#3959）。
     """
     assert m.stage is not None and m.step is not None and m.progress is not None
@@ -93,10 +93,6 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         return d.proceed(v, m, f"{reason}。回答は検証を通してから読むので next を打つ")
     if event_payload(m.event)["answer"] == APPROVED:
-        why = d.env.verify(v.machine_id, m.event.seq)
-        if why is not None:
-            d.warn(why)  # 待ちへ戻したか繰り上げたので、記録を読み直して次の手を決める
-            return None
         _pass_gate(d, v, m, m.event)
         return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
