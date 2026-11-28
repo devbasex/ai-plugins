@@ -174,22 +174,24 @@
 
 | 単位 | 含むタスク | 満たす受け入れ条件 | 見込みの差分の行数 | 実際の行数 |
 | --- | --- | --- | --- | --- |
-| body-rewrite | Task 1 | 4735:10 | 約 350 | |
-| doc-parse | Task 2 | 4735:2,9 | 約 400 | |
-| doc-history | Task 3 | 4735:7,8 | 約 450 | |
-| doc-lookup | Task 4 | 4735:7〜9 | 約 550 | |
-| doc-commands | Task 5 | 4735:7,8 | 約 500 | |
-| materials | Task 6 | 4735:6,8,9 | 約 200 | |
-| run-output | Task 7 | 4735:2,7 | 約 500 | |
-| move | Task 8 | 4735:2 | 約 600 | |
-| check-table | Task 9 | 4735:7,9 | 約 350 | |
-| check-switch | Task 10・11 | 4735:7〜10 | 約 950 | |
-| pr-body | Task 12・13 | 4735:7〜9 | 約 650 | |
-| release-write | Task 14 | 4735:7,9 | 約 900 | |
-| release-read | Task 15 | 4735:7〜9 | 約 750 | |
-| close-judge | Task 16 | 4735:7,8 | 約 650 | |
-| close-release | Task 17 | 4735:8 | 約 600 | |
-| handbooks | Task 18 | 4735:1〜6 | 約 600 | |
+| body-rewrite | Task 1 | 無し | 約 350 | |
+| doc-parse | Task 2 | 無し | 約 400 | |
+| doc-history | Task 3 | 無し | 約 450 | |
+| doc-lookup | Task 4 | 無し | 約 550 | |
+| doc-commands | Task 5 | 無し | 約 500 | |
+| materials | Task 6 | 無し | 約 200 | |
+| run-output | Task 7 | 無し | 約 500 | |
+| move | Task 8 | 無し | 約 600 | |
+| check-table | Task 9 | 無し | 約 350 | |
+| check-switch | Task 10・11 | 無し | 約 950 | |
+| pr-body | Task 12・13 | 無し | 約 650 | |
+| release-write | Task 14 | 無し | 約 900 | |
+| release-read | Task 15 | 無し | 約 750 | |
+| close-judge | Task 16 | 無し | 約 650 | |
+| close-release | Task 17 | 無し | 約 600 | |
+| handbooks | Task 18 | 無し | 約 600 | |
+
+「満たす受け入れ条件」の欄をすべて「無し」にするのは、この実装を流す NDF が受け入れ条件を Issue の本文から数えるためである。この Issue の受け入れ条件は[要求仕様書](./issue-4735-requirements.md)だけが持ち、本文へはコピーしない。単位ごとの確認は流れず、10 件は完了判定で要求仕様書と照らす。単位と受け入れ条件の番号の対応は次のとおりである: body-rewrite=10、doc-parse=2,9、doc-history=7,8、doc-lookup=7〜9、doc-commands=7,8、materials=6,8,9、run-output=2,7、move=2、check-table=7,9、check-switch=7〜10、pr-body=7〜9、release-write=7,9、release-read=7〜9、close-judge=7,8、close-release=8、handbooks=1〜6。
 
 行数は `git diff --shortstat <ベース>...HEAD` で数える。見込みが 400 行を超える単位は、1 つのモジュールや 1 つのコマンドをテストと一緒に作るので、目安を超える。`check-switch` は、分けるとコマンドと呼び出し元の引数がそろわない。実装の途中で 1,000 行を超えそうなら、その単位をタスクの中の関数の依存の向きで分け直す。
 
