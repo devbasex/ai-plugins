@@ -459,6 +459,13 @@ def _cmd_units(a: argparse.Namespace) -> int:
         return result.emit(result.stopped(TOOL, "precondition", str(exc)))
 
 
+_DESIGN_GATE_HELP = (
+    f"承認ゲートの前の確かめ。{STAGE_INPUT_ENV} に issues、worktree、スプリントブランチを示す branch、レビュー結果の reviewed を渡す。"
+    "位置引数、--issue、--omitted は指定しない。作業場所の HEAD が reviewed.head と一致し、そのコミットの検査を通ると "
+    "outputs.design_units を返す"
+)
+
+
 def _parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=TOOL, description="プランの実行の回を流す・待つ")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -515,7 +522,7 @@ def _parser() -> argparse.ArgumentParser:
     uc.add_argument(
         "--design-gate",
         action="store_true",
-        help=f"承認ゲートの前の確かめ。工程の入力 {STAGE_INPUT_ENV} の reviewed が指すコミットを読み、通れば outputs.design_units を返す",
+        help=_DESIGN_GATE_HELP,
     )
     return p
 

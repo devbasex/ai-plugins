@@ -171,7 +171,7 @@
         },
         "--design-gate": {
           "type": "boolean",
-          "description": "承認ゲートの前の確かめ。工程の入力 NDF_STAGE_INPUT の reviewed が指すコミットを読み、通れば outputs.design_units を返す"
+          "description": "承認ゲートの前の確かめ。NDF_STAGE_INPUT に issues、worktree、スプリントブランチを示す branch、レビュー結果の reviewed を渡す。位置引数、--issue、--omitted は指定しない。作業場所の HEAD が reviewed.head と一致し、そのコミットの検査を通ると outputs.design_units を返す"
         }
       },
       "required": [

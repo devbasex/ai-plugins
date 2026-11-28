@@ -23,7 +23,6 @@ TARGET_KEY = "design_target"
 REVIEW_STAGE_ID, GATE = "document-review", "design"
 IMPLEMENT_DEFINITION = PurePosixPath("workflow/stages/implement.json")
 _RESPLIT = "変更を求めて実装計画を分け直す"
-_REMOTE = "origin"
 
 
 def _stage_by_id(snap: stages.Snapshot, stage_id: str) -> Optional[stages.StageDef]:
@@ -146,13 +145,14 @@ def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mappi
 
 
 def _fetched(g: Git, head: str) -> bool:
-    """コミットが手元にあるか。無ければ 1 回だけ取得する。"""
+    """コミットが手元にあるか。無ければ設定のリモートから 1 回だけ取得する。"""
     for last in (False, True):
         try:
             g.rev_parse(head)
             return True
         except GitError:
-            if last or g.fetch(_REMOTE, head).returncode != 0:
+            # リモート名は取得が要るときだけ求める（`Git.remote()` は git を起動する）
+            if last or g.fetch(g.remote(), head).returncode != 0:
                 break
     return False
 
@@ -165,9 +165,15 @@ def _file_mismatches(approved: units_files.Tree, now: units_files.Tree, issues: 
         return [str(exc)]
     found = [f"{path}: 承認した単位のファイルが無い" for path in sorted(before - after)]
     found += [f"{path}: 承認の時点に無い単位のファイルがある" for path in sorted(after - before)]
-    for path in sorted(before & after):
+    common = sorted(before & after)
+    try:
+        # 読み取りは側ごとに 1 回にまとめる（git の起動をファイル数に比例させない）
+        old, new = approved.read_all(common), now.read_all(common)
+    except units_files.UnitsFileError as exc:
+        return [*found, str(exc)]
+    for path in common:
         try:
-            if units_files.differs(units_files.load(approved, path), units_files.load(now, path)):
+            if units_files.differs(units_files.parse_text(path, old[path]), units_files.parse_text(path, new[path])):
                 found.append(f"{path}: 承認した単位のファイルと中身が違う")
         except units_files.UnitsFileError as exc:
             found.append(str(exc))

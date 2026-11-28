@@ -211,10 +211,11 @@ def find(tree: Tree, issues: Sequence[int], names: Optional[Sequence[str]] = Non
 
 def load(tree: Tree, path: str) -> ud.UnitFile:
     """スキーマとパスを検査して読む。名前が単位のファイルの形なら、名前の番号と中の `issues` の一致も確かめる。"""
-    return _load(path, tree.read(path))
+    return parse_text(path, tree.read(path))
 
 
-def _load(path: str, text: Optional[str]) -> ud.UnitFile:
+def parse_text(path: str, text: Optional[str]) -> ud.UnitFile:
+    """読んだ本文を `load` と同じ検査で解析する。`text` が None（ファイルが無い）なら `UnitsFileError`。"""
     if text is None:
         raise UnitsFileError(f"{path}: 単位のファイルが無い")
     try:
@@ -269,7 +270,7 @@ def _collect(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], 
     found = find(tree, rest, sorted(listing))
     paths = list(dict.fromkeys(found[n] for n in rest if n in found))
     texts = tree.read_all(paths, listing)
-    files = tuple(_load(path, texts[path]) for path in paths)
+    files = tuple(parse_text(path, texts[path]) for path in paths)
     return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found), handled)
 
 
