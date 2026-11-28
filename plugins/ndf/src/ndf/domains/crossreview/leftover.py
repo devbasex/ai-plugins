@@ -301,7 +301,7 @@ class _Filing:
     def known(self) -> None:
         """起票の記録か行の引き継ぎ（`prior_issue`）に URL がある識別値は、その URL が信用する作者のこの指摘の Issue なら、
         起票せず行に書く。違えば URL を捨て、起票の記録か作る候補として扱う。読めなければ起票も採用もしない。Issue はまとめて
-        1 回で読む。"""
+        読む（`GitHub.nodes`）。"""
         recorded = {ident: url for ident in self.rows if (url := self.url_of(ident))}
         carried = {ident: str(row[Filed.PRIOR]) for ident, rows in self.rows.items() for row in rows if row.get(Filed.PRIOR)}
         urls = carried | recorded

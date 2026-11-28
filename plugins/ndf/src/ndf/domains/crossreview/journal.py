@@ -672,8 +672,8 @@ class FindingJournal:
                     self.merged.append(str(known["id"]))
                 continue
             if c.parked:
-                if c.issue:
-                    self.filed[leftover_decide.normalized(c.text)] = c.issue
+                if url := c.issue or c.prior_issue:
+                    self.filed[leftover_decide.normalized(c.text)] = url
                 continue
             fid = self._free_id(c.id)
             row = _journal_row(fid, 0, c.text, _text(c.by), key, _text(c.section))
@@ -682,6 +682,8 @@ class FindingJournal:
             _protect(row, c.protect)
             if c.issue:
                 row[leftover_decide.Filed.URL] = c.issue
+            elif c.prior_issue:
+                row[leftover_decide.Filed.PRIOR] = c.prior_issue
             if not _restore(row, c, items, mvv):
                 unknown.append(fid)
             added.append(fid)

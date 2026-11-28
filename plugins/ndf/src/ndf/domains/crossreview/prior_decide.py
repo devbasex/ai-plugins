@@ -62,7 +62,8 @@ class Carried(NamedTuple):
     """前の実行から引き継ぐ未解決の指摘 1 件。`comment` は開いたままのスレッドの最初のコメントの id（記録のコメントから
     戻した指摘は None）。`mvv` から `unpinned_severity` までは、記録のコメントにある MVV の判定（欄の意味は `report_decide.MARKS`）。
     `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。`protect` は記録のコメントにある
-    保護の種類（#4363）。`parked` は直さずに残した指摘、`issue` は起票した Issue の URL（#3780）。"""
+    保護の種類（#4363）。`parked` は直さずに残した指摘、`issue` は起票した Issue の URL、
+    `prior_issue` は指す Issue をまだ確かめていない起票の URL（#3780）。"""
 
     id: str
     comment: Optional[int]
@@ -81,6 +82,7 @@ class Carried(NamedTuple):
     protect: Sequence[str] = ()
     parked: bool = False
     issue: Optional[str] = None
+    prior_issue: Optional[str] = None
 
 
 # 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）
@@ -192,6 +194,7 @@ def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optiona
         thread=thread if type(thread) is int else None,
         parked=item.get(leftover_decide.PARKED) is True,
         issue=_issue_url(item.get(leftover_decide.Filed.URL)),
+        prior_issue=_issue_url(item.get(leftover_decide.Filed.PRIOR)),
     )
 
 

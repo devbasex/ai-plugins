@@ -319,8 +319,10 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         # 直さずに残した指摘と起票の URL（次の実行は残した指摘を引き継がず、URL だけを戻す。#3780）
         if f.get(leftover_decide.PARKED):
             keep[leftover_decide.PARKED] = True
-        if url := f.get(leftover_decide.Filed.URL):
-            keep[leftover_decide.Filed.URL] = url
+        # 確かめる前の URL は別の欄で残し、別の保存先でも確かめられるようにする
+        for key in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR):
+            if url := f.get(key):
+                keep[key] = url
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):

@@ -528,16 +528,22 @@ def _post_report(
         raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
 
 
-def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: Filer) -> list[str]:
-    """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
-    rows = leftover.candidates(data) if hub.leftovers is not None else []
-    if not rows:
-        return []
+def _filing_target(data: Mapping[str, Any], filer: Filer) -> tuple[Optional[str], Optional[str]]:
+    """起票先の宣言の値と、起票を見送る理由（見送らないか、GitHub にしないと宣言していれば None）。GitHub は呼ばない。"""
     main = filer.locate()
     primary, note = leftover.primary_of(main)
     if primary == leftover.GITHUB and main is not None:
         # 別のリポジトリの設定で起票を許可しない（許可する設定と起票先を同じリポジトリにする）
         note = leftover.unconfirmed_target(main, filer.repo_arg, data.get(store.REPO_KEY))
+    return primary, note
+
+
+def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: Filer) -> list[str]:
+    """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
+    rows = leftover.candidates(data) if hub.leftovers is not None else []
+    if not rows:
+        return []
+    primary, note = _filing_target(data, filer)
     if primary != leftover.GITHUB or note is not None:
         leftover.hold(rows, note)
         # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
@@ -720,15 +726,19 @@ def _report(
     previous = data.get(report_decide.COMMENT_KEY)
     # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
     now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
-    # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す（#3780）
-    retry = any(leftover_decide.Filed.ERROR in row for row in leftover.candidates(data))
+    # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由で見送るだけなら、
+    # 公開済みの記録を使う（#3780）
+    filer = Filer(lambda: cfg.main, repo_arg)
+    errors = [row[leftover_decide.Filed.ERROR] for row in leftover.candidates(data) if leftover_decide.Filed.ERROR in row]
+    skipped = _filing_target(data, filer)[1] if errors else None
+    retry = any(error != skipped for error in errors)
     published = data.get(report_decide.PUBLISHED_KEY) == now and not retry
     if got.reused and isinstance(previous, str) and published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
-        return items, warnings
+        return items, warnings + ([skipped] if skipped else [])
     try:
         # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
-        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of, Filer(lambda: cfg.main, repo_arg))
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of, filer)
         items.append({"kind": "comment", "number": cfg.pr, "url": url})
         warnings += notes
     except ReportFailed as exc:

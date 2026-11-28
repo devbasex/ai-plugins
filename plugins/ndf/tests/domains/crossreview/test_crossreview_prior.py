@@ -476,6 +476,20 @@ def test_issue_3780_2_a_left_finding_is_not_carried_and_its_issue_comes_back() -
     assert (row["parked"], row["prior_issue"]) == (True, url) and "issue" not in row
 
 
+def test_issue_3780_an_unconfirmed_url_is_published_and_restored_apart_from_a_confirmed_one() -> None:
+    url = "https://github.com/o/r/issues/100"
+    row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url}
+    parked = {**row, "parked": True}
+    [item] = report_decide.open_items(report_decide.open_block({"findings": [parked]}))
+    assert item["prior_issue"] == url and "issue" not in item
+    journal = FindingJournal()
+    journal.carry(prior_decide.recorded([_record([parked], {}, "2026-11-20T00:00:00Z")])[0])
+    assert list(journal.filed.values()) == [url]
+    journal.carry(prior_decide.recorded([_record([row], {}, "2026-11-20T00:00:00Z")])[0])
+    [carried] = journal.rows.values()
+    assert carried["prior_issue"] == url and "issue" not in carried
+
+
 def test_broken_leftover_fields_in_the_record_are_ignored() -> None:
     body = report_decide.OPEN_MARK + '[{"id": "r1-1", "text": "A", "parked": "yes", "issue": "秘密の文"}] -->'
     [got] = prior_decide.recorded([prior_decide.Remark("comment", "ndf", report_decide.MARKER + "\n" + body, trusted=True)])[0]
