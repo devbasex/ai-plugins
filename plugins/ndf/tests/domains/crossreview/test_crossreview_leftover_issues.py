@@ -457,6 +457,17 @@ def test_issue_3780_a_carried_url_is_used_only_after_the_issue_is_read() -> None
     assert github.created() == 1
 
 
+def test_issue_3780_a_carried_url_of_the_pr_before_a_rewind_is_used_from_another_state() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    # 巻き直した後の PR 9 を別の保存先で始めると、元の番号が 9 になる
+    again = Run(github, _row(prior_issue=url))
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    assert again.go() == [] and again.row[Filed.URL] == url
+    assert github.created() == 1
+
+
 @pytest.mark.parametrize(("protect", "created"), [pytest.param(["user_data"], 1, id="filed-kind"), pytest.param([], 0, id="other-kind")])
 def test_issue_3780_a_carried_url_of_a_deleted_issue_is_dropped(protect: list, created: int) -> None:
     github = FakeGitHub()

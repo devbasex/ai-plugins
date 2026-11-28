@@ -232,9 +232,15 @@ def matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool:
     return re.search(rf"/pull/{int(origin_pr)}(?!\d)", _prose(listed.body)) is not None
 
 
-def names_finding(listed: Listed, ident: str) -> bool:
-    """起票の記録にある URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。"""
-    return not listed.is_pull and issue_mark(ident) in listed.body
+def names_finding(listed: Listed, ident: str, text: str) -> bool:
+    """起票の記録か引き継ぎの URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。
+
+    目印は、今の識別値 `ident` か、本文の PR の URL の番号（起票時の元の PR）と指摘の本文 `text` の識別値を受ける。PR を
+    巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。"""
+    if listed.is_pull:
+        return False
+    idents = [ident, *(identity(int(pr), text) for pr in re.findall(r"/pull/(\d+)", _prose(listed.body)))]
+    return any(issue_mark(i) in listed.body for i in idents)
 
 
 def _issue_number(url: str, issues_url: str) -> Optional[int]:

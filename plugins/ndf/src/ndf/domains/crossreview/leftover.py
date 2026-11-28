@@ -316,7 +316,7 @@ class _Filing:
                 ident
                 for ident, url in urls.items()
                 if (issue := read[url])
-                and leftover_decide.names_finding(issue, ident)
+                and leftover_decide.names_finding(issue, ident, self.rows[ident][0]["text"])
                 and self._trusts(issue.author, issue.author_id, issue.association)
             }
         except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
