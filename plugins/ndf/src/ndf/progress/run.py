@@ -354,6 +354,11 @@ class Drive:
     def write(self, *drafts: model.EventDraft) -> None:
         _write(self.st, self.machine_id, *drafts)
 
+    def write_if_unchanged(self, v: View, *drafts: model.EventDraft) -> None:
+        """`v` を読んだ後に事象が増えていないときだけ書く。追記が読み直す記録で照らすので、確かめの読み取りは増えない。"""
+        seen = v.events[-1].seq
+        append(self.st, self.machine_id, lambda now: list(drafts) if now.events[-1].seq == seen else [])
+
     def report(self, v: View, m: Move) -> dict[str, Any]:
         return report(v, m)
 

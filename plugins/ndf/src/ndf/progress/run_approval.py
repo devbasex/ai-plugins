@@ -43,6 +43,8 @@ class Hands(Protocol):
 
     def write(self, *drafts: model.EventDraft) -> None: ...
 
+    def write_if_unchanged(self, v: View, *drafts: model.EventDraft) -> None: ...
+
     def synced(self) -> None: ...
 
     def report(self, v: View, m: Move) -> dict[str, Any]:
@@ -83,7 +85,7 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
         # 同じ対象への有効な先の承認があれば、MVV の回答を書かずにそれを使う
         found = standing_approval(d, v, m.stage, m.step)
         if found is not None:
-            _pass_gate(d, v, m, found)
+            d.write(_passed(v, m, found))
             return None
         held = model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
         if held is None:
@@ -93,7 +95,7 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
         d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
         return d.proceed(v, m, f"{reason}。回答は検証を通してから読むので next を打つ")
     if event_payload(m.event)["answer"] == APPROVED:
-        _pass_gate(d, v, m, m.event)
+        d.write(_passed(v, m, m.event))
         return None
     detail = f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）"
     d.refuse(v, m, detail)
@@ -114,20 +116,20 @@ def standing_approval(d: Hands, v: View, s: stages.StageDef, step: stages.StepDe
     return None if _standing(d, v, s, step, found).differences else found
 
 
-def _pass_gate(d: Hands, v: View, m: Move, answered: model.Event) -> None:
-    """承認の回答 `answered` で承認ゲートのステップを済ませる。"""
+def _passed(v: View, m: Move, answered: model.Event) -> model.EventDraft:
+    """承認の回答 `answered` で承認ゲートのステップを済ませる事象。"""
     assert m.stage is not None and m.step is not None and m.progress is not None
     rep = gate_report(m.step, answered)
     payload = {"step": m.step.id, "status": FINISHED, "report": rep, "generation": m.progress.generation}
-    d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev))
+    return model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=payload, rev=v.rev)
 
 
 def prior_approval(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     """自動の流れの承認ゲートの待ち。有効な先の承認があれば質問せずにステップを済ませ、無ければ待ちを返す。
 
     手で終えた回答待ちは、回答を `consume_held` が読むので、ここでは先の承認を使わない。
-    待ちの状態は回答も受けるので、ステップを済ませる書き込みは回答と共有する排他の中で行う。事象が増えていれば何も書かずに
-    None を返し、呼び手が次の手を決め直す。"""
+    待ちの状態は回答も受けるので、ステップを済ませる書き込みは回答と共有する排他の中で行う。書いている回答があれば終わるまで
+    待つ。事象が増えていれば何も書かずに None を返し、呼び手が最新の記録から次の手を決め直す。"""
     assert m.stage is not None
     if m.step is None or m.progress is None or not invoke.is_listen(m.step) or m.progress.held_finish is not None:
         return d.report(v, m)
@@ -135,11 +137,8 @@ def prior_approval(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     if found is None:
         return d.report(v, m)
     # 回答は証跡を投稿してから DB へ確定する。その間にステップを済ませると、PR の却下が DB に残らない
-    with store.approval_lock(d.st, v.machine_id):
-        with store.transaction(d.st) as conn:
-            unchanged = store.last_seq(conn, v.machine_id) == v.events[-1].seq
-        if unchanged:
-            _pass_gate(d, v, m, found)
+    with store.approval_lock_after_answer(d.st, v.machine_id, d.env.sleep):
+        d.write_if_unchanged(v, _passed(v, m, found))
     return None
 
 

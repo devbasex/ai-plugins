@@ -199,7 +199,9 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 - `committed_reopen(v, *, trigger, later, reason) -> list[Event]`（`progress/reopening.py`）は、送り直しの判定に使う開き直しの事象を返す
 - `stage_revocations(v, stage)`（`progress/approval_decide.py`）は、工程に記録した承認に、投稿前の記録（事象 `approval_posting`）に残る、その工程の未確定の承認を加える。資料を出し直す前の記録も調べる。承認の境界より前の記録は、境界を書くときに取り消してあるので加えない。`reread`・`_append_hand_finish`・`_send_back`・`_reopen_unbound`・`consume_held` が使い、`plan_reopen` も同じ規則で未確定の承認を加える
 - `last_seq(conn, machine_id)`（`progress/store.py`）は、最後の事象の番号を返す。`_append_hand_finish` が排他を取った後の確かめに使う
-- `approval_lock(store, machine_id)`（`progress/store.py`）は、承認を書く操作と取り消す操作が共有する排他である。`answer`・`_cmd_retry`・`_send_back`・`_reopen_unbound`・`reread`・`_append_hand_finish`（回答待ちを書くとき）・`consume_held`（質問し直すとき）・`prior_approval`（先の承認でステップを済ませるとき）が使う
+- `approval_lock_after_answer(store, machine_id, sleep)`（`progress/store.py`）は、`approval_lock` が空くのを間隔を空けて待って取り、上限を越えれば断る。`_append_hand_finish`（回答待ちを書くとき）と `prior_approval`（先の承認でステップを済ませるとき）が使う
+- `Drive.write_if_unchanged(v, *drafts)`（`progress/run.py`）は、追記が読み直す記録の最後の事象の番号が `v` と同じときだけ書く。`prior_approval` が使う
+- `approval_lock(store, machine_id)`（`progress/store.py`）は、承認を書く操作と取り消す操作が共有する排他である。`answer`・`_cmd_retry`・`_send_back`・`_reopen_unbound`・`reread`・`consume_held`（質問し直すとき）が使う。`_append_hand_finish` と `prior_approval` は `approval_lock_after_answer` で取る
 - `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は開き直さない。ただし、開き直す工程がリリースしないで終えて無効にした工程（`disabled` の `cause: no_release` と工程名が一致する）には、`later` の値によらず `enabled` を足す
 - `core/merge_approval.py` の証跡の読み取りは、担い手 `reopen` を却下の行でだけ数える。`失効する承認:`（承認を指す値の JSON の並び）を持つ却下は、指した承認だけを取り消す。値を読めなければ、先の承認をすべて取り消す却下として数える
 - 取り消されない操作は、対象の工程のうち、定義がマージかリリースのステップを持ち、工程が終了したか、そのステップの成功を直近の開き直しより後に記録したものを挙げる
@@ -307,6 +309,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `finish` と承認の回答 | 同上 | 承認は作業の排他を取らない | 追記の前に読み直し、番号の条件で追記する |
 | 回答と開き直し | PR の証跡と工程の事象 | 両方が `store.approval_lock` を取り、取れなければ断る | 断られた側は何も書かず、打ち直す |
 | 回答と、回答待ちを書く `finish` | 同上 | `finish` は作業の排他を持ったまま `store.approval_lock` が空くのを待つ。承認の回答は作業の排他を取らないので、待つ間に確定できる | 待つ間に事象が増えていれば、取り消さずに読み直して決め直す。上限を越えたら何も書かずに断る |
+| 回答と、先の承認でゲートを済ませる `next` | 同上 | `next` は作業の排他を持ったまま `store.approval_lock` が空くのを待つ | 待つ間に事象が増えていれば、ゲートを済ませずに次の手を決め直す。上限を越えたら何も書かずに断る |
 
 ### 既存の部品の再利用
 

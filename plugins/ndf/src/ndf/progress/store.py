@@ -19,7 +19,8 @@ import fcntl
 import hashlib
 import logging
 import os
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import UTC, datetime
@@ -666,6 +667,10 @@ def _pg_run_lock(store: Store, machine_id: str) -> Iterator[None]:
             conn.execute(sa.text("SELECT pg_advisory_unlock(:space, :key)"), params)
 
 
+# 書いている回答の終わりを待つ方針（contracts/limits/）
+APPROVAL_WAIT = "progress.approval-lock"
+
+
 @contextmanager
 def approval_lock(store: Store, machine_id: str) -> Iterator[None]:
     """承認を書く操作（`ndf answer` の回答）と取り消す操作（工程の開き直し・承認の待ちへの戻し・手で終える回答待ち）を 1 つに限る。取れなければ待たずに `Refused`。
@@ -677,4 +682,22 @@ def approval_lock(store: Store, machine_id: str) -> Iterator[None]:
             stack.enter_context(run_lock(store, f"{machine_id}#approval"))
         except model.Refused:
             raise model.Refused(f"ステートマシン {machine_id} の回答か開き直しを書いている。終わってから同じコマンドを打ち直す") from None
+        yield
+
+
+@contextmanager
+def approval_lock_after_answer(store: Store, machine_id: str, sleep: Callable[[float], None]) -> Iterator[None]:
+    """`approval_lock` を、書いている回答が終わるまで間隔を空けて取り直す。待ちの上限を越えれば `model.Refused`。
+
+    待つ間に事象が増えうるので、呼び手は排他を取った後に最新の事象で決め直す。"""
+    deadline = time.monotonic() + limits.value(APPROVAL_WAIT, "seconds")
+    with ExitStack() as stack:
+        while True:
+            try:
+                stack.enter_context(approval_lock(store, machine_id))
+                break
+            except model.Refused:
+                if time.monotonic() >= deadline:
+                    raise
+                sleep(limits.value(APPROVAL_WAIT, "interval"))
         yield
