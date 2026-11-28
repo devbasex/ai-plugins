@@ -139,10 +139,11 @@ def revocations(since: Mapping[str, Sequence[model.Event]], machine_id: str, nam
 
 
 def stage_revocations(v: View, stage: str) -> list[merge_approval.Revocation]:
-    """工程の直近の開き直しより後の承認の取り消し。手で終えた回答待ちか質問の出し直しで承認の境界が移るときに、移る前に渡す。"""
-    cut = v.last_reopened(stage)
-    rows = [ev for ev in v.events if ev.draft.row_key == stage and ev.seq > cut]
-    return revocations({stage: rows}, v.machine_id, [stage])
+    """工程の直近の承認の境界（`ends_approvals`）より後の承認の取り消し。手で終えた回答待ちか質問の出し直しで境界が移るときに、
+    移る前に渡す。境界より前の承認は、その境界へ移るときに取り消してある。"""
+    rows = [ev for ev in v.events if ev.draft.row_key == stage]
+    cut = max((ev.seq for ev in rows if ends_approvals(ev)), default=0)
+    return revocations({stage: [ev for ev in rows if ev.seq > cut]}, v.machine_id, [stage])
 
 
 def content_differences(now: Mapping[str, Any], seen: Mapping[str, Any]) -> list[str]:

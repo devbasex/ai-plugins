@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+import contextlib
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional, Protocol
@@ -296,10 +298,10 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
             q, seen = _refusal(v, a, observe, st.root)
             # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
             q = replace(q, target=seen)
-            # 手で終えたデプロイの回答待ちへの回答は、実行済みのリリースの追認で、事前の承認ではない
-            after = q.gate == RELEASE_GATE and run.step_progress(v, q.stage).held_finish is not None
+            # 手で終えたデプロイの回答待ちへの回答は、工程を閉じる確認で、マージの事前の承認ではない
+            closes = q.gate == RELEASE_GATE and run.step_progress(v, q.stage).held_finish is not None
             by = _trail_by(conn, q, a, seen)
-            if by is not None and not (after and a.value == run.APPROVED):
+            if by is not None and not (closes and a.value == run.APPROVED):
                 _post_trail(q, a, seen, by, post)
             carried = _carry(conn, machine_id, a.drop, a.reason)
             rejected = _reject_release(conn, q, a)
@@ -312,7 +314,7 @@ def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_ob
                 "dropped": list(a.drop),
                 "carried_row": carried,
                 "release_request": rejected,
-                **({"after_release": True} if after else {}),
+                **({"closes_stage": True} if closes else {}),
             }
             draft = run.answer_draft(v, q.stage, a.value, a.reason, text, extra)
             drafts = [draft, *_outputs(v, q, a), *_dropped(v, q, a.drop)]
@@ -353,7 +355,7 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
 
     担い手は記録した回答した者（事象の `by`）から決める。送り直しの `a.by` は `_same` が記録と同じことを確かめている。
     承認の境界（`approval_decide.approval_boundary`）より前の回答には書かない（取り消した承認を、送り直しで PR へ戻さない）。
-    追認の承認（`closes_only`）にも書かない。"""
+    工程を閉じるだけの承認（`closes_only`）にも書かない。"""
     p = run.event_payload(held)
     rows = [ev for ev in v.events if ev.draft.row_key == held.draft.row_key]
     if held.seq < approval_decide.approval_boundary(rows, str(p.get("step"))):
@@ -492,10 +494,13 @@ def recheck(
     observe: Observe,
     docs_only: DocsOnly = never_docs_only,
     revoke: Callable[[list[merge_approval.Revocation]], None] = no_revoke,
+    advancing: bool = True,
 ) -> Optional[str]:
     """回答を読む前に、回答した者が見た対象と今の対象を比べる。違えば待ちへ戻し（質問は新しい id）、理由を返す（3364-2）。
     承認の対象を持つ回答は、人の回答も MVV の回答も、マージ先と本番へ反映されるかを比べる（#4520 の懸念 1）。
-    待ちへ戻す前に、`revoke` で PR の証跡の承認を取り消す（取り消せなければ何も書かない）。
+    待ちへ戻す前に、`revoke` で PR の証跡の承認を取り消す（取り消せなければ何も書かない）。取り消しと書き込みは、回答を読む
+    操作と同じ排他（`_driving`）の中で行う。工程を進めない呼び出し（`advancing` が偽。`show` など）は、何も取り消さず書かずに、
+    違いと次の操作を返す。
 
     `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
     待ちの記録で、回答はその後の回答だけが読まれる（`run.StepProgress`）。回答が課題を外していれば、同じトランザクションで
@@ -504,8 +509,9 @@ def recheck(
     待ちへ戻す（`_unbound_approval`・`_reopen_unbound`。#4495）。
     """
     v = run.read(st, machine_id)
+    later = f"。ndf progress next {machine_id} で承認の待ちへ戻す"
     if _unbound_approval(v) is not None:
-        return _reopen_unbound(st, machine_id, revoke)
+        return _reopen_unbound(st, machine_id, revoke) if advancing else UNBOUND_REASON + later
     m = run.decide(v)
     if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
         return None
@@ -520,25 +526,47 @@ def recheck(
     texts = replace(now, head=None).differs(seen)
     if now.binding() is not None:  # 今の対象が分かるときだけ比べる（ほかの項目と同じ）
         texts += approval_decide.binding_differences(now.as_dict(), seen.as_dict())
-    if p.get("by") == model.MVV_SERVICE:
-        moved = _judged_elsewhere(p, q, seen, now)
-    elif seen.head is None or now.head is None or seen.head == now.head:
-        moved = _material_moved(st.root, q, seen)
-    elif not seen.production and not texts and _docs_only_after(st.root, q, seen, now, docs_only):
+    # 本文か題が違えば、文書だけの範囲でも繰り上げない
+    moved, carried = _moved(st.root, p, q, now, never_docs_only if texts else docs_only)
+    if carried:
+        if not advancing:
+            return None
         _accept(st.root, q, now)
         return f"承認の後に加わった範囲（{seen.head} → {now.head}）は文書だけなので、リリース承認ゲートを出し直さずに新しい範囲で進める"
-    else:
-        moved = f"head の SHA（見た値 {seen.head}・今の値 {now.head}）"
     changed = [*([moved] if moved else []), *texts]
     if not changed:
         return None
     why = "回答した後に対象が変わった: " + " / ".join(changed)
-    _send_back(st, v, m, why, revoke)
-    return why
+    if not advancing:
+        return why + later
+    return why if _send_back(st, v, m, why, revoke) else None
 
 
-def _send_back(st: store.Store, v: run.View, m: run.Move, why: str, revoke: Callable[[list[merge_approval.Revocation]], None]) -> None:
-    """読む前の回答 `m.event` の承認の証跡を取り消してから、承認ゲートの待ちへ戻す（`recheck` の書き込み）。"""
+def _moved(root: Path, p: Mapping[str, Any], q: Question, now: Target, docs_only: DocsOnly) -> tuple[Optional[str], bool]:
+    """回答の payload `p` が見た head と承認資料の、今との違いの文（無ければ None）と、加わった範囲が文書だけで出し直さずに
+    繰り上げるか（`recheck` の比較）。"""
+    seen = Target.from_dict(p.get("seen"))
+    if p.get("by") == model.MVV_SERVICE:
+        return _judged_elsewhere(p, q, seen, now), False
+    if seen.head is None or now.head is None or seen.head == now.head:
+        return _material_moved(root, q, seen), False
+    if not seen.production and _docs_only_after(root, q, seen, now, docs_only):
+        return None, True
+    return f"head の SHA（見た値 {seen.head}・今の値 {now.head}）", False
+
+
+@contextlib.contextmanager
+def _driving(st: store.Store, machine_id: str) -> Iterator[None]:
+    """回答を読む操作（`next`・`work`）と同じ排他。起動した側が放すまで待ち、取れなければ `model.Refused`。"""
+    with contextlib.ExitStack() as stack:
+        if not run._work_lock(stack, st, machine_id, time.sleep):
+            raise model.Refused(f"ステートマシン {machine_id} を流す作業が動いている。ndf progress wait {machine_id} で終わりを待つ")
+        yield
+
+
+def _send_back(st: store.Store, v: run.View, m: run.Move, why: str, revoke: Callable[[list[merge_approval.Revocation]], None]) -> bool:
+    """読む前の回答 `m.event` の承認の証跡を取り消してから、承認ゲートの待ちへ戻す（`recheck` の書き込み）。
+    回答が先に読まれていれば、何も取り消さず書かずに偽を返す。"""
     assert m.event is not None and m.stage is not None and m.step is not None and m.progress is not None
     p = run.event_payload(m.event)
     draft = _no_report_draft(v, m.stage.name, m.step.id, "waiting", m.progress.generation, why)
@@ -557,8 +585,13 @@ def _send_back(st: store.Store, v: run.View, m: run.Move, why: str, revoke: Call
         if undo:
             _uncarry(conn, v.machine_id, p.get("carried_row"), why)
 
-    revoke(approval_decide.stage_revocations(v, stage))
-    run.append(st, v.machine_id, build, after)
+    with _driving(st, v.machine_id):
+        latest = run.read(st, v.machine_id)
+        if not _still(latest, answered):
+            return False
+        revoke(approval_decide.stage_revocations(latest, stage))
+        run.append(st, v.machine_id, build, after)
+    return True
 
 
 # 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）
@@ -638,11 +671,12 @@ def _reopen_unbound(st: store.Store, machine_id: str, revoke: Callable[[list[mer
         if held:
             _uncarry(conn, machine_id, run.event_payload(held[0].answered).get("carried_row"), UNBOUND_REASON)
 
-    v = run.read(st, machine_id)
-    found = _unbound_approval(v)
-    if found is not None:
-        revoke(approval_decide.stage_revocations(v, found.stage.name))
-    run.append(st, machine_id, build, after)
+    with _driving(st, machine_id):
+        v = run.read(st, machine_id)
+        found = _unbound_approval(v)
+        if found is not None:
+            revoke(approval_decide.stage_revocations(v, found.stage.name))
+        run.append(st, machine_id, build, after)
     return UNBOUND_REASON if held else None
 
 
@@ -696,8 +730,13 @@ def reread(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[st
         wait = _no_report_draft(now, stage.name, step.id, "waiting", n.progress.generation, REREAD_REASON)
         return [wait, *_reading_reset(now, stage.name, step.gate)]
 
-    env.revoke(approval_decide.stage_revocations(v, stage.name))
-    if not run.append(st, machine_id, build):
+    # 回答（`approval_lock`）と回答を読む操作を止めてから、待ちが同じと確かめて取り消し、書き直す
+    with store.approval_lock(st, machine_id), _driving(st, machine_id):
+        latest = run.read(st, machine_id)
+        if build(latest):
+            env.revoke(approval_decide.stage_revocations(latest, stage.name))
+        written = run.append(st, machine_id, build)
+    if not written:
         summary = "確認をやり直す前に回答が書かれた。書かれた回答は ndf progress next で読む"
         return result.result(
             TOOL, result.OK, summary, metrics={"machine_id": machine_id}, next=result.command("progress", "next", machine_id)

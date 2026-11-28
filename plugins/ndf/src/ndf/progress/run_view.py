@@ -183,8 +183,9 @@ def ends_approvals(ev: model.Event) -> bool:
 
 
 def closes_only(payload: Mapping[str, Any]) -> bool:
-    """回答が、実行済みのリリースを持つ工程を閉じるだけの承認（追認 `after_release`）か。マージや後の操作の承認に数えない。"""
-    return payload.get("after_release") is True
+    """回答が、手で終えた工程を閉じるだけの確認（`closes_stage`）か。マージや後の操作の承認に数えない。
+    リリースの実行は確かめていないので、追認とは記録しない。"""
+    return payload.get("closes_stage") is True
 
 
 _UNSEEN: Any = object()

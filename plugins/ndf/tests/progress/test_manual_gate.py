@@ -488,3 +488,19 @@ def test_a_hand_finished_deploy_revokes_the_old_approval_and_its_answer_does_not
     assert gate.approved_head(run.read(st, tid), "release") is None
     _next(st, tid, repo, env)
     assert _state(st, tid, DEPLOY) == "finished" and judged(merge_hub.OTHER) is None
+
+
+def test_a_refused_finish_and_a_non_advancing_recheck_revoke_nothing(repo, st, env, capsys):
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    _answer(st, tid, repo, env, _next(st, tid, repo, env))
+    _merge(env, merge_hub.OTHER)
+    before = _kinds(st, tid, DESIGN)
+
+    assert _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})["cause"]["kind"] == "refused"
+    env.reader.forget()
+    observe = answering.github_observe(repo, st.root, reader=env.reader)
+    why = gate.recheck(st, tid, observe, revoke=lambda r: pytest.fail("取り消した"), advancing=False)
+
+    assert why is not None and "ndf progress next" in why
+    assert env.hub.dequeued == [] and _kinds(st, tid, DESIGN) == before

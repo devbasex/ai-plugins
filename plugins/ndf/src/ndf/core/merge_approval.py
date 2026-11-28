@@ -213,7 +213,8 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     失効済みなら書かない（`_not_voided`）。
 
     キューから外すのは、残る承認の無い PR と、別のアカウントが `approvals` を今も承認と数える PR（キューに入れたのが
-    どの承認かは分からない）。行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
+    どの承認かは分からない）。ただし PR の今のマージ先と HEAD が取り消す対象と違い、有効な承認を持つ PR は外さない
+    （`_queued_on_another`）。行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
     打ち直しでも外す。
 
     別のアカウントに `reopen` の行で失効させていない `approvals` の承認があるなら、token の利用者の分を書いてキューから外した後に `TrailError`
@@ -245,10 +246,25 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
             row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id, voids=voids)
             publisher.comment(target.number, render_merge_row(row))
     for number in leaving:
-        hub.dequeue(number)
+        if not _queued_on_another(hub, viewer, read[number], [r.target for r in revocations if r.target.number == number]):
+            hub.dequeue(number)
     if others:
         names = "・".join(others)
         raise TrailError(f"取り消す承認の証跡を別のアカウント（{names}）が書いている。承認を書いたアカウントで打ち直す")
+
+
+def _queued_on_another(hub: GitHub, viewer: Viewer, found: Sequence[tuple[Authored, MergeRow]], revoked: Sequence[MergeTarget]) -> bool:
+    """PR の今の対象（マージ先と HEAD。キューに入っている PR はこれが対象）が、取り消す対象 `revoked` のどれとも違い、
+    token の利用者の有効な承認を持つか。そうならキューから外さない。PR は、別の対象の有効な承認があるときだけ読む。"""
+    mine = [row for c, row in found if same_writer(c, viewer)]
+
+    def kept(target: MergeTarget) -> bool:
+        return not any(target.same(r) for r in revoked) and bool(_live_approvals(mine, target))
+
+    if not any(kept(row.target) for row in mine):
+        return False
+    pull = hub.pull(revoked[0].number)
+    return kept(MergeTarget(hub.repo, revoked[0].number, pull.base_ref, pull.head_sha))
 
 
 def _not_voided(rows: Sequence[MergeRow], target: MergeTarget, approvals: frozenset[str]) -> bool:

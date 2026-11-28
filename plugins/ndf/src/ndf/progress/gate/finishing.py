@@ -261,7 +261,8 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
     held = _standing_answer(v, read, cwd, st.root) is None
     drafts, dropped = _finish_drafts(a, v, read, held)
     if held:
-        # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す
+        # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す。回答待ちを書けない状態なら、取り消す前に断る
+        model.check_event("sprint", model.rows_for("sprint", v.events, drafts[0]), v.whole, drafts[0])
         revoker(shared_hub(cwd), "回答待ちを書かない")(approval_decide.stage_revocations(v, a.stage))
     with store.transaction(st) as conn:
         return held, store.append_events(conn, a.machine_id, drafts, v.events[-1].seq), dropped

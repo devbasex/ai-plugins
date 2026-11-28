@@ -602,7 +602,8 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     seen = observe if observe is not None else github_observe(cwd, st.root, hub, reader)
     took = _took(st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
     revoke = finishing.revoker(hub, "承認の待ちを書き直さない")
-    why = recheck(st, a.machine_id, seen, git_docs_only(cwd), revoke)
+    # 承認の取り消しと待ちの書き直しは、工程を進める操作だけで行う
+    why = recheck(st, a.machine_id, seen, git_docs_only(cwd), revoke, a.action in ("next", "work"))
     out = run.COMMANDS[a.action](run.with_env(a, _drive_env(st, reader, revoke)), cwd, st)
     if a.action in ("wait", "work"):
         reader.forget()  # 待ちと作業の間に PR が変わりうるので、承認資料は読み直した対象で作る
