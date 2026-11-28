@@ -271,6 +271,13 @@
       "source": "plugins/ndf/skills/development-workflow/references/glossary.md"
     },
     {
+      "term": "要求仕様書",
+      "context": "ndf-design",
+      "meaning": "Issue の報告をもとに現状と根本原因を調べ、解決の要求と受け入れ条件を書く、要求の正のファイル（`issues/issue-<番号の並び>-requirements.md`）",
+      "source": "",
+      "pending_source": "issues/issue-4735-design.md"
+    },
+    {
       "term": "待ち通知",
       "context": "ndf-notification",
       "meaning": "利用者の回答か承認が無いと進まない時点で、Slack へ送る知らせ",
@@ -3950,8 +3957,9 @@
     {
       "term": "受け入れ条件の番号",
       "context": "ndf-workflow",
-      "meaning": "課題の本文の `## 受け入れ条件` のセクションで、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く",
-      "source": "docs/specifications/ndf-sprint-close-acceptance-criteria.md"
+      "meaning": "要求仕様書の `## 受け入れ条件` のセクションで、コードブロックの外にある行頭のチェックボックスの行を上から数えた順（1 から）。リリース後テストの表の `受け入れ条件` の列は、セルの頭に `<番号>.` で書く",
+      "source": "docs/specifications/ndf-sprint-close-acceptance-criteria.md",
+      "pending_source": "issues/issue-4735-design.md"
     },
     {
       "term": "受け入れ条件のマーカー",

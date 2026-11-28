@@ -9,6 +9,7 @@
 | モデルレビュー | — | 設計 PR のレビューの 1 ラウンド目。ドメインモデルのセクションだけを見る | モデルの段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 詳細レビュー | — | 設計 PR のレビューの 2 ラウンド目以降。確定したモデルを前提に残りを見る | 詳細の段 | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
 | 仕様のコピー | — | 課題の本文にある要求を、設計 PR と一緒にコミットする `issues/` のファイル | 仕様の写し | — | `plugins/ndf/skills/development-workflow/references/glossary.md` |
+| 要求仕様書 | — | Issue の報告をもとに現状と根本原因を調べ、解決の要求と受け入れ条件を書く、要求の正のファイル（`issues/issue-<番号の並び>-requirements.md`） | — | — | — |
 | 人へ残す判断 | — | 設計文書のうち、レッドラインに当たるため設計者（AI）が決めずに承認ゲートで人が決める判断。判断ごとに当たるレッドラインの番号となぜ当たるかを書く。番号を挙げられない判断は人へ残さず、設計者が決める | — | — | `docs/specifications/ndf-design-ai-decisions-and-mvv-gate.md` |
 | 系統（決定番号の） | — | 決定番号が一意に決まる設計文書の集まり。#1142 では `decisions`・`dbos`・`smells`・`data`・`scripted-flow`・`fixes`・`next` の 7 つ。重なる番号は `決定 73（fixes）` のように系統を添えて書く | — | — | `docs/specifications/ndf-rebuild.md` |
 | 設計 Pull Request | — | 要求仕様と設計文書だけを載せ、実装を含まない Pull Request。変更ファイルに issues/ の要求・設計・決定の記録を含む | — | — | `docs/specifications/ndf-design-phase.md` |
