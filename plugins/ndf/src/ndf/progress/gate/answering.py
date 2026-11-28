@@ -502,6 +502,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     文脈の `issues` を回答の前へ戻し、外した課題を入れたレーンの行を取り消す（回答し直しで同じ課題を外せる）。
     設計 PR に結び付けずに記録した設計の承認（#4495 の直しの前のバージョンの承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
     待ちへ戻す（`_unbound_approval`・`_reopen_unbound`。#4495）。
+    承認の記録を持つ工程の却下は比べない（`design.stops_regardless`）。
     """
     v = run.read(st, machine_id)
     if _unbound_approval(v) is not None:
@@ -510,7 +511,7 @@ def recheck(st: store.Store, machine_id: str, observe: Observe, docs_only: DocsO
     if m.action != run.Action.CONSUME or m.event is None or m.stage is None or m.step is None or m.progress is None:
         return None
     p = run.event_payload(m.event)
-    if "gate_id" not in p:
+    if "gate_id" not in p or design.stops_regardless(v, m.stage, p):
         return None
     q = question(v, replace(m, action=run.Action.GATE))
     # head を先に照らし、資料はその結論に要る 1 つだけを読む（#3959）。本文と題は head と同じ 1 回の取得で比べる（#4446）

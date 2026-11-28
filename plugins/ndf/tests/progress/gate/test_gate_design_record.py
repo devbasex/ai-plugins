@@ -292,23 +292,28 @@ def test_a_move_after_the_approval_starts_the_review_over(st, machine, change):
     assert run.decide(v).step.id == "design-pr-review"
 
 
-@pytest.mark.parametrize("value", ["rejected", "request_changes"])
-def test_a_base_change_after_a_non_approval_starts_the_review_over(st, repo, machine, tmp_path, value):
+@pytest.mark.parametrize("change", [{"head": "b" * 40}, {"base": "sprint/x"}])
+def test_a_rejection_stops_the_sprint_even_if_the_pr_moved_afterwards(st, machine, change):
     machine.turn()
-    shown = _present(st, machine.tid, repo, _observe(machine))
+    _answer(st, machine.tid, _observe(machine), "rejected")
+
+    assert gate.recheck(st, machine.tid, _observe(machine, **change)) is None
+    machine.turn()
+
+    assert run.decide(run.read(st, machine.tid)).action == run.Action.FAILED
+
+
+def test_a_change_request_returns_to_the_review_when_it_is_answered(st, machine, tmp_path):
+    machine.turn()
     notes = tmp_path / "notes.md"
     notes.write_text("直す", encoding="utf-8")
-    argv = shown["routes"][value]["argv"]
-    seen = gate.Target(machine.head, argv[argv.index("--material-sha256") + 1], presentation=argv[argv.index("--presentation") + 1])
-    q = gate.waiting(run.read(st, machine.tid))
-    extra = {"notes": notes} if value == "request_changes" else {}
-    gate.answer(st, machine.tid, gate.Answer(q.id, value, "理由", "human:reviewer", "k1", seen=seen, **extra), _observe(machine))
 
-    why = gate.recheck(st, machine.tid, _observe(machine, base="sprint/x"))
+    _answer(st, machine.tid, _observe(machine), "request_changes", notes=notes)
 
-    assert why is not None
+    v = run.read(st, machine.tid)
     assert _done(st, machine.tid) == []
-    assert run.decide(run.read(st, machine.tid)).step.id == "design-pr-review"
+    assert run.step_progress(v, REVIEW).notes == "直す"
+    assert run.decide(v).step.id == "design-pr-review"
 
 
 def test_an_unchanged_pr_is_not_reset_after_the_approval(st, machine):

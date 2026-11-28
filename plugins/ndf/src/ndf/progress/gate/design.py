@@ -44,19 +44,20 @@ def reset(v: run.View, q: Question, why: str) -> list[model.EventDraft]:
     return design_record.reset_drafts(v, v.snap.stage(q.stage), why)
 
 
-def moved_after_answer(v: run.View, q: Question, payload: Mapping[str, Any], now: Target) -> Optional[str]:
-    """回答が見た PR と今の PR（head かマージ先など）の違い。違わないか、対象の無い回答・読めない PR なら None。
+def stops_regardless(v: run.View, stage: stages.StageDef, payload: Mapping[str, Any]) -> bool:
+    """対象が変わっても読んで工程を止める回答（承認の記録を持つ工程の却下）か。
 
-    承認は回答の記録と照らす。記録を持たない回答（却下・変更要求）は、回答の確定時に保存した見た対象（`seen`）と照らす。
+    待ちや未了へ戻すと却下が読まれず、利用者の判断の無いままレビューが再開する。
     """
-    if _stage_of(v, q) is None or now.pr is None or now.head is None:
-        return None
+    rejected = payload.get("answer") == run.REJECTED and payload.get("gate") == DESIGN_GATE
+    return rejected and design_record.applies(v.snap, stage)
+
+
+def moved_after_answer(v: run.View, q: Question, payload: Mapping[str, Any], now: Target) -> Optional[str]:
+    """承認した回答の記録と今の PR（head かマージ先など）の違い。違わないか、記録の無い回答・読めない PR なら None。"""
     record = payload.get(design_record.TARGET_KEY)
-    if not isinstance(record, Mapping):
-        seen = Target.from_dict(payload.get("seen")).binding()
-        if seen is None:
-            return None
-        record = {"review": {"repo": seen.repo, "pr": seen.pr, "head": seen.head, "base": seen.base}}
+    if _stage_of(v, q) is None or not isinstance(record, Mapping) or now.pr is None or now.head is None:
+        return None
     return design_record.moved(record, now.repo, now.pr, now.head, now.base)
 
 
