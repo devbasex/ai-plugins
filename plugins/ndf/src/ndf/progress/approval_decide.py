@@ -119,12 +119,13 @@ def skip_barred(rows: Sequence[model.Event], gate: Optional[str], judged_step: O
     return objection_remains(rows, gate) or rejection_posted_after(rows, gate, judged)
 
 
-def objection_bars_skip(rows: Sequence[model.Event], step_id: str) -> bool:
-    """判定のステップ `step_id` の MVV 判定を、省かない指定で打つか。`rows` はその工程のすべての事象。
+def objection_bars_skip(rows: Callable[[], Sequence[model.Event]], step_id: str) -> bool:
+    """判定のステップ `step_id` の MVV 判定を、省かない指定で打つか。`rows` はその工程のすべての事象を返し、設計の
+    MVV 判定のステップだけで呼ぶ（他のステップで記録を走査しない）。
 
     省かない指定の判定は読み手役のステップを流し、承認ゲートで人へ問う材料をそろえる。
     工程を流す側（`next`）と `ndf records mvv gate --machine` の両方がここで決める（#4520）。"""
-    return step_id == model.MVV_GATE_STEPS[DESIGN_GATE] and objection_remains(rows, DESIGN_GATE)
+    return step_id == model.MVV_GATE_STEPS[DESIGN_GATE] and objection_remains(rows(), DESIGN_GATE)
 
 
 def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:

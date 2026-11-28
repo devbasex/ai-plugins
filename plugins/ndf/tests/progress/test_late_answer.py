@@ -499,64 +499,35 @@ def test_an_mvv_row_is_not_written_over_a_user_rejection():
     assert len(hub.comments(DESIGN_PR)) == 1
 
 
-@pytest.mark.parametrize(("account", "association", "stops"), [(1, "OWNER", True), (2, "COLLABORATOR", True), (2, "NONE", False)])
-def test_an_mvv_approval_posted_after_a_user_rejection_does_not_merge(account, association, stops):
-    """投稿と重なって却下の後に載った MVV の承認は、別のアカウントの却下でも数えない。外部の人の却下は数えない。"""
-    hub = merge_hub.MergeHub()
+def _trail(hub, answer: str, by: str, record: str) -> Authored:
+    """token の利用者が書いた、設計の PR の証跡のコメント。"""
     target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
-    rejected = merge_approval.render_merge_row(merge_approval.MergeRow("rejected", "user", target, True, "plan:answer:1"))
-    approved = merge_approval.render_merge_row(merge_approval.MergeRow("approved", "mvv", target, True, "mvv:1"))
-    hub.comments_of[DESIGN_PR] = [
-        Authored("someone", association, rejected, author_id=account),
-        Authored(hub.login, "OWNER", f"{merge_approval.MVV_NOTE_HEADING}design）\n\n{approved}", author_id=hub.account_id),
-    ]
+    voids = frozenset({"b"}) if by == "reopen" else frozenset()
+    body = merge_approval.render_merge_row(merge_approval.MergeRow(answer, by, target, True, record, voids=voids))
+    if by == "mvv":
+        body = f"{merge_approval.MVV_NOTE_HEADING}design）\n\n{body}"
+    return Authored(hub.login, "OWNER", body, author_id=hub.account_id)
 
+
+def _judged(hub) -> str | None:
+    """今の対象で数える最新の承認の記録の識別子。"""
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
     found = merge_approval.merge_judgment(merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer()), target)
+    return None if found is None else found.record_id
 
-    assert (found is None) is stops
 
-
-@pytest.mark.parametrize(("approver", "stops"), [(2, False), (3, True)])
-def test_a_later_approval_withdraws_only_the_same_writers_rejection(approver, stops):
-    """別のアカウントの却下は同じ書き手の後の承認で取り下がる。その承認だけではマージを許さない。"""
+@pytest.mark.parametrize("order", [("rejected", "mvv:1"), ("mvv:1", "rejected")])
+def test_approving_again_does_not_revive_an_mvv_approval_from_before_or_during_a_rejection(order):
+    """却下の前か却下中の MVV の承認は、承認し直した後も数えない。承認し直した後の MVV の承認は数える。"""
     hub = merge_hub.MergeHub()
-    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+    posted = {"rejected": _trail(hub, "rejected", "user", "a"), "mvv:1": _trail(hub, "approved", "mvv", "mvv:1")}
+    hub.comments_of[DESIGN_PR] = [posted[name] for name in order]
+    assert _judged(hub) is None
 
-    def body(answer: str, by: str, record: str) -> str:
-        row = merge_approval.render_merge_row(merge_approval.MergeRow(answer, by, target, True, record))
-        return f"{merge_approval.MVV_NOTE_HEADING}design）\n\n{row}" if by == "mvv" else row
+    hub.comments_of[DESIGN_PR].append(_trail(hub, "approved", "user", "b"))
+    assert _judged(hub) == "b"
+    hub.comments_of[DESIGN_PR].append(_trail(hub, "rejected", "reopen", "reopen:1"))  # 承認し直しだけを失効させる
+    assert _judged(hub) is None
 
-    hub.comments_of[DESIGN_PR] = [
-        Authored("someone", "COLLABORATOR", body("rejected", "user", "a"), author_id=2),
-        Authored("someone", "COLLABORATOR", body("approved", "user", "b"), author_id=approver),
-    ]
-    rows = merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer())
-    assert merge_approval.merge_judgment(rows, target) is None
-    hub.comments_of[DESIGN_PR].append(Authored(hub.login, "OWNER", body("approved", "mvv", "c"), author_id=hub.account_id))
-    rows = merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer())
-
-    assert (merge_approval.merge_judgment(rows, target) is None) is stops
-
-
-@pytest.mark.parametrize("order", [("rejected", "mvv"), ("mvv", "rejected")])
-def test_withdrawing_a_rejection_does_not_revive_an_earlier_mvv_approval(order):
-    """却下の前後に書かれた MVV の承認は、別のアカウントが却下を取り下げても数えない。取り下げ後の記録は数える。"""
-    hub = merge_hub.MergeHub()
-    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
-
-    def user(answer: str, record: str) -> Authored:
-        row = merge_approval.render_merge_row(merge_approval.MergeRow(answer, "user", target, True, record))
-        return Authored("someone", "COLLABORATOR", row, author_id=2)
-
-    def mvv(record: str) -> Authored:
-        row = merge_approval.render_merge_row(merge_approval.MergeRow("approved", "mvv", target, True, record))
-        return Authored(hub.login, "OWNER", f"{merge_approval.MVV_NOTE_HEADING}design）\n\n{row}", author_id=hub.account_id)
-
-    posted = {"rejected": user("rejected", "a"), "mvv": mvv("mvv:1")}
-    hub.comments_of[DESIGN_PR] = [*(posted[name] for name in order), user("approved", "b")]
-    assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer()), target) is None
-
-    hub.comments_of[DESIGN_PR].append(mvv("mvv:2"))
-    found = merge_approval.merge_judgment(merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer()), target)
-
-    assert found is not None and found.record_id == "mvv:2"
+    hub.comments_of[DESIGN_PR].append(_trail(hub, "approved", "mvv", "mvv:2"))
+    assert _judged(hub) == "mvv:2"

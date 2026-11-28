@@ -38,7 +38,6 @@ def stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]:
     if not found:
         raise model.Refused(f"ステートマシンのモード {current.snapshot.mode} は判定のステップ {step_id} を持たない")
     inputs = invoke.resolve_inputs(found[0], command.machine_context(current))
-    rows = [e for e in current.events if e.draft.row_key == found[0].name]
-    if approval_decide.objection_bars_skip(rows, step_id):
+    if approval_decide.objection_bars_skip(lambda: [e for e in current.events if e.draft.row_key == found[0].name], step_id):
         inputs[model.NO_SKIP] = True
     return inputs
