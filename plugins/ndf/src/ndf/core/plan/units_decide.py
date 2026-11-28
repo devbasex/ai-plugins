@@ -12,6 +12,10 @@ from graphlib import CycleError, TopologicalSorter
 from typing import NamedTuple, Optional
 
 
+# 受け入れ条件を持つキー（単位のファイルのタスクと、承認の記録とその材料）
+CRITERIA_KEY = "criteria"
+
+
 class Task(NamedTuple):
     id: str
     title: str
@@ -114,7 +118,7 @@ def parse(doc: Mapping, path: str) -> UnitFile:
             t["issue"] if "issue" in t else issues[0],
             tuple(t["files"]),
             t["lines"],
-            tuple(t["criteria"]),
+            tuple(t[CRITERIA_KEY]),
             tuple(t["after"]),
         )
         for t in doc["tasks"]

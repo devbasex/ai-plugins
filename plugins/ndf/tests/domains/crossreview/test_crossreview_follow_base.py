@@ -1,4 +1,4 @@
-"""`ndf cross-review run --reviewed-base-out`: `--base` でなく PR の今のマージ先を比較元にし、その名前を書き出す（#3702）。
+"""`ndf cross-review run --follow-base`: `--base` でなく PR の今のマージ先を比較元にし、結果の `outputs.reviewed` に返す（#3702）。
 
 相手役と修正担当は `test_crossreview_run` の偽物を使い、PR のマージ先は偽の Hub（`conftest.FakePort.base_ref`）が返す。
 """
@@ -19,7 +19,7 @@ SPRINT = "sprint/y"
 
 @pytest.fixture(autouse=True)
 def _fetches_from_the_pr_repo(monkeypatch: pytest.MonkeyPatch, hub, repos: Repos) -> None:
-    """テストのリモートはローカルのパスなので、取得元を PR のベースリポジトリと同じと読ませる。`--reviewed-base-out` の起動は
+    """テストのリモートはローカルのパスなので、取得元を PR のベースリポジトリと同じと読ませる。`--follow-base` の起動は
     PR の確認を求める（PR 4638 の r1-7）ので、読んだ PR の head は PR のブランチの origin の先頭にする。"""
     monkeypatch.setattr(reviewed_pr, "fetch_repo", lambda g, remote: hub.port.repo_name)
     port = hub.port
@@ -28,6 +28,10 @@ def _fetches_from_the_pr_repo(monkeypatch: pytest.MonkeyPatch, hub, repos: Repos
         "read_pr",
         lambda: threads.ReadPr(f"{port.repo_name}#{PR}", BRANCH, sh(repos.origin, "rev-parse", BRANCH).strip(), port.repo_name),
     )
+
+
+def _reviewed(hub, wt: Path, base: str) -> dict:
+    return {"repo": hub.port.repo_name, "pr": PR, "head": sh(wt, "rev-parse", "HEAD").strip(), "base": base}
 
 
 def _sprint_branch(repos: Repos) -> None:
@@ -39,17 +43,16 @@ def _sprint_branch(repos: Repos) -> None:
     sh(repos.main, "fetch", "-q", "origin")
 
 
-def test_issue_3702_reviewed_base_out_compares_with_the_pr_target_not_the_given_base(
+def test_issue_3702_follow_base_compares_with_the_pr_target_not_the_given_base(
     repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
 ) -> None:
-    """`--reviewed-base-out` を渡すと、`--base` でなく PR の今のマージ先を取得して比較元にし、その名前を書く。"""
+    """`--follow-base` を渡すと、`--base` でなく PR の今のマージ先を取得して比較元にし、結果に載せる。"""
     _sprint_branch(repos)
     hub.port.base_ref = SPRINT
-    base_out = tmp_path / "reviewed-base"
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "head"), "--reviewed-base-out", str(base_out))
+    code, got = _run(capsys, monkeypatch, fake, wt, "--follow-base")
     assert (code, got["status"]) == (0, "ok")
-    assert base_out.read_text(encoding="utf-8") == f"{SPRINT}\n"
+    assert got["outputs"]["reviewed"] == _reviewed(hub, wt, SPRINT)
     last = _state(fake.state_dir)["rounds"][-1]
     assert last["mvv"]["mvv_branch"] == SPRINT
     assert last["base"] == sh(wt, "merge-base", f"origin/{SPRINT}", "HEAD").strip()
@@ -61,31 +64,27 @@ def test_issue_3702_changed_target_reviews_the_full_diff_against_the_new_target(
     """起動の間にマージ先が変われば、前回の収束を返さず、前の head からの差分でなく新しいマージ先との全差分を読ませる。"""
     _sprint_branch(repos)
     state_dir = tmp_path / "st"
-    base_out = tmp_path / "reviewed-base"
-    extra = ("--reviewed-out", str(tmp_path / "head"), "--reviewed-base-out", str(base_out))
-    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt, *extra)
-    assert base_out.read_text(encoding="utf-8") == "main\n"
+    _, got = _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt, "--follow-base")
+    assert got["outputs"]["reviewed"]["base"] == "main"
     commit(repos.other, "more.md", "# 足した\n", "足す")
     _push_to_pr(repos)
     hub.port.base_ref = SPRINT
     fake = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, *extra)
+    code, got = _run(capsys, monkeypatch, fake, wt, "--follow-base")
     assert (code, got["status"]) == (0, "ok") and fake.prompts
     assert all("範囲: full" in p for _, _, p in fake.prompts)
-    assert base_out.read_text(encoding="utf-8") == f"{SPRINT}\n"
+    assert got["outputs"]["reviewed"]["base"] == SPRINT
     assert _state(state_dir)["rounds"][-1]["mvv"]["mvv_branch"] == SPRINT
 
 
 def test_issue_3702_same_target_reuses_the_converged_round(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
-    """マージ先が同じなら、前回の収束をそのまま返し、そのマージ先の名前を書く。"""
+    """マージ先が同じなら、前回の収束をそのまま返し、その結果にも同じ `outputs.reviewed` を載せる。"""
     state_dir = tmp_path / "st"
-    base_out = tmp_path / "reviewed-base"
-    extra = ("--reviewed-out", str(tmp_path / "head"), "--reviewed-base-out", str(base_out))
-    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt, *extra)
+    _run(capsys, monkeypatch, Fake(state_dir, {"codex": [[]], "kiro": [[]]}), wt, "--follow-base")
     again = Recording(state_dir, {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, again, wt, *extra)
+    code, got = _run(capsys, monkeypatch, again, wt, "--follow-base")
     assert (code, got["status"], again.prompts) == (0, "ok", [])
-    assert base_out.read_text(encoding="utf-8") == "main\n"
+    assert got["outputs"]["reviewed"] == _reviewed(hub, wt, "main")
 
 
 def test_issue_3702_changed_base_with_the_same_merge_base_reviews_again(
@@ -104,33 +103,23 @@ def test_issue_3702_changed_base_with_the_same_merge_base_reviews_again(
     assert rounds[-1]["base"] == rounds[0]["base"] and rounds[-1]["mvv"]["mvv_branch"] == SPRINT
 
 
-def test_issue_3702_without_reviewed_base_out_the_given_base_is_kept(
-    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub
-) -> None:
-    """引数が無ければ今のまま `--base` のブランチを比較元にし、PR のマージ先を読まない。"""
+def test_issue_3702_without_follow_base_the_given_base_is_kept(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """引数が無ければ今のまま `--base` のブランチを比較元にし、PR のマージ先を読まず、`outputs.reviewed` を載せない。"""
     _sprint_branch(repos)
     hub.port.base_ref = SPRINT
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"], hub.port.base_reads) == (0, "ok", 0)
+    assert "reviewed" not in got["outputs"]
     assert _state(fake.state_dir)["rounds"][-1]["mvv"]["mvv_branch"] == "main"
 
 
 def test_issue_3702_unreadable_target_stops_before_any_launch(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
-    """PR のマージ先を読めなければ、担当を起動する前に precondition で止まる。"""
+    """PR のマージ先を読めなければ、担当を起動する前に precondition で止まる。止まる結果にも null の `outputs.reviewed` を載せる。"""
     hub.port.base_ref = None
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
-    assert (got["cause"]["kind"], fake.calls) == ("precondition", [])
-
-
-def test_issue_3702_unwritable_reviewed_base_out_is_precondition(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """`--reviewed-base-out` を書けなければ、相手役を起動する前に precondition で止まる（レビューの後に分かっても遅い）。"""
-    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    missing = tmp_path / "no-such-dir" / "base"
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(missing))
-    assert (got["cause"]["kind"], fake.calls) == ("precondition", [])
-    assert str(missing) in got["cause"]["detail"]
+    code, got = _run(capsys, monkeypatch, fake, wt, "--follow-base")
+    assert (got["cause"]["kind"], fake.calls, got["outputs"]) == ("precondition", [], {"reviewed": None})
 
 
 @pytest.mark.parametrize("fetched", ["fork/repo", None], ids=["other-repo", "unknown"])
@@ -140,28 +129,24 @@ def test_issue_3702_target_fetched_from_another_repo_stops_before_any_launch(
     """取得するリモートが PR のベースリポジトリと違うか確かめられなければ、担当を起動する前に precondition で止まる。"""
     monkeypatch.setattr(reviewed_pr, "fetch_repo", lambda g, remote: fetched)
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
-    assert (got["cause"]["kind"], fake.calls) == ("precondition", [])
-    assert not (tmp_path / "b").exists()
+    code, got = _run(capsys, monkeypatch, fake, wt, "--follow-base")
+    assert (got["cause"]["kind"], fake.calls, got["outputs"]) == ("precondition", [], {"reviewed": None})
 
 
-def test_issue_3702_reviewed_base_out_without_reviewed_out_is_invalid(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
-    """`--reviewed-base-out` だけを渡すと、レビューを始める前に invalid で止まる。"""
+def test_issue_3702_stop_before_the_run_starts_also_returns_null_reviewed(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
+    """引数の誤りで始めに止まる結果にも、null の `outputs.reviewed` を載せる。"""
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-base-out", str(tmp_path / "b"))
-    assert (got["cause"]["kind"], fake.calls) == ("invalid", [])
+    shared = tmp_path / "out"
+    code, got = _run(capsys, monkeypatch, fake, wt, "--follow-base", "--reviewed-out", str(shared), "--reviewed-pr-out", str(shared))
+    assert (got["cause"]["kind"], fake.calls, got["outputs"]) == ("invalid", [], {"reviewed": None})
 
 
-@pytest.mark.parametrize("other", ["--reviewed-out", "--reviewed-pr-out"])
-def test_issue_3702_shared_output_is_invalid_and_kept(wt: Path, tmp_path: Path, capsys, monkeypatch, other: str) -> None:
+def test_issue_3702_shared_output_is_invalid_and_kept(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     """PR 4638 の r1-3: 出力先を重ねると、消す前に invalid で止まる（後に書く値で先の値が失われる）。"""
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     shared = tmp_path / "out"
     shared.write_text("前の値\n", encoding="utf-8")
-    head = shared if other == "--reviewed-out" else tmp_path / "h"
-    extra = ("--reviewed-out", str(head), "--reviewed-base-out", str(shared))
-    if other == "--reviewed-pr-out":
-        extra += ("--reviewed-pr-out", str(tmp_path / "." / "out"))
+    extra = ("--reviewed-out", str(shared), "--reviewed-pr-out", str(tmp_path / "." / "out"))
     code, got = _run(capsys, monkeypatch, fake, wt, *extra)
     assert (got["cause"]["kind"], fake.calls, shared.read_text(encoding="utf-8")) == ("invalid", [], "前の値\n")
 
@@ -171,7 +156,7 @@ def test_issue_3702_target_resolved_from_the_remote_is_not_read_again(wt: Path, 
     hub.port.fetched_from = hub.port.repo_name
     monkeypatch.setattr(reviewed_pr, "fetch_repo", lambda g, remote: pytest.fail("取得元を読み直した"))
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
+    code, got = _run(capsys, monkeypatch, fake, wt, "--follow-base")
     assert (code, got["status"]) == (0, "ok")
 
 
@@ -180,7 +165,7 @@ def test_existing_output_not_written_by_ndf_is_kept_and_stops(wt: Path, tmp_path
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     mine = tmp_path / "mine.txt"
     mine.write_text("利用者のデータ\n", encoding="utf-8")
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(mine))
+    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-pr-out", str(mine))
     assert (got["cause"]["kind"], fake.calls, mine.read_text(encoding="utf-8")) == ("precondition", [], "利用者のデータ\n")
 
 
@@ -202,11 +187,11 @@ def test_pr_4638_r1_11_empty_output_made_in_advance_is_kept_and_written(wt: Path
     assert (code, got["status"]) == (0, "ok") and len(out.read_text(encoding="utf-8").strip()) == 40
 
 
-def test_pr_4638_r1_7_base_out_checks_the_pr_head(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
-    """PR 4638 の r1-7: `--reviewed-pr-out` が無くても、`--reviewed-base-out` の起動は PR の head がレビューするブランチの先頭と
-    違えば、相手役を起動する前に precondition で止まり、比較元を書かない。"""
+def test_pr_4638_r1_7_follow_base_checks_the_pr_head(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    """PR 4638 の r1-7: `--reviewed-pr-out` が無くても、`--follow-base` の起動は PR の head がレビューするブランチの先頭と
+    違えば、相手役を起動する前に precondition で止まる。"""
     port = hub.port
     monkeypatch.setattr(port, "read_pr", lambda: threads.ReadPr(f"{port.repo_name}#{PR}", "other/branch", "0" * 40, port.repo_name))
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
-    code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-out", str(tmp_path / "h"), "--reviewed-base-out", str(tmp_path / "b"))
-    assert (got["cause"]["kind"], fake.calls, (tmp_path / "b").exists()) == ("precondition", [], False)
+    code, got = _run(capsys, monkeypatch, fake, wt, "--follow-base")
+    assert (got["cause"]["kind"], fake.calls, got["outputs"]) == ("precondition", [], {"reviewed": None})

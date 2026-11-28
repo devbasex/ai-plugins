@@ -29,7 +29,7 @@ _UNITS_PATH = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-plan\.units\.json$")
 _DESIGN_PATH = re.compile(r"^issues/issue-(\d+(?:-\d+)*)-design\.md$")
 UNITS_SUFFIX = "-plan.units.json"
 PLAN_SUFFIX = "-plan.md"
-# 承認の記録の保存先の、レビューした HEAD のファイル（`ndf cross-review run` の `--reviewed-out` の出力先）
+# 単位の回の保存先の、レビューした HEAD のファイル（`ndf cross-review run` の `--reviewed-out` の出力先）
 REVIEWED_HEAD = "reviewed-head"
 # 独立した単位を持たない扱い（設計書の「設計の結果」の表の値）
 EXCLUDED_HANDLINGS = frozenset({inputs_decide.MERGE_HANDLING, "閉じる"})
@@ -174,6 +174,7 @@ class Report(NamedTuple):
     """確かめの結果。`task_gaps`・`stale_tables`（表を書き直すと変わる実装計画）は `docs` を指定したときだけ入る。
 
     `files` は判定した単位のファイル（省いた課題の 1 単位を含む）である。`handlings` は課題から確かめたときだけ入る。
+    `criteria` は判定に渡した課題ごとの受け入れ条件の数である。
     """
 
     judgement: ud.Judgement
@@ -182,6 +183,7 @@ class Report(NamedTuple):
     stale_tables: tuple[str, ...]
     files: tuple[ud.UnitFile, ...]
     handlings: Mapping[int, tuple[str, Optional[int]]]
+    criteria: Mapping[int, int]
 
 
 # --- 読み手 -------------------------------------------------------------------------------------
@@ -302,6 +304,11 @@ def _handlings(
     return out, tuple(n for n in issues if out[n][0] in EXCLUDED_HANDLINGS)
 
 
+def handlings(tree: Tree, issues: Sequence[int]) -> dict[int, tuple[str, Optional[int]]]:
+    """課題ごとの、設計書の「設計の結果」の（扱い, 統合先）。"""
+    return _handlings(tree, tree.listing(), tuple(sorted(set(issues))))[0]
+
+
 def project_of(tree: Tree) -> dict[str, Any]:
     """読み元の `.ndf/project.json`。無いか、オブジェクトでなければ空。JSON として読めなければ `UnitsFileError`。"""
     text = tree.read(PROJECT_FILE)
@@ -328,12 +335,13 @@ def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.
     listing = tree.listing()
     found = _collect(tree, listing, issues, omitted)
     files = [*found.files, *map(ud.single, found.omitted)]
-    return _report(tree, listing, files, ud.judge(files, limits, criteria), docs)._replace(missing=found.missing, handlings=found.handlings)
+    judged = _report(tree, listing, files, ud.judge(files, limits, criteria), criteria, docs)
+    return judged._replace(missing=found.missing, handlings=found.handlings)
 
 
 def check_files(tree: Tree, files: Sequence[ud.UnitFile], limits: ud.Limits, criteria: Mapping[int, int], docs: bool) -> Report:
     """直に指したファイルを確かめる。課題から探さないので、欠落は見ない。"""
-    return _report(tree, tree.listing(), files, ud.judge(files, limits, criteria), docs)
+    return _report(tree, tree.listing(), files, ud.judge(files, limits, criteria), criteria, docs)
 
 
 def _report(
@@ -341,6 +349,7 @@ def _report(
     listing: Mapping[str, Optional[tuple[str, str, str]]],
     files: Sequence[ud.UnitFile],
     judgement: ud.Judgement,
+    criteria: Mapping[int, int],
     docs: bool,
 ) -> Report:
     """判定の結果に、`docs` なら実装計画との突き合わせを足す。`missing` は空で返す。"""
@@ -356,7 +365,7 @@ def _report(
             gaps.append(gap)
         if text is not None and render_tables(text, judgement.views, unit_file.path) != _newlines(text):
             stale.append(plan)
-    return Report(judgement, (), tuple(gaps), tuple(stale), tuple(files), {})
+    return Report(judgement, (), tuple(gaps), tuple(stale), tuple(files), {}, dict(criteria))
 
 
 def paired_plan(units_path: str) -> str:
@@ -403,6 +412,20 @@ def unit_items(report: Report) -> list[dict[str, Any]]:
         item["tasks"] = [{"id": t, "issue": issue_of[(v.file, t)] if v.file else v.issues[0]} for t in v.tasks]
         items.append({"kind": "unit", **item})
     return items
+
+
+def design_units_of(report: Report, head: str, branch: str, issues: Sequence[int], limits: ud.Limits) -> dict[str, Any]:
+    """承認の記録の材料（結果の `outputs.design_units`）。`head` は確かめで読んだコミット、`branch` はスプリントブランチ。"""
+    return {
+        "head": head,
+        "branch": branch,
+        "issues": sorted(set(issues)),
+        "handling": {str(n): {"handling": handling, "into": into} for n, (handling, into) in report.handlings.items()},
+        "omitted": [f.issues[0] for f in report.files if f.whole],
+        "limits": limits._asdict(),
+        ud.CRITERIA_KEY: {str(n): count for n, count in report.criteria.items()},
+        "units": unit_items(report),
+    }
 
 
 def findings(report: Report) -> list[ud.Finding]:

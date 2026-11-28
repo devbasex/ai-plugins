@@ -167,7 +167,11 @@
         },
         "--docs": {
           "type": "boolean",
-          "description": "実装計画のタスクの集合と 2 つの表も突き合わせる（承認の記録を書くときは指定しなくても突き合わせる）"
+          "description": "実装計画のタスクの集合と 2 つの表も突き合わせる（--design-gate では指定しなくても突き合わせる）"
+        },
+        "--design-gate": {
+          "type": "boolean",
+          "description": "承認ゲートの前の確かめ。工程の入力 NDF_STAGE_INPUT の reviewed が指すコミットを読み、通れば outputs.design_units を返す"
         }
       },
       "required": [

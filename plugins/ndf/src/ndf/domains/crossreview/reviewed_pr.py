@@ -100,7 +100,7 @@ def fetch_repo(g: git.Git, remote: str) -> Optional[str]:
 
 def check_base_source(cfg: RunConfig, reader_for: Optional[Callable[[int], threads.Reader]], g: git.Git, remote: str, branch: str) -> None:
     """PR の今のマージ先 `branch` を取得するリモートが、PR のベースリポジトリと一致すると確かめる。確かめられなければ、担当を
-    起動する前に止める（`--reviewed-base-out` の起動。#3702）。
+    起動する前に止める（`--follow-base` の起動。#3702）。
 
     マージ先の名前は GitHub の PR から読むが、ブランチは作業場所のリモートから取得する。`--repo` やフォークで両者が別の
     リポジトリだと、同名の別のブランチとの差分をレビューした結果を、承認へ渡す比較元として書いてしまう。
