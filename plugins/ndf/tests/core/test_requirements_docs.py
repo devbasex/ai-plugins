@@ -168,6 +168,19 @@ def test_the_comment_mark_in_an_attribute_does_not_hide_the_following_criteria(v
     assert [c.text.split("\n")[0] for c in rd.criteria_of(_doc_text(criteria=body))] == ["甲", "乙"]
 
 
+@pytest.mark.parametrize(
+    "block",
+    [
+        '<details>\n<span title="説明\n<!-- 補足">本文</span>\n</details>',
+        '> <details>\n> <span title="説明\n> <!-- 補足">本文</span>',
+        '<details><!--\n\n--> <span title="<!--">補足</span>',
+    ],
+)
+def test_the_comment_mark_in_a_multiline_attribute_does_not_hide_the_following_criteria(block: str) -> None:
+    body = f"- [ ] 甲\n\n{block}\n\n- [ ] 乙\n"
+    assert [c.text.split("\n")[0] for c in rd.criteria_of(_doc_text(criteria=body))] == ["甲", "乙"]
+
+
 def test_the_text_after_the_close_is_parsed_inline_once(monkeypatch: pytest.MonkeyPatch) -> None:
     parsed: list[str] = []
     parse = inputs_decide._INLINE.inline.parse

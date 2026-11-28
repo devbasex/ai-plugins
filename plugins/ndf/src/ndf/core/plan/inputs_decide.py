@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional, TypeVar
 
@@ -26,7 +27,8 @@ CHECKS_HEADING = "## 受け入れ条件の確認"
 CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
-_OPEN_TAG = re.compile(open_tag)
+# HTML の文を前から区切る。コメントは閉じ（無ければ末尾）まで 1 つにして中のタグを読まず、タグは改行を含めて読む
+_COMMENT_OR_TAG = re.compile(rf"<!(?=--).*?(?:-->|\Z)|({open_tag})", re.DOTALL)
 
 
 def _recording(rule: Callable[[StateInline, bool], bool]) -> Callable[[StateInline, bool], bool]:
@@ -57,19 +59,37 @@ def _comment_spans(content: str) -> list[tuple[bool, int, int]]:
 
 
 def _inline_marks(lines: Sequence[str] | Mapping[int, str], tokens: Iterable[Token]) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
-    """段落と見出しの中の `<!--` の位置を (本物のコメントの開き, コード表記の中) で返す。
+    """`<!--` の位置を (段落と見出しの中の本物のコメントの開き, コメントを開かないもの) で返す。
 
+    コメントを開かないのは、段落と見出しのコード表記の中と、HTML のブロックのタグの属性値の中。
     位置は (行の添字, 行末までの文字数)。行頭の字下げや引用の記号を除いた行でも、元の行でも同じ値になる。
     結果はトークンに残し、同じトークンの解析と位置の変換は 1 回だけにする。
     """
     comments: set[tuple[int, int]] = set()
     literals: set[tuple[int, int]] = set()
-    for token in (t for t in tokens if t.type == "inline" and "<!--" in t.content):
+    for token in (t for t in tokens if t.type in ("inline", "html_block") and "<!--" in t.content):
         if "marks" not in token.meta:
-            token.meta["marks"] = _token_marks(lines, token)
+            if token.type == "inline":
+                token.meta["marks"] = _token_marks(lines, token)
+            else:
+                # 読み足したブロック（`tails` を持つ）はコメントの中から始まる
+                opening = "<!-- " if "tails" in token.meta else ""
+                token.meta["marks"] = set(), _attribute_marks(opening + token.content, token.map[0])
         comments |= token.meta["marks"][0]
         literals |= token.meta["marks"][1]
     return comments, literals
+
+
+def _attribute_marks(text: str, first: int) -> set[tuple[int, int]]:
+    """HTML の文 `text`（先頭の行の添字は `first`）の、タグの属性値の中の `<!--` の位置（`_inline_marks` と同じ形）。"""
+    inner = [
+        mark.start()
+        for tag in _COMMENT_OR_TAG.finditer(text)
+        if tag[1]
+        for mark in re.compile("<!--").finditer(text, tag.start(), tag.end())
+    ]
+    ends = [m.start() for m in re.finditer("\n", text)] + [len(text)]
+    return {(first + k, ends[k] - at) for at in inner for k in (bisect_left(ends, at),)}
 
 
 def _token_marks(lines: Sequence[str] | Mapping[int, str], token: Token) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
@@ -132,12 +152,6 @@ def _scan_line(
         if found < 0:
             kept += line[pos:]
             break
-        if in_html:
-            tag = next((t for t in _OPEN_TAG.finditer(line, pos) if t.end() > found), None)
-            if tag and tag.start() < found:
-                kept += line[pos : tag.end()]
-                pos = tag.end()
-                continue
         at_head = not (kept + line[pos:found]).strip()
         place = (i, len(line) - found)
         # 読み足した行はインライン解析されないので、閉じた後ろのコード表記とエスケープはここで見る
@@ -171,7 +185,7 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
         if token.content.rfind("<!--") <= token.content.rfind("-->"):
             return True
         rows = {n: state.src[state.bMarks[n] + state.tShift[n] : state.eMarks[n]] for n in range(*token.map)}
-        marks = (set(), set()) if in_html else _inline_marks(rows, [token])
+        marks = _inline_marks(rows, [token])
         inside = False
         for n, text in rows.items():
             inside = _scan_line(n, text, inside, in_html, marks)[2]
@@ -179,7 +193,8 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
         tails: dict[str, list[tuple[bool, int, int]]] = {}
         while inside and line < end:
             text = state.src[state.bMarks[line] : state.eMarks[line]]
-            inside = _scan_line(line, text, inside, True, (set(), set()), tails)[2]
+            marks = set(), _attribute_marks("<!-- " + text, line)
+            inside = _scan_line(line, text, inside, True, marks, tails)[2]
             line += 1
         if line > first:
             held = state.push("html_block", "", 0)
