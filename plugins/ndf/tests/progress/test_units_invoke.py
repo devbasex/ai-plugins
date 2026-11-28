@@ -273,7 +273,8 @@ def test_units_only_on_the_remote_send_an_older_definition_to_the_conversion(spr
     stage_run = replace(_run(sprint), per_unit=False, sprint=plan)
     # 通常のエントリポイントの振り分け（by_units）を通り、単位に分けないプランは組まない
     assert invoke.prepare_plan(stage_run, tmp_path / "w", sprint) is None
-    assert asked == [BRANCH] and [c[0] for c in git_calls].count("fetch") == 1
+    # 起動の前は経路の判定の取得だけで、送り先は実行の時に読む
+    assert asked == [] and [c[0] for c in git_calls].count("fetch") == 1
 
 
 def test_a_worktree_diverged_from_the_remote_stops(sprint, tmp_path):

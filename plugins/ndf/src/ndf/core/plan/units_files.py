@@ -595,6 +595,45 @@ def differs(a: ud.UnitFile, b: ud.UnitFile) -> bool:
     return bare(a) != bare(b)
 
 
+_TASK_LABELS = {
+    "title": "題",
+    "issue": "課題",
+    "files": "対象のファイル",
+    "lines": "見込みの行数",
+    "criteria": "満たす受け入れ条件",
+    "after": "先に要るタスク",
+}
+_UNIT_LABELS = {"tasks": "含むタスク", "after": "先に要る単位"}
+
+
+def changes(before: Optional[ud.UnitFile], after: Optional[ud.UnitFile]) -> list[str]:
+    """2 つの版の単位の定義の違いを、タスクと単位の欄ごとの行にする。None はその版にファイルが無い。実際の行数は比べない。"""
+    found: list[str] = []
+    for kind, attr, key, labels in (("タスク", "tasks", "id", _TASK_LABELS), ("単位", "units", "name", _UNIT_LABELS)):
+        was, now = ({getattr(x, key): x for x in (getattr(f, attr) if f else ())} for f in (before, after))
+        for name in dict.fromkeys([*was, *now]):
+            if name in was and name in now:
+                found += [
+                    f"{kind} {name} の{label}: {_shown(getattr(was[name], field))} → {_shown(getattr(now[name], field))}"
+                    for field, label in labels.items()
+                    if getattr(was[name], field) != getattr(now[name], field)
+                ]
+                continue
+            held = now[name] if name in now else was[name]
+            detail = _JOIN.join(f"{label} {_shown(getattr(held, field))}" for field, label in labels.items())
+            found.append(f"{kind} {name} を{'足した' if name in now else '消した'}（{detail}）")
+    return found
+
+
+def _shown(value: Any) -> str:
+    if isinstance(value, ud.Edge):
+        issue = "" if value.issue is None else f"#{value.issue}。"
+        return f"{value.unit}（{issue}{value.reason}）"
+    if isinstance(value, tuple):
+        return _JOIN.join(map(_shown, value)) or _NONE
+    return _NONE if value is None else str(value)
+
+
 # --- 実装計画の表 -------------------------------------------------------------------------------
 
 

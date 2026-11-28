@@ -143,7 +143,7 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     branch = units_flow.branch_here(g)
     remote = g.remote()
     uncommitted = _uncommitted(g, issues)
-    head, tip, at_head, at_tip, checked_to = units_flow.read_start(g, remote, branch, issues, sprint, run.peeked)
+    head, tip, at_head, at_tip, checked_to = units_flow.read_start(g, remote, branch, issues, sprint, run.peeked, ports is not None)
     left = units_flow.Seen(units_flow.worktree_plans(root, uncommitted), bool(units_files.paths_naming(uncommitted, issues)))
     if not (sprint.required or at_head.has_units() or at_tip.has_units() or left.has_units()):
         return _plain_route(work_dir)
@@ -159,8 +159,10 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     if not (sprint.required or seen.has_units()):
         return _plain_route(work_dir)
     converting = sprint.convert is not None and not sprint.new_definition and seen.has_headings()
-    if behind:
-        project, branch = _checked_ahead(run, root, branch, str(tip) if converting else None)
+    # 変換は push するので、手元と取得先の HEAD が同じでも、取得先のコミットの設定でリリース先を確かめる
+    pushing = converting and tip is not None
+    if behind or pushing:
+        project, branch = _checked_ahead(run, root, branch, str(tip) if pushing else None)
     count = _counted_once(g, remote)
     request = ConvertRequest(run, root, branch, tuple(issues), sprint.omitted, count, checked_to)
     asked, seen = _converted(g, sprint, seen, request, ports)
@@ -332,9 +334,9 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
 
 
 def _checked_ahead(run: StageRun, root: Path, branch: str, commit: Optional[str]) -> tuple[Mapping[str, Any], str]:
-    """手元が遅れていたときに取得先の設定でリリース先（I4）を確かめ直し、（設定, ブランチ）を返す。変換が push する前に呼ぶ。
+    """取得先の設定でリリース先（I4）を確かめ直し、（設定, ブランチ）を返す。手元が遅れていたときと、変換が push する前に呼ぶ。
 
-    設定は `commit` から読む（手元を進めていない変換の経路）。None なら進めた後の作業場所から読む。"""
+    設定は `commit` から読む（変換の経路）。None なら進めた後の作業場所から読む。"""
     try:
         project = ndf_settings_in(root, PROJECT_FILE) if commit is None else units_files.project_of(units_files.Tree(root, commit))
     except units_files.UnitsFileError as exc:

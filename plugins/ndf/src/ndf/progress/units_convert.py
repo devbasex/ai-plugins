@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters.git import HEADS, Git, mask_urls, repo_of_url
-from ndf.contracts import result
+from ndf.contracts import facts, result
 from ndf.core import route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
@@ -50,8 +50,8 @@ TEMPLATE = "implementation-plan-convert"
 REF_PREFIX = f"refs/{result.ENTRY}/convert/"
 # 送り先の HEAD を受ける一時の ref。同じリポジトリの別の fetch が書き換える `FETCH_HEAD` は読まない
 TIP_PREFIX = f"refs/{result.ENTRY}/convert-tip/"
-# 一時の作業場所の親（メインディレクトリの下。`.git` の下は担当が書けない）
-TREE_PARENT = Path(".worktrees") / "ndf-convert"
+# 一時の作業場所の親。worktree の保存先（事実の表 `locations` の `worktrees`。`.git` の下は担当が書けない）の下に置く
+TREE_PARENT = Path(facts.value("locations", "worktrees", "path")) / "ndf-convert"
 # 1 回の `convert` で担当を起動する上限（最初の変換と、やり直し 1 回。競合のやり直しも数える）
 MAX_LAUNCHES = 2
 REJECTED = folding.answer_word("rejected")
@@ -544,7 +544,8 @@ def _converted_record(r: _Run, commit: str, report: units_files.Report) -> dict[
 def _push_conversion(r: _Run, url: str, tip: str, send: str, report: units_files.Report, approval: Mapping[str, Any]) -> None:
     """承認した文書の反映と同じ送り先と送るコミットの確かめを通してから push する。強制はしない。"""
     record = _converted_record(r, send, report)
-    _, errors = units_sync.destination_errors(r.git, record, r.job.context, r.job.machine_repo(), url)
+    # リリース先は、手元の作業場所でなく、確かめた送り先の HEAD の設定で照らす（未コミットの設定が覆い隠さないように）
+    _, errors = units_sync.destination_errors(r.git, record, r.job.context, r.job.machine_repo(), url, tip)
     names = units_files.Tree(r.root, send).names()
     allowed = [*units_files.paths_naming(names, r.issues), *(p.path for p in _plans(r, send))]
     errors += units_sync.outgoing_errors(r.git, tip, send, allowed)
@@ -561,13 +562,20 @@ def _push_conversion(r: _Run, url: str, tip: str, send: str, report: units_files
 # --- 反映済み -------------------------------------------------------------------------------------
 
 
+def _unit_texts(root: Path, issues: Sequence[int], commit: str) -> dict[str, Optional[str]]:
+    """コミットにある、スプリントの課題の単位のファイルの本文。git の起動はファイルの件数に依らない。"""
+    tree = units_files.Tree(root, commit)
+    listing = tree.listing()
+    return tree.read_all(sorted(units_files.paths_naming(sorted(listing), issues)), listing)
+
+
 def _same_unit_files(root: Path, issues: Sequence[int], commit: str, head: str) -> bool:
     """スプリントの課題の単位のファイルが、実際の行数を除いて同じか。"""
-    old, new = units_files.Tree(root, commit), units_files.Tree(root, head)
     try:
-        before = units_files.paths_naming(old.names(), issues)
-        after = units_files.paths_naming(new.names(), issues)
-        return before == after and not any(units_files.differs(units_files.load(old, p), units_files.load(new, p)) for p in before)
+        before, after = _unit_texts(root, issues, commit), _unit_texts(root, issues, head)
+        return before.keys() == after.keys() and not any(
+            units_files.differs(units_files.parse_text(p, before[p]), units_files.parse_text(p, after[p])) for p in before
+        )
     except units_files.UnitsFileError:  # noqa: NDF401 利用者の入力: 読めないファイルは同じでないとみなし、再承認で理由を示す
         return False
 
@@ -636,13 +644,33 @@ def _old_rows(r: _Run, head: Optional[str]) -> list[str]:
     ]
 
 
+def _definition_changes(r: _Run, previous: Optional[str], commit: str) -> list[str]:
+    """前回承認したコミット（None なら何も無い）と `commit` の、単位の定義の違いの行。"""
+    try:
+        before = {} if previous is None else _unit_texts(r.root, r.issues, previous)
+        after = _unit_texts(r.root, r.issues, commit)
+    except units_files.UnitsFileError as exc:
+        return [f"（単位のファイルを読めない: {exc}）"]
+    found: list[str] = []
+    for path in sorted(before.keys() | after.keys()):
+        try:
+            sides = [units_files.parse_text(path, side[path]) if path in side else None for side in (before, after)]
+        except units_files.UnitsFileError as exc:
+            found.append(f"（比べられない: {exc}）")
+            continue
+        found += [f"{path}: {line}" for line in units_files.changes(*sides)]
+    return [f"- {line}" for line in found] or ["（定義の違いは無い）"]
+
+
 def _reapproval_material(
     r: _Run, commit: str, report: units_files.Report, differences: Sequence[str], record: Optional[Mapping[str, Any]], old: Optional[str]
 ) -> str:
     previous = str(record["review"]["head"]) if record is not None else old
-    paths = [p.path for p in _plans(r, commit)]
+    known = previous if previous is not None and r.git.commit_or_none(previous) is not None else None
     diff = "（前回の承認は無い）"
-    if previous is not None and r.git.commit_or_none(previous) is not None:
+    if known is not None:
+        # 前回の承認の後に削除・改名した実装計画も載るように、両方のコミットのパスを比べる
+        paths = sorted({p.path for side in (known, commit) for p in _plans(r, side)})
         changed = r.git.run("diff", previous, commit, "--", *paths) if paths else ""
         diff = f"```diff\n{changed}```"
     lines = [
@@ -659,6 +687,10 @@ def _reapproval_material(
         "## 新しい分け方",
         "",
         *units_files.item_table(units_files.unit_items(report)),
+        "",
+        f"## 単位の定義の違い（{known or '無し'} → {commit}）",
+        "",
+        *_definition_changes(r, known, commit),
         "",
         f"## 実装計画の差分（{previous or '無し'} → {commit}）",
         "",

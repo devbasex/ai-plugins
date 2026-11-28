@@ -795,6 +795,7 @@ def read_start(
     issues: Sequence[int],
     sprint: SprintPlan,
     peeked: Optional[Peeked] = None,
+    confirm: bool = True,
 ) -> Start:
     """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
 
@@ -802,6 +803,7 @@ def read_start(
     がある）は、取得の前に取得の URL を確かめ、単位の欄が見つかったときだけ、確かめた送り先の URL から HEAD を読む。
     手元に欄があればリモート名では取得せず、取得先にだけあれば送り先の HEAD で読み直す。送り先から単位の欄のある実装計画を
     読めなければ止める。変換しないスプリントは送り先を使わないので、取得と push で認証の経路が違っても止まらない。
+    `confirm` が偽（起動の前の確かめ）なら送り先を読まない。送り先との照合は、実行の時に 1 回だけ行う。
     """
     destination = sprint.destination
     local_headings = False
@@ -816,17 +818,20 @@ def read_start(
             peeked = peek(g, remote, branch, issues, here)
     head, tip, at_head, at_tip = peeked
     checked_to = None
-    if destination is not None and branch is not None and (local_headings or at_tip.has_headings()):
+    if confirm and destination is not None and branch is not None and (local_headings or at_tip.has_headings()):
         url, found = destination(g, branch)
         checked_to = (url, found)
         if found != tip:
             head, tip = (g.rev_parse("HEAD"), found) if found is not None else ("HEAD", None)
             at_tip = at_head if found is None or found == head else seen_at(g, found, issues)
-        # 取得先にだけ欄があった場合に、欄の無い手元の計画へ戻ると、分けた変更を 1 本で流してしまう
-        if not local_headings and not at_tip.has_headings():
+        # 分割を確かめた後に欄の無い計画へ戻ると、分けた変更を 1 本で流してしまうので、手元を進める前に止める。
+        # 手元に欄があって送り先にブランチが無い場合は、変換が止める
+        lost = found is not None and not at_tip.has_units() if local_headings else not at_tip.has_headings()
+        if lost:
+            seen_in = "手元" if local_headings else "取得先"
             raise UnitsStopped(
                 "precondition",
-                f"取得先の {branch} の実装計画に単位の欄があるが、送り先の {branch} では確かめられないので、始めない",
+                f"{seen_in}の {branch} の実装計画に単位の欄があるが、送り先の {branch} では確かめられないので、始めない",
             )
     return Start(head, tip, at_head, at_tip, checked_to)
 

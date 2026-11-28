@@ -822,14 +822,39 @@ def test_units_seen_at_the_fetch_url_but_not_at_the_destination_stop():
         units_flow.read_start(git, "origin", SPRINT, [3], sprint, peeked)
 
 
-def test_a_release_branch_declared_at_the_tip_stops_before_the_conversion(tmp_path, monkeypatch):
+def test_units_seen_locally_but_gone_at_the_destination_stop_before_moving(monkeypatch):
+    headed = units_flow.Seen([PlanDoc(PLAN, frozenset({3}), OLD_PLAN)], False)
+    empty = units_flow.Seen([], False)
+    monkeypatch.setattr(units_flow, "seen_at", lambda g, commit, issues: headed if commit == "HEAD" else empty)
+    git = SimpleNamespace(rev_parse=lambda ref: "local", merge_ff=lambda commit: pytest.fail("進めない"))
+    sprint = plan_runs.SprintPlan(destination=lambda g, branch: (URL, "tip"))
+
+    with pytest.raises(UnitsStopped, match="送り先"):
+        units_flow.read_start(git, "origin", SPRINT, [3], sprint)
+    # 起動の前の確かめは、送り先を読まない
+    unread = plan_runs.SprintPlan(destination=lambda *args: pytest.fail("読まない"))
+    assert units_flow.read_start(git, "origin", SPRINT, [3], unread, confirm=False).checked_to is None
+
+
+def test_the_changes_of_the_definitions_name_the_target_files_and_dependencies():
+    old, new = (units_files.parse_text(UNITS, json.dumps(doc)) for doc in (_doc(), _doc(edge=False, touch="src/c.py")))
+
+    got = units_files.changes(old, new)
+
+    assert any("T2" in line and "src/b.py" in line and "src/c.py" in line for line in got), got
+    assert any("書き手" in line and "読み手" in line for line in got), got
+    assert units_files.changes(old, old) == []
+
+
+@pytest.mark.parametrize("head", ["local", "tip"], ids=["手元が遅れている", "手元と取得先が同じ"])
+def test_a_release_branch_declared_at_the_tip_stops_before_the_conversion(tmp_path, monkeypatch, head):
     plan = units_flow.Seen([PlanDoc(PLAN, frozenset({3}), OLD_PLAN)], False)
     empty = units_flow.Seen([], False)
     git = SimpleNamespace(run=lambda *args: str(tmp_path), remote=lambda: "origin", is_ancestor=lambda a, b: a == "local")
     monkeypatch.setattr(units_invoke, "Git", lambda path: git)
     monkeypatch.setattr(units_flow, "branch_here", lambda g: SPRINT)
     monkeypatch.setattr(units_invoke, "_uncommitted", lambda g, issues: [])
-    monkeypatch.setattr(units_flow, "read_start", lambda *args: units_flow.Start("local", "tip", empty, plan, None))
+    monkeypatch.setattr(units_flow, "read_start", lambda *args: units_flow.Start(head, "tip", plan if head == "tip" else empty, plan, None))
     monkeypatch.setattr(units_flow, "worktree_plans", lambda root, paths: [])
     monkeypatch.setattr(units_invoke, "ndf_settings_in", lambda root, name: {})
     monkeypatch.setattr(units_files, "project_of", lambda tree: {"released": tree.commit})
