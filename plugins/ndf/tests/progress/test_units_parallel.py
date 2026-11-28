@@ -395,14 +395,10 @@ class Waiting(Fake):
         self.reads.append((self.now, names))
         return {self.number(n): self.states[n].pop(0) if len(self.states[n]) > 1 else self.states[n][0] for n in names}
 
-    def advance(self, pulls):
-        names = [next(u.name for u in self.units if units_flow.key_of(u) == k) for k in pulls]
-        self.advances.append((self.now, names))
-        return {k for k, n in zip(pulls, names) if self.now >= self.visible.get(n, 0)}
-
-    def held(self, pulls):
-        """`visible` の時刻を過ぎた単位は、手元の HEAD が含むとみなす。"""
-        names = {k: next(u.name for u in self.units if units_flow.key_of(u) == k) for k in pulls}
+    def advance(self, pulls, overdue):
+        """`advances` には反映先を決める単位だけを残す。"""
+        names = {k: next(u.name for u in self.units if units_flow.key_of(u) == k) for k in (*pulls, *overdue)}
+        self.advances.append((self.now, [names[k] for k in pulls]))
         return {k for k, n in names.items() if self.now >= self.visible.get(n, 0)}
 
     def sleep(self, seconds: float) -> None:
@@ -410,8 +406,7 @@ class Waiting(Fake):
         self.now += seconds
 
     def watching(self) -> units_queue.Watching:
-        ingest = self.tmp / "ingest.json"
-        return units_queue.Watching(self.read, self.advance, ingest, self.budget, lambda: self.now, self.sleep, self.held)
+        return units_queue.Watching(self.read, self.advance, self.tmp / "ingest.json", self.budget, lambda: self.now, self.sleep)
 
     def flow(self, *, limit: int = 6, merged=(), chained: bool = False, landed=()) -> units_flow.Flowed:
         def failed(unit, exc):

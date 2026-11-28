@@ -333,17 +333,15 @@ class _Flow:
         if not batch or self.broken is not None:
             return False
         try:
-            taken = set(self.ops.watching.advance(batch))
+            taken = set(self.ops.watching.advance(batch, self.overdue))
         except UnitsStopped as exc:
             self.broken = exc
             return True
-        recovered = set(self.ops.watching.held(self.overdue)) if self.overdue else set()
-        for key in recovered:
+        for key in [k for k in self.overdue if k in taken]:
             del self.overdue[key]
             del self.failures[key]
-        done = [*recovered, *(k for k in batch if k in taken)]
-        self.board.taken(*done)
-        for key in done:
+        self.board.taken(*taken)
+        for key in taken:
             self.order.finish(key)
         for key, pull in batch.items():
             if key not in taken and not self.board.add_ingest(key, pull):

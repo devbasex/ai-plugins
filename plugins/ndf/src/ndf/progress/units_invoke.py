@@ -502,15 +502,9 @@ def _to_take_in(
 
     含む単位は反映を通らないので、反映待ちの記録（前の起動の後に手元へ入ったもの）をここで消す。
     """
-    held = _held_in_head(ctx, done)
-    units_queue.Board(watching).taken(*held)
-    return {k: p for k, p in done.items() if p.merge_sha and k not in held}
-
-
-def _held_in_head(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> frozenset[str]:
-    """マージのコミットを手元の HEAD が含む単位のキー。取得も作業場所の更新もしない。"""
-    held = Git(ctx.sprint).contained((p.merge_sha for p in pulls.values()), "HEAD")
-    return frozenset(k for k, p in pulls.items() if p.merge_sha in held)
+    held = Git(ctx.sprint).contained((p.merge_sha for p in done.values()), "HEAD")
+    units_queue.Board(watching).taken(*(k for k, p in done.items() if p.merge_sha in held))
+    return {k: p for k, p in done.items() if p.merge_sha and p.merge_sha not in held}
 
 
 def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
@@ -569,20 +563,24 @@ def _watching(ctx: Context, ports: Ports, hub: github.GitHub) -> units_queue.Wat
     budget = overrides["ci_budget"] if "ci_budget" in overrides else route.params()["ci_budget"].default
     return units_queue.Watching(
         read=lambda numbers: units_queue.read(hub, numbers, ctx.branch),
-        advance=lambda pulls: advance(ctx, pulls),
+        advance=lambda pulls, overdue: advance(ctx, pulls, overdue),
         ingest=ctx.work_dir / UNITS_DIR / INGEST_FILE,
         budget=float(str(budget)),
         clock=ports.clock,
         sleep=ports.sleep,
-        held=lambda pulls: _held_in_head(ctx, pulls),
     )
 
 
-def advance(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> frozenset[str]:
+def advance(
+    ctx: Context,
+    pulls: Mapping[str, github_pulls.MergedPull],
+    overdue: Mapping[str, github_pulls.MergedPull] = MappingProxyType({}),
+) -> frozenset[str]:
     """スプリントブランチを 1 回取得して作業場所をマージのコミットまで進め、反映できた単位のキーを返す。
 
     マージのコミットが分からない単位は確かめられないので、反映できたとみなす（`sprint_pr` が読み直して進める）。取得した
-    リモートにまだ見えないコミットは返さない。見えるのに作業場所を進められなければ止める。
+    リモートにまだ見えないコミットは返さない。見えるのに作業場所を進められなければ止める。`overdue`（反映の上限を超えた単位）は
+    反映先の選定と止める判定に使わず、進めた後の HEAD が含むかだけを `pulls` とまとめて確かめる。
     """
     known = [p for p in pulls.values() if p.merge_sha]
     if not known:
@@ -590,8 +588,8 @@ def advance(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> froze
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
     head = _catch_up_to(g, ctx, known, tip)
-    reached = {head} | g.contained((p.merge_sha for p in known if p.merge_sha != head), head)
-    taken = frozenset(k for k, p in pulls.items() if not p.merge_sha or p.merge_sha in reached)
+    reached = {head} | g.contained((p.merge_sha for p in (*known, *overdue.values()) if p.merge_sha != head), head)
+    taken = frozenset(k for k, p in {**pulls, **overdue}.items() if not p.merge_sha or p.merge_sha in reached)
     if g.contained((p.merge_sha for k, p in pulls.items() if k not in taken), tip):
         _check_sprint_branch(g, ctx)
         raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
