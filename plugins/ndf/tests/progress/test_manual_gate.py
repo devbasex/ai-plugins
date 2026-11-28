@@ -266,6 +266,23 @@ def test_the_flow_uses_an_earlier_approval_without_asking_again(repo, st, env, c
     assert "design" in env.calls and "design-merge" in env.calls and "design-reading" not in env.calls
 
 
+def test_the_flow_does_not_pass_the_gate_while_an_answer_is_being_written(repo, st, env, capsys):
+    """先の承認で承認ゲートを済ませる書き込みは、回答と同じ排他を取る。"""
+    tid = _approved_in_the_flow(st, capsys, repo, env)
+    finishing.main(["retry", tid, DESIGN, "--reason", "やり直す"])
+    run._write(st, tid, run.model.EventDraft("started", "workflow", DESIGN, payload={"inputs": {}}, rev=1))
+    run._write(st, tid, run.model.EventDraft("failed", "workflow", DESIGN, payload={"step": None}, rev=1))
+    finishing.main(["retry", tid, DESIGN, "--reason", "やり直す"])
+    capsys.readouterr()
+
+    with store.approval_lock(st, tid), pytest.raises(model.Refused, match="回答か開き直し"):
+        _next(st, tid, repo, env)
+    assert _state(st, tid, DESIGN) == "running"
+
+    _next(st, tid, repo, env)
+    assert _state(st, tid, DESIGN) == "finished"
+
+
 def test_a_stage_without_a_gate_finishes_and_goes_on_as_before(repo, st, env, capsys):
     """受け入れ条件 4。light モードの設計の工程は承認ゲートを持たない。"""
     tid = _new(capsys, "light")

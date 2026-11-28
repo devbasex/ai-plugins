@@ -199,7 +199,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 - `committed_reopen(v, *, trigger, later, reason) -> list[Event]`（`progress/reopening.py`）は、送り直しの判定に使う開き直しの事象を返す
 - `stage_revocations(v, stage)`（`progress/approval_decide.py`）は、工程に記録した承認に、投稿前の記録（事象 `approval_posting`）に残る、その工程の未確定の承認を加える。資料を出し直す前の記録も調べる。承認の境界より前の記録は、境界を書くときに取り消してあるので加えない。`reread`・`_append_hand_finish`・`_send_back`・`_reopen_unbound`・`consume_held` が使い、`plan_reopen` も同じ規則で未確定の承認を加える
 - `last_seq(conn, machine_id)`（`progress/store.py`）は、最後の事象の番号を返す。`_append_hand_finish` が排他を取った後の確かめに使う
-- `approval_lock(store, machine_id)`（`progress/store.py`）は、承認を書く操作と取り消す操作が共有する排他である。`answer`・`_cmd_retry`・`_send_back`・`_reopen_unbound`・`reread`・`_append_hand_finish`（回答待ちを書くとき）・`consume_held`（質問し直すとき）が使う
+- `approval_lock(store, machine_id)`（`progress/store.py`）は、承認を書く操作と取り消す操作が共有する排他である。`answer`・`_cmd_retry`・`_send_back`・`_reopen_unbound`・`reread`・`_append_hand_finish`（回答待ちを書くとき）・`consume_held`（質問し直すとき）・`prior_approval`（先の承認でステップを済ませるとき）が使う
 - `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は開き直さない。ただし、開き直す工程がリリースしないで終えて無効にした工程（`disabled` の `cause: no_release` と工程名が一致する）には、`later` の値によらず `enabled` を足す
 - `core/merge_approval.py` の証跡の読み取りは、担い手 `reopen` を却下の行でだけ数える。`失効する承認:`（承認を指す値の JSON の並び）を持つ却下は、指した承認だけを取り消す。値を読めなければ、先の承認をすべて取り消す却下として数える
 - 取り消されない操作は、対象の工程のうち、定義がマージかリリースのステップを持ち、工程が終了したか、そのステップの成功を直近の開き直しより後に記録したものを挙げる
@@ -380,7 +380,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `_effects` | `progress/gate/answering.py` | 新設 | `(v: View, q: Question, a: Answer) -> Effects` | 回答の種類と工程の状態から、`late`・`after_release`・開き直し・`failed` の要否を返す |
 | `_drafts` | `progress/gate/answering.py` | 新設 | `(v, q, a, effects: Effects, extra: Mapping) -> list[EventDraft]` | `reopened`、`answered`、`failed`、出力、外した課題の順に下書きを並べる |
 | `_trail_by` | `progress/gate/answering.py` | 変更 | `(conn, q: Question, a: Answer, seen: Target) -> str \| None` | 追認（`after_release`）と `no_release` の承認では `None` を返す |
-| `_ensure_trail` | `progress/gate/answering.py` | 変更 | `(conn, v: View, held: Event, a: Answer, post: Post) -> Callable[[], None]` | 証跡を書く関数を返し、呼び手がトランザクションの外で打つ。記録した回答がもう有効でない（`boundary` より前、後の回答がある）ときは何も書かない関数を返す |
+| `_ensure_trail` | `progress/gate/answering.py` | 変更 | `(conn, v: View, held: Event, a: Answer, post: Post) -> Callable[[], None]` | 証跡を書く関数を返し、呼び手がトランザクションの外で打つ。記録した回答がもう有効でないときは何も書かない関数を返す。有効でない条件は、設計文書の「送り直しで証跡を投稿しない条件」のとおり |
 | `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool \| None = None) -> bool` | 真（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直し）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない。指定しない `ndf ci answer` は、今と同じく識別子が同じ行があれば書かない |
 
 - `answer`

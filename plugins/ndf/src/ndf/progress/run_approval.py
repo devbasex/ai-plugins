@@ -125,14 +125,21 @@ def _pass_gate(d: Hands, v: View, m: Move, answered: model.Event) -> None:
 def prior_approval(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     """自動の流れの承認ゲートの待ち。有効な先の承認があれば質問せずにステップを済ませ、無ければ待ちを返す。
 
-    手で終えた回答待ちは、回答を `consume_held` が読むので、ここでは先の承認を使わない。"""
+    手で終えた回答待ちは、回答を `consume_held` が読むので、ここでは先の承認を使わない。
+    待ちの状態は回答も受けるので、ステップを済ませる書き込みは回答と共有する排他の中で行う。事象が増えていれば何も書かずに
+    None を返し、呼び手が次の手を決め直す。"""
     assert m.stage is not None
     if m.step is None or m.progress is None or not invoke.is_listen(m.step) or m.progress.held_finish is not None:
         return d.report(v, m)
     found = standing_approval(d, v, m.stage, m.step)
     if found is None:
         return d.report(v, m)
-    _pass_gate(d, v, m, found)
+    # 回答は証跡を投稿してから DB へ確定する。その間にステップを済ませると、PR の却下が DB に残らない
+    with store.approval_lock(d.st, v.machine_id):
+        with store.transaction(d.st) as conn:
+            unchanged = store.last_seq(conn, v.machine_id) == v.events[-1].seq
+        if unchanged:
+            _pass_gate(d, v, m, found)
     return None
 
 
