@@ -42,7 +42,7 @@ plugins/ndf/src/ndf/
                  acceptance_record.py *, acceptance_record_decide.py *}
 ```
 
-依存は一方向だけで、循環は無い。層は `checks/rules.json` の `structure.layers` の順に `contracts`・`adapters`・`core`・`progress`・`domains` と並び、各層は並びで前にある層に依存する。要求仕様書の読み出し（`core/requirements_docs.py`・`core/requirements_history.py`）と本文の書き換え（`core/issue_body.py`）は `core` に置く。`progress` と `domains` の呼ぶ側がそこを使う。`core` から `progress` を呼ばないため、起点コミットの解決は `progress.command.base_ref` を使わずに `Git.commit_or_none` で行う。構成要素の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
+依存は一方向だけで、循環は無い。層は `checks/rules.json` の `structure.layers` の順に `contracts`・`adapters`・`core`・`progress`・`domains` と並ぶ。各層は、並びで前にある層に依存する。要求仕様書の読み出し（`core/requirements_docs.py`・`core/requirements_history.py`）と本文の書き換え（`core/issue_body.py`）は `core` に置く。`progress` と `domains` の呼ぶ側がそこを使う。`core` から `progress` を呼ばないため、起点コミットの解決は `progress.command.base_ref` を使わずに `Git.commit_or_none` で行う。構成要素の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
 
 **新設のモジュールを設計文書の構成要素より 6 つ多く置く。** 6 つは次のモジュールである。
 
@@ -53,7 +53,7 @@ plugins/ndf/src/ndf/
 - `domains/release/acceptance_record.py`
 - `domains/release/acceptance_record_decide.py`
 
-`progress/requirements_stage.py` を分けるのは、`progress/command.py` が行数の上限（`checks/rules.json` の `structure.max_lines` の 1,000 行）にちょうど達していて、行を足せないためである。ほかの 5 つは、1 つのモジュールに置くと、上限に近づくか、判断だけの関数と I/O が同じモジュールに混ざるためである。判断だけの関数は、名前が `_decide` で終わるモジュールに置き、外部の I/O を持たない。新設のモジュールは設計文書の「設計の結果」の触るファイルに足した。
+`progress/requirements_stage.py` を分けるのは、`progress/command.py` に行を足せないためである。このファイルは行数の上限（`checks/rules.json` の `structure.max_lines` の 1,000 行）にちょうど達している。ほかの 5 つは、1 つのモジュールに置くと、上限に近づくか、判断だけの関数と I/O が同じモジュールに混ざるためである。判断だけの関数は、名前が `_decide` で終わるモジュールに置き、外部の I/O を持たない。新設のモジュールは設計文書の「設計の結果」の触るファイルに足した。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
