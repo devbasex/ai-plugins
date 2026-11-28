@@ -42,6 +42,22 @@ def test_criteria_of_numbers_the_checkboxes_from_the_top() -> None:
     assert [c.digest for c in got] == [rd.criterion_digest(t) for t in "甲乙丙"]
 
 
+@pytest.mark.parametrize(("operation", "outcome"), [("取り消す", "公開される"), ("公開する", "下書きのまま")])
+def test_criteria_digests_change_with_the_continuation_lines(operation: str, outcome: str) -> None:
+    def read(op: str, result: str) -> tuple[rd.Criterion, ...]:
+        return rd.criteria_of(_doc_text(criteria=f"- [ ] 前提: 下書きがある\n      操作: {op}\n\n      結果: {result}\n"))
+
+    before, after = read("公開する", "公開される"), read(operation, outcome)
+    assert before[0].text == "前提: 下書きがある\n操作: 公開する\n結果: 公開される"
+    assert before[0].digest != after[0].digest
+    assert rd.criteria_list_digest(before) != rd.criteria_list_digest(after)
+
+
+def test_criteria_of_skips_the_headings_in_code_blocks() -> None:
+    example = "```markdown\n## 受け入れ条件\n\n- [ ] 例\n```\n\n"
+    assert [c.text for c in rd.criteria_of(example + _doc_text())] == ["甲", "乙"]
+
+
 def test_criteria_of_returns_nothing_without_checkboxes() -> None:
     assert rd.criteria_of("# 題\n") == ()
 

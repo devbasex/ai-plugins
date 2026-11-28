@@ -149,8 +149,8 @@ plugins/ndf/src/ndf/
 | `Doc` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(path: str, source: str, commit: Optional[str], issues: tuple[int, ...], body: str, criteria: tuple[Criterion, ...], criteria_digest: str)` | 読んだ要求仕様書 1 本 |
 | `Lookup` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(docs: dict[int, Doc], missing: tuple[int, ...])` | 番号ごとの要求仕様書と、見つからない番号 |
 | `RequirementsError` | `core/requirements_decide.py` | 新設（例外） | `(cause: str, detail: str, gaps: Sequence[dict[str, str]] = ())` | 読めない理由を結果 JSON の `cause` で持つ |
-| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(text: str) -> str` | チェックボックスの印と先頭の番号を除き前後の空白を落とした文の SHA-256 の先頭 12 桁を返す |
-| `criteria_of` | `core/requirements_decide.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを上から番号を振って読み、文の重なりを断る |
+| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(text: str) -> str` | チェックボックスの印と先頭の番号を除き、各行の前後の空白と空行を落とした文の SHA-256 の先頭 12 桁を返す |
+| `criteria_of` | `core/requirements_decide.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを、字下げした継続の行を含めて上から番号を振って読み、文の重なりを断る |
 | `criteria_list_digest` | `core/requirements_decide.py` | 新設 | `(criteria: Sequence[Criterion]) -> str` | 条件の版を番号の順に改行でつないだ文字列の SHA-256 の先頭 12 桁を返す |
 | `parse_doc` | `core/requirements_decide.py` | 新設 | `(path: str, raw: bytes, *, source: str, commit: Optional[str], repo: str) -> Doc` | バイト列を UTF-8 で読み、元の Issue の行と条件を確かめて `Doc` にする |
 | `base_commit` | `core/requirements_docs.py` | 新設 | `(git: Git, remote: str, base: str) -> str` | `<remote>/<base>` を 1 回だけコミットに解決する |
@@ -206,7 +206,7 @@ plugins/ndf/src/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `criteria_of` | `core/plan/inputs_decide.criteria` | `core/plan/inputs_decide.py` を読んだ | 使う（番号の数え方を共有し、版だけを足す） |
+| `criteria_of` | `core/plan/inputs_decide.criteria` | `core/plan/inputs_decide.py` を読んだ | 使う（番号の数え方を共有する。条件の文は、同じモジュールの `criteria_blocks` で継続の行まで読む） |
 | `criterion_digest`・`criteria_list_digest` | `hashlib.sha256`・`domains/loop/acceptance_decide` の今の表 | `grep -rn sha256 src/ndf/core` | 使う（`hashlib`）。今の確認の表は版を持たないので、版を計算する既存の関数は無い |
 | `parse_doc` | markdown-it-py（`domains/materials/collect._tokens`） | `grep -rn MarkdownIt src/ndf` | 使わない（`inputs_decide.criteria` が行で読んでおり、数え方を変えないため） |
 | `worktree_candidates` | `contracts/worker_paths.open_workdir`・`read_bytes`・`check_owned`・`check_unshared`・`has_acl` | `contracts/worker_paths_open.py` を読んだ | 使う |

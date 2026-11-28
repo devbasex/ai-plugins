@@ -53,8 +53,8 @@ def body_lines(body: str) -> list[str]:
 
 
 def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
-    """行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
-    return next((i for i, line in enumerate(lines) if line.rstrip() == heading), None)
+    """コードブロックの外で、行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
+    return next((i for i, line in outside_fences(lines) if line.rstrip() == heading), None)
 
 
 def section_lines(body: str, heading: str) -> Optional[list[str]]:
@@ -83,10 +83,30 @@ def outside_fences(lines: Iterable[str], fence: re.Pattern[str] = _FENCE) -> Ite
 
 
 def criteria(body: str) -> list[str]:
-    """受け入れ条件のセクションのチェックボックスの文（上から）。セクションが無ければ空。"""
+    """受け入れ条件のセクションのチェックボックスの先頭の行の文（上から）。セクションが無ければ空。"""
+    return [block.split("\n", 1)[0] for block in criteria_blocks(body)]
+
+
+def criteria_blocks(body: str) -> list[str]:
+    """受け入れ条件のセクションのチェックボックスを、字下げした継続の行を含めて返す（上から。番号の数え方は `criteria` と同じ）。
+
+    各行は前後の空白を落として改行でつなぐ。空行は飛ばし、字下げの無い行で条件は終わる。
+    """
+    blocks: list[list[str]] = []
+    inside = False
     found = section_lines(body, HEADING)
-    matches = [_BOX.match(line) for line in found] if found is not None else []
-    return [m.group(1).strip() for m in matches if m]
+    if found is None:
+        return []
+    for line in found:
+        box = _BOX.match(line)
+        if box:
+            blocks.append([box.group(1).strip()])
+            inside = True
+        elif inside and line.strip():
+            inside = line.startswith((" ", "\t"))
+            if inside:
+                blocks[-1].append(line.strip())
+    return ["\n".join(block) for block in blocks]
 
 
 def section_lack(body: str) -> Optional[str]:

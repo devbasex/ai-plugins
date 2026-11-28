@@ -1,6 +1,7 @@
 """要求仕様書の型と、読んだバイト列の解析、受け入れ条件のハッシュ値の計算（外部の I/O を持たない。#4735 の決定 2・決定 10）。
 
 条件のハッシュ値は条件の文の SHA-256 の先頭 `DIGEST_CHARS` 桁で、チェックボックスの記号と先頭の番号は文に数えない。
+条件の文は字下げした継続の行（`操作:`・`結果:` など）を含み、各行の前後の空白と空行は数えない。
 並べ替えとチェックの付け外しでは変わらず、文を直すと変わる。条件一覧のハッシュ値は、条件のハッシュ値を番号の順に
 つないだもののハッシュ値である。
 """
@@ -65,8 +66,9 @@ def _digest(text: str) -> str:
 
 
 def _sentence(text: str) -> str:
-    """チェックボックスの記号と先頭の番号を除き、前後の空白を落とした条件の文。"""
-    return _MARKS.sub("", text, count=1).strip()
+    """チェックボックスの記号と先頭の番号を除き、各行の前後の空白と空行を落とした条件の文。"""
+    joined = "\n".join(line.strip() for line in text.split("\n") if line.strip())
+    return _MARKS.sub("", joined, count=1).strip()
 
 
 def criterion_digest(text: str) -> str:
@@ -76,7 +78,7 @@ def criterion_digest(text: str) -> str:
 
 def criteria_of(body: str) -> tuple[Criterion, ...]:
     """`## 受け入れ条件` のチェックボックスを上から番号を振って読む。同じ文の条件が 2 つあれば `RequirementsError`。"""
-    sentences = [_sentence(c) for c in inputs_decide.criteria(body)]
+    sentences = [_sentence(c) for c in inputs_decide.criteria_blocks(body)]
     found = tuple(Criterion(n, text, _digest(text)) for n, text in enumerate(sentences, 1))
     numbers: dict[str, list[int]] = {}
     for c in found:

@@ -153,15 +153,18 @@ def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]
     組になるのは、名前の番号が設計書の名前の番号と重なる要求仕様である（`issue-7-8-design.md` なら課題 7 と 8 の
     要求仕様と、番号をまとめた `issue-7-8-requirements.md`）。工程の `--issue` が課題 7 だけでも、課題 8 の要求仕様を
     落とさない。設計書でない対象と、コピーが 1 つも無い設計書は含めない。
+
+    作業場所の外を読み手役に渡さないため、`issues/` がシンボリックリンクなら列挙しない。設計書の対象が無いときも列挙しない。
     """
+    designs = [t for t in targets if t.kind == "design"]
+    if not designs or os.path.islink(cwd / "issues"):
+        return {}
     names = (f"issues/{p.name}" for p in (cwd / "issues").glob("*-requirements.md"))
     numbered = sorted((sorted(issue_docs.requirements_issues(rel)), rel) for rel in names)
     out: dict[str, list[str]] = {}
-    for t in targets:
-        if t.kind != "design":
-            continue
+    for t in designs:
         wanted = issue_docs.design_issues(t.path)
-        found = [rel for numbers, rel in numbered if wanted.intersection(numbers) and _is_regular(cwd / rel)]
+        found = [rel for numbers, rel in numbered if wanted.intersection(numbers) and regular_file(cwd, rel)]
         if found:
             out[t.path] = found
     return out

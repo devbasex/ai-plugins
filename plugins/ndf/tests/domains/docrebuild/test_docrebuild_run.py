@@ -250,6 +250,15 @@ def test_requirements_pair_by_the_numbers_in_the_name(tmp_path: Path) -> None:
     assert drive.requirements_of(tmp_path, targets) == {"issues/issue-7-8-design.md": ["issues/issue-7-8-requirements.md"]}
 
 
+def test_requirements_are_not_read_through_a_linked_issues_directory(tmp_path: Path) -> None:
+    """`issues/` が作業場所の外を指すリンクなら、その中の要求仕様書を組にしない。"""
+    cwd, outside = tmp_path / "work", tmp_path / "outside"
+    _write(outside, "issue-75-requirements.md")
+    cwd.mkdir()
+    (cwd / "issues").symlink_to(outside, target_is_directory=True)
+    assert drive.requirements_of(cwd, [Target(DESIGN, "design")]) == {}
+
+
 def test_requirements_without_the_issues_directory(tmp_path: Path) -> None:
     assert drive.requirements_of(tmp_path, [Target(DESIGN, "design")]) == {}
 
