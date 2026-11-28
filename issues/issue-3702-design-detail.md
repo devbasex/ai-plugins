@@ -25,7 +25,7 @@ contracts/
 ├── workflow/{modes/{standard,legacy-refactor}.json, context.schema.json}
 ├── templates/{design-pr-review*, docs-ci*, design-merge-approved*, impl, implementation-plan, implementation-plan-convert*, params}.json
 ├── limits/review-units.{target-lines*, max-lines*}.json
-├── schemas/{project-workflow.schema.json, ndf-settings/project.schema.json, result.schema.json, io/}
+├── schemas/{project-workflow.schema.json, ndf-settings/project.schema.json, io/}
 ├── worker/kinds.json
 └── domains/env.json
 ```
@@ -59,7 +59,7 @@ contracts/
 | `src/ndf/core/plan/review_units_decide.py` | 変更 | #4369 の `Unit` に並列で使う欄を足す | — | — |
 | `src/ndf/progress/design_record.py` | 新設 | 承認の記録をイベントの値から組む・照らす・読む | `units_files`・`folding` | `build`・`stale`・`reset_drafts`・`approved_of`・`required`・`mismatches`・`without`・`converted`・`reapproved_of` |
 | `src/ndf/progress/stages.py` | 変更 | 同じ工程の済んだステップから、後のステップへ渡す出力を取る | — | `carried`・`carried_inputs`（新設） |
-| `src/ndf/progress/units_invoke.py` | 変更 | 単位の読み元を単位のファイルにし、承認と照らし、並列に流す | 下の 3 つ・`units_files`・`units_sync` | `prepare`・`run_stage`（変更）・`advance`（新設） |
+| `src/ndf/progress/units_invoke.py` | 変更 | 単位の読み元を単位のファイルにし、承認と照らし、並列に流す | 下の 3 つ・`units_files` | `prepare`・`run_stage`（変更）・`advance`（新設） |
 | `src/ndf/progress/units_queue.py` | 新設 | マージキューで待つ単位の状態を読む | `github` | `read`・`action` |
 | `src/ndf/progress/units_convert.py` | 新設 | この変更より前の表を単位のファイルへ変換する | `review_units_decide`・`units_files`・`design_record`・`units_sync` | `convert`・`compare` |
 | `src/ndf/progress/units_sync.py` | 新設 | 送り先を確かめ、承認した文書をスプリントブランチへ取り込む | `git`・`github`・`design_record` | `destination_errors`・`outgoing_errors`・`sync` |
@@ -264,10 +264,7 @@ contracts/
 | `outputs.reviewed` | `design-pr-review`（`ndf cross-review run --follow-base`） | `{"repo": "<所有者>/<リポジトリ>", "pr": 番号, "head": "<SHA>", "base": "<ブランチ>"}`。そろわなければ null |
 | `outputs.design_units` | `units-check`（`ndf plan units check --design-gate`） | 上の「コマンド」の表 |
 
-- 結果の `outputs` のスキーマ（`contracts/schemas/result.schema.json` の `$defs/outputs`）は、定義の無いキーを受けない。形に合わないと、`core/plan/records.recorded_outputs` が `outputs` 全体を落とすので、次の 2 つのキーを足す
-  - `reviewed`: `repo`・`pr`・`head`・`base` がすべて必須の object か、null
-  - `design_units`: 上の「コマンド」の表のキーがすべて必須の object。`head`・`branch` は文字列、`issues`・`omitted` は整数の配列、`handling`・`limits`・`criteria` は object、`units` は object の配列
-- 工程の定義の `outputs` に無いキーは `invoke.finished` が捨てるので、2 つのキーは工程「ドキュメントレビュー」の `outputs` と `optional_inputs` に載せる
+- 工程の定義の `outputs` に無いキーは `invoke.finished` が捨てるので、2 つのキーは工程「ドキュメントレビュー」の `outputs` と `optional_inputs` に載せる。結果の `outputs` のスキーマ（`contracts/schemas/result.schema.json` の `$defs/outputs`）は定義の無いキーを拒み、`outputs` を丸ごと落とす。`reviewed`（object か null）と `design_units` を足す
 - 後のステップは、2 つのキーを `NDF_STAGE_INPUT` と差し込みで受ける。値は同じ工程の済んだステップからだけ取り、文脈の値は使わない。前の回や前の工程の値を混ぜないためである
 
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
@@ -302,9 +299,9 @@ contracts/
 | `gate/entry.present` | 設計承認ゲートで `required` なら、`carried` の値から `build` して `stale` を見る。違いがあれば資料を出さず、`reset_drafts` を書いて `ndf progress next` を案内する。合えば承認資料に単位の表・警告・省いた課題を足す。質問の PR は `review.pr` にする |
 | `gate/answering.answer` | 回答の確定の前に、同じ値から `build` して `stale` を見る。違いがあれば回答を書かず、`reset_drafts` を書く。承認なら payload に `design_target` を足す。工程「実装」の再承認（決定 10 の変換で求める承認。下の「この変更より前のスプリントの変換」）の回答では、その承認の待ちを返した `gate` の結果の `report.design_target` を payload に足す。設計 PR の照合ではないので `stale` は見ない |
 | `gate/answering.recheck` | 回答の後に head かマージ先が変わっていれば、待ちへ戻すかわりに `reset_drafts` を書く |
-| `run._start`・`_run_step` | 入力を `stages.carried_inputs` で組む。`_run_step` は `NDF_MACHINE_ID` も渡す（下の「コマンド `ndf progress units`」） |
+| `run._start`・`_run_step` | 入力を `stages.carried_inputs` で組む。`_run_step` は工程の script のステップの子へ `NDF_MACHINE_ID`（`StageRun.env_extra`。`invoke._call_script` も渡す）を足し、`design-sync` が読む |
 | `run._consume` | MVV 判定が人の承認を省いて作る回答にも `design_target` を足す。判定の結果が持つ承認の対象（出力 `mvv_gate.target` の `repo`・`pr`・`base`・`head`。判定が読んだ PR の値）を、記録の `review` の 4 つと比べる。1 つでも違うか欠ければ、人の承認を省く回答を作らず、`reset_drafts` を書いてレビューへ戻す |
-| `run._step_draft` | `units-check`・`docs-ci`・`design-mvv`・`design-merge-approved` のどれかが `approval_stale` で止まれば、`reset_drafts` の後に失敗のイベントを同じ書き込みで書く（未了に戻すイベントは、工程が実行中の状態のときしか書けないので、失敗のイベントより先に書く）。`retry` と `next` で `design-pr-review` から流れる |
+| `run._step_draft` | `units-check`・`docs-ci`・`design-mvv`・`design-merge-approved` のどれか（`design-pr-review` は下の「異常系の処理」）が `approval_stale` で止まれば、`reset_drafts` の後に失敗のイベントを同じ書き込みで書く（未了に戻すイベントは、工程が実行中の状態のときしか書けないので、失敗のイベントより先に書く）。`retry` と `next` で `design-pr-review` から流れる |
 | `run.approved_seen` | 返す辞書に `design_target` を含める |
 | `folding.StepProgress._recorded` | 未了に戻すイベントの対象が待ちのステップなら、`waiting` を消す |
 
@@ -411,18 +408,11 @@ contracts/
 
 | 場所 | 失敗 | 扱い |
 | --- | --- | --- |
-| `design-pr-review` | `outputs.reviewed` が無いか null | `progress/invoke` がこのステップを `precondition` で止める。済みにしないので、`retry` の後はレビューから流れる（開始点は表の下） |
+| `design-pr-review` | `outputs.reviewed` が無いか null | `progress/invoke` がこのステップを `approval_stale` で止め、`run._step_draft` が `reset_drafts` を書く。保存先が新しくなるので、`retry` の後はレビューから流れる。同じ保存先のままだと終わった回の結果が返る |
 | `docs-ci` | PR の HEAD が `reviewed_head` と違う（開始と成功の確定の時点） | `approval_stale`。ステップを未了に戻し、レビューから流し直す |
 | `docs-ci` | 必須のチェックの失敗 | 工程を止める。直して push すると head が変わるので、打ち直しは記録の照合でレビューからになる |
 | `design-merge-approved` | head か base が承認と違う（未マージ） | `approval_stale`。ステップを未了に戻し、レビューから流し直す |
 | 同 | マージ済みで head か base が承認と違う | `refused`。流し直さない（[#4420](https://github.com/devbasex/ai-plugins/issues/4420) の条件 2。人が確かめる） |
-
-**`design-pr-review` の打ち直しの開始点**: 今の `invoke.plan_start` は、push で止まったプランを `--from push` で再開し、その回が通った後の打ち直しにも同じ開始点を使う。`push` はレビューをしないので、そのままでは `reviewed` が null のまま、打ち直すたびに push だけが流れる。このテンプレートでは次のようにする。
-
-- 前の回が終わっていて、`push` で止まり（結果の `next` が `--from push`）、保存先の `outputs.json` の `reviewed` が object のときだけ、`push` から流す
-- 前の回が終わっていてそれ以外のときは、`review` から流す。`reviewed` が無いか null の場合と、通った回の後にステップが未了に戻った場合が当たる
-- 前の回が終わっていないとき（途中で落ちた）は、今のとおりである
-- `review` から始める新しい回は、起動の前に `outputs.json` の `reviewed` を除く（`invoke.plan_argv`）。残る値は、最後に流したレビューが返したものだけになる
 
 ### 単体テストの観点
 
@@ -432,13 +422,12 @@ contracts/
   - ほかのモードの並びは変わらない
   - `documentation` の「ドキュメントレビュー」は、必須の入力が `worktree`・`branch` だけで、出力に `mvv_gate` が無い
 - `tests/progress/test_sprint_templates.py` で、3 つの新しいテンプレートの argv を組む
-- `design-pr-review` の開始点は、`reviewed` が object の push の失敗だけが `push` で、null・欠落の push の失敗と、通った回の後は `review` からになる
 
 ## cross-review の `--follow-base` と `ndf ci merge --verify-merged`
 
 満たす決定: 決定 1、I7。
 
-この節の用語は次のとおりである。相手役はレビューを担当する別の AI、席はレビュー担当の枠、収束は、対応が必要な指摘がすべて処理され、未解決の指摘が無い状態でレビューが終わることをいう。理由を添えて見送りが確定した指摘は、未解決に数えない。
+この節の用語は次のとおりである。相手役はレビューを担当する別の AI、席はレビュー担当の枠、収束は、対応の要る指摘が残らず終わった状態をいう（理由を添えて見送った指摘は残りに数えない）。
 
 | 関数 | 定義するファイル | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
@@ -612,7 +601,7 @@ contracts/
 `prepare` は次の順に見る。上で止まれば下は見ない。
 
 1. `required(snap)` が真なら、`approved_of`。無ければ始めない
-2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。単位ごとに流すか、#4369 のこれまでの経路（`impl` を 1 回）で流すかは、実装計画の「レビューの単位」の見出しか単位のファイルがあるかで決める。どちらも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む。`required` が真なら、取得と push は下の「承認が要る場合の開始前の push」に従う
+2. #4369 の開始前の確かめを呼ぶ（取得・配布先として宣言したブランチでないこと・ff・push）。単位ごとに流すか、#4369 のこれまでの経路（`impl` を 1 回）で流すかは、実装計画の「レビューの単位」の見出しか単位のファイルがあるかで決める。どちらも、手元と取得した先端の両方で調べる。承認が要るスプリントは、常に単位の経路にする。ここで決まった HEAD を `start_head` とし、3 より後の照合・読み込み・起動の判定は、すべてこのコミットを読む
 3. `required` が真なら、承認した文書が届いていることを確かめる。次のどちらかのコミットが、`start_head` と同じか `start_head` の祖先なら通る（`git merge-base --is-ancestor <コミット> <start_head>`）。どちらでもなければ始めない。SHA の一致は条件にしない。単位をマージするたびにスプリントブランチが進むためである
    - 記録の head
    - 取り込みのコミット（`design-sync.json` の、`record_head` が記録の head と同じもの）
@@ -620,38 +609,6 @@ contracts/
 5. 古い定義で単位の欄があれば、単位のファイルの有無にかかわらず `units_convert.convert` を呼ぶ。変換が完了して承認も要らなければ、`convert` は None を返す。変換がコミットを足したら `start_head` を取り直す。この変更より後に作ったスプリントで、欄があるのに単位のファイルが無ければ始めない
 6. `required` が真なら、記録の `targets.omitted` の課題を、課題ごとの単位（`units_decide.single`）にする。全部の課題が省いた課題で欄もファイルも無くても、単位の経路を続ける。`required` が偽で、欄もファイルも無ければ、#4369 の「これまでの経路」（単位に分けず `impl` を 1 回）
 7. 単位のファイルを `units_files.check`（`docs` は偽）に通す。違反があれば始めない
-
-**承認が要る場合の開始前の push**: `required` が真のとき、開始前の確かめは、行数の記録（下で定める）のほかに、送り先に無いコミットを送らない。#4369 の push は手元の HEAD をそのまま送るので、承認の後に手元だけで足したコミットまで公開されるためである。この確かめは打ち直しのたびに通り、`units.json` があっても省かない。
-
-- 最初に `units_sync.destination_errors` を通し、取得・不在の確かめ・push の相手を、返った URL にする。リモート名は使わない。取得は `git fetch --no-tags -- <URL> +refs/heads/<ブランチ>:refs/remotes/<remote>/<ブランチ>` で、#4369 の取得を置き換える
-
-取得した後は、上から順に当たる行で進める。表の「先端」は取得した先端である。
-
-| 手元と送り先の状態 | 扱い |
-| --- | --- |
-| 先端が手元の HEAD を含む | 手元が遅れていれば ff で進める。送るものは無いので push しない |
-| 先端より後の手元のコミットに、行数の記録でないものが 1 つでもある | 何もマージも push もせずに `stopped`（`refused`）。そのコミットを示し、公開してよければ利用者が push してから打ち直すと書く |
-| 手元のコミットがすべて行数の記録で、先端が手元の HEAD の祖先である | そのまま push する |
-| 手元のコミットがすべて行数の記録で、先端も進んでいる（中断の間に単位の PR がマージされた場合） | スプリントの作業場所で `git merge --no-ff --no-edit <先端>` してから push する。競合すれば `git merge --abort` して `stopped`（`base_conflict`） |
-| 送り先にブランチが無い（`git ls-remote --exit-code` が終了コード 2） | 手元の HEAD が記録の head そのものなら、その SHA を push してブランチを作り直す。マージした head ブランチを GitHub が自動で削除する設定が当たり、送る内容は設計 PR で公開済みである。ほかは `stopped`（`refused`） |
-
-行数の記録だけで再開を止めず、利用者に push や履歴の手直しを求めないためである。rebase でなくマージにするのは、手元のコミットを書き換えないためである。push の後は手元が送り先と同じ線上にあるので、以後の `advance` は ff で進む。
-
-**行数の記録**: 実装を進める AI か利用者が、`implementation-plan` の手順書に従い実装の後に作るコミットである（ndf のコードは作らない）。単位のファイルの `units[].actual_lines` を書き足し、`render` で表を作り直す。`units_sync.line_record_errors` が、先端より後のコミットを 1 つずつ調べる。途中のコミットの中身も公開されるので、先端との差分だけでは判定しない。行数の記録とするのは、次のすべてに当たるコミットである。
-
-- 親が 1 つである
-- 変えたのは、スプリントの課題の単位のファイルと実装計画だけで、追加・削除・改名が無い
-- 単位のファイルは `actual_lines` のほかが親と同じである（`units_files.differs` が偽）
-- 実装計画の全文が、親の実装計画の表をそのコミットの単位のファイルから作り直した結果と同じである。作り直しは `render` と同じ組み立て（`collect`・`judge`・`render_tables`。課題・省いた課題・上限・受け入れ条件の数は承認の記録の値）を使う。実行順や依存を表だけで書き換えたコミットや、表の周りに文を足したコミットは当たらない
-
-上の表の 4 行目で作ったマージのコミットは、push が失敗した後の打ち直しで先端より後に残る。片方の親が先端の祖先で、ツリーが自動のマージの結果（`git merge-tree --write-tree <親 1> <親 2>`）と同じマージのコミットは、送ってよいものとする。手で中身を足したマージは当たらない。
-
-`test_units_sync.py` では、次を確かめる。
-
-- 行数の記録だけなら push して進む。先端も進んでいれば、マージしてから push する。その push が失敗した後の打ち直しも進む
-- ほかの手元のコミット（途中で足して後で戻した変更、表の実行順だけの書き換え、手で中身を足したマージを含む）があるときは、マージも push も起きない
-- 先端と同じなら push しない。削除されたブランチは記録の head でだけ作り直す
-- 取得と push の引数は照合した URL である
 
 「この変更より後に作ったスプリント」は、保存した定義の工程「実装」の `optional_inputs` に `plan_omitted` があることで見分ける。無いものが「古い定義」である。この変更が足すキーだからである。
 
@@ -849,7 +806,6 @@ contracts/
 | `push_url` | `units_sync.py` | 新設 | `(git, repo: str, url: Optional[str] = None) -> tuple[Optional[str], list[str]]` | 下の表の「送り先の URL」の条件。通れば URL を返す。`url` を渡せば読み直さずに同じ値を確かめる |
 | `destination_errors` | 同上 | 新設 | `(git, record, context, machine_repo: str, url: Optional[str] = None) -> tuple[Optional[str], list[str]]` | 照合した URL と、送り先のリポジトリとブランチがゲートの記録とスプリントの状態に合わない点 |
 | `outgoing_errors` | 同上 | 新設 | `(git, tip: str, head: str, allowed: Sequence[str]) -> list[str]` | 下の「送るコミットの確かめ」に合わない点。変換の反映も使う |
-| `line_record_errors` | 同上 | 新設 | `(git, tip: str, head: str, record: Mapping) -> list[str]` | 先端より後のコミットのうち、送ってよくないもの（「承認が要る場合の開始前の push」） |
 | `sync` | 同上 | 新設 | `(st, machine_id, cwd, hub) -> dict` | 確かめてから取り込み、照合して push する |
 
 ### 送り先の確かめ
@@ -900,9 +856,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 
 ### 処理の手順
 
-`sync` の手順は次のとおりである。取り込むファイルは、単位のファイルと実装計画と、番号の並びが一致する `-requirements.md`・`-design.md`・`-design-detail.md` である。記録の head にあるファイルは中身を取り込む。
-
-削除するファイルもある。`git diff --no-renames --name-only -z --diff-filter=D <merge-base> <記録の head>`（`merge-base` は記録の head と手元の HEAD の共通の起点）の出力を NUL で区切ったパスのうち、名前が単位のファイルか上の 4 種類の文書の形で、番号の並びに記録の課題を含むものである。改名は、元の名前の削除と新しい名前の追加になる。
+`sync` の手順は次のとおりである。取り込むファイルは、単位のファイルと実装計画と、番号の並びが一致する `-requirements.md`・`-design.md`・`-design-detail.md` である。
 
 1. `approved_of`。無ければ `stopped`
 2. `destination_errors`。1 件でもあれば `stopped`（`refused`）。返った URL を、手順 3 以降の取得と push のすべてに使う
@@ -910,19 +864,12 @@ push は、手元の HEAD までのコミットをすべて公開する。その
    - 先端が `commit` を含めば `ok`
    - 手元の HEAD だけが含めば（push の失敗の後）、手順 8 へ進む
    - どちらも含まなければ（取り込みのコミットを手元で消した後など）、`design-sync.json` を使わずに手順 4 から進める。記録が今の手元を表さないためである。手順 6 と 8 の確かめは同じに通るので、手元だけの別のコミットは送らない
-4. 手元のスプリントブランチが記録の head を祖先に持てば、取り込むものは無いので、PR も送り先の先端も読まずに `ok`（送り先への到達は未確認。表の下の「`ok` の結果」）。`ndf progress next` の経路は、設計 PR の head がスプリントブランチ自身なので、ここで終わる。手元だけのコミットを公開しない確かめは、実際に送る工程「実装」の開始前の push が持つ（「始める前」の「承認が要る場合の開始前の push」）
+4. 手元のスプリントブランチが記録の head を祖先に持てば、取り込むものは無いので、PR を読まずに `ok`。`ndf progress next` の経路は、設計 PR の head がスプリントブランチ自身なので、ここで終わる
 5. 記録の PR を読み、マージ済み・head が記録の head・base が記録の base を確かめる。base の正しい宛先は、通常は `pr_target("doc", <branch>)`、設計 PR の head がスプリントブランチ自身なら `pr_target("sprint")` である
-6. 作業場所を検査する。取り込むファイルに未コミットの変更があるか（`git status --porcelain --untracked-files=all -- <ファイル>` が空でない）、マージの途中（`MERGE_HEAD` がある）なら `stopped`（`precondition`）。ファイルを書き換えない。ただし、インデックスと作業ツリーがどちらも記録の head と同じファイル（削除するファイルは、どちらにも無い）は、未コミットの変更に数えない。手順 7 のコミットの前に中断した打ち直しが残す状態で、コミットしても利用者の内容は失われないためである。次に `merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`。送り先の先端を読み（手順 3 で読んでいればその値を使い）、手元の HEAD で「送るコミットの確かめ」を通す。手元だけの別のコミットがあれば、取り込みのコミットを作らずに止まる。コミットの後、`design-sync.json` を書く前に中断した打ち直しでは、そのコミットは対象のファイルだけを持つ 1 コミットなので、この確かめを通る
-7. 記録の head にあるファイルは `git checkout <記録の head> -- <ファイル>`、削除するファイルは `git rm -q --ignore-unmatch -- <ファイル>` する。差があれば `git commit -- <差のあるファイル>` でそのファイルだけをコミットする（ほかのステージ済みの変更は含めない）。差が無ければ（コミットの直後に中断した打ち直し）コミットしない。HEAD の SHA を `design-sync.json` に書く
-8. 照合する。HEAD の各ファイルの blob が記録の head の同じファイルと同じでないか、削除するファイルが HEAD に残っていれば、push せずに `stopped`。手順 6 で使った先端で「送るコミットの確かめ」を通し、通らなければ push せずに `stopped`
+6. 作業場所を検査する。取り込むファイルに未コミットの変更があるか（`git status --porcelain --untracked-files=all -- <ファイル>` が空でない）、マージの途中（`MERGE_HEAD` がある）なら `stopped`（`precondition`）。ファイルを書き換えない。次に `merge-base` から両側の変更を調べる。スプリント側も変えていて中身が違うファイルがあれば `stopped`。送り先の先端を読み（手順 3 で読んでいればその値を使い）、手元の HEAD で「送るコミットの確かめ」を通す。手元だけの別のコミットがあれば、取り込みのコミットを作らずに止まる
+7. `git checkout <記録の head> -- <ファイル>` し、差があれば `git commit -- <ファイル>` でそのファイルだけをコミットする（ほかのステージ済みの変更は含めない）。差が無ければ（コミットの直後に中断した打ち直し）コミットしない。HEAD の SHA を `design-sync.json` に書く
+8. 照合する。HEAD の各ファイルの blob が記録の head の同じファイルと同じでなければ、push せずに `stopped`。手順 6 で使った先端で「送るコミットの確かめ」を通し、通らなければ push せずに `stopped`
 9. 照合した HEAD の SHA を push する。同じ URL から先端を読み直し、その SHA を含めば `ok`。push が拒否されれば `precondition`。理由には、取り込みのコミットを送り先の先端の上へ載せ直して（`git rebase`）打ち直すと書く。マージのコミットを作ると「送るコミットの確かめ」を通らないためである
-
-**`ok` の結果**: 送り先に届いたと確かめた成功と、確かめていない成功を、`metrics.delivery` と要約で区別する。確かめていないものを済んだと記録しないためである。単独のコマンドと工程のステップ `design-sync` は、同じ `sync` の結果を返す。
-
-| 終わった手順 | `metrics.delivery` | 要約 |
-| --- | --- | --- |
-| 3（先端が `commit` を含む）・9 | `confirmed` | 承認した文書が送り先のスプリントブランチに届いている |
-| 4 | `unchecked` | 取り込むものは無い。送り先への到達は確かめていない。工程「実装」の開始前の確かめが確かめる |
 
 ### 異常系の処理
 
@@ -956,9 +903,6 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 次も確かめる。
 
 - 取り込みと関係ないステージ済みの変更は、コミットに入らない
-- 手元が記録の head を含めば、`git fetch` も `git push` も打たずに `ok` にし、`metrics.delivery` は `unchecked` にする。送り先に届いたと確かめた成功は `confirmed` にする
-- checkout の後（コミットの前）とコミットの後（`design-sync.json` の前）に中断した打ち直しは、どちらも `ok` まで進む。記録の head と違う未コミットの編集は止まる
-- 承認した差分が削除したファイルと改名した元のファイルは、取り込みの後に残らない。スプリント側がそのファイルを変えていれば止まる
 - push が拒否された後の打ち直しは、競合にせず送り直し、リモートに届くまで `ok` にしない
 - `design-sync.json` の `commit` を送り先の先端も手元の HEAD も含まない打ち直しは、手順 4 から進め、取り込みのコミットを作り直す
 - 取得先と push 先の URL が違うリモートでは、push 先に届けば `ok` にする
@@ -998,8 +942,6 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 | `ndf progress units run` | `<ステートマシンの ID>`・`--cwd` | 下の「実装を流す手順」。工程「実装」だけを、`ndf progress next` と同じ処理で流す |
 | `ndf progress units sync` | `[<ID>]`・`--cwd`。`<ID>` を省けば環境変数 `NDF_MACHINE_ID`（工程のステップ `design-sync`）。取り込みは文脈の `worktree` で行う | `units_sync.sync` |
 | `ndf progress units guard` | `--issue`・`--base`・`--branch`・`--unit-file` | `units_guard.guard` |
-
-**ステートマシンの ID の渡し方**: 今の `invoke._call_script` が工程の子プロセスに足す工程の環境変数は `NDF_STAGE_INPUT` だけである。`run._run_step` が呼び出しの `env_extra` に `NDF_MACHINE_ID`（実行中のステートマシンの ID）を入れ、`_call_script` は `env_extra` も子プロセスに渡す。工程の定義の `design-sync` の引数には ID を書かない。単体テストでは、子プロセスの起動を差し替え、`ndf progress next` の経路で `design-sync` の環境変数にそのステートマシンの ID が入ることを確かめる。
 
 **実装を流す手順**: `units run` は、工程「実装」を `ndf progress next` と同じ処理で流し、同じ工程のイベントを書く。別の流し方を持つと、失敗や回答の待ちが記録に残らず、開始前の検査も抜けるためである。違いは、別のプロセスを起動せずその場で流すことと、工程「実装」の外へ進まないことの 2 つである。
 
