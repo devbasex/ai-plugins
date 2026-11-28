@@ -297,7 +297,9 @@ worker の起動指示と手順書は、コードの依存を持たないので�
 
 確認の表は、Issue を閉じるときに本文から消す。保留の解消と再検証に使う内容は、リリース記録の写しにあるためである。閉じる工程は、閉じた Issue をまとめて `ndf loop acceptance prune --issue <番号>... --release <記録の PR> --version <値> [--unit <単位>]` を 1 回打つ。`--unit` には、閉じる手順の最初に記録の読み取りで選んだ単位を渡す。
 
-整理は閉じる条件に含めない。閉じるかは今の閉じる条件だけで決め、整理は閉じた後に行う。整理が失敗しても閉じた Issue は開き直さず、失敗を報告に載せる。デプロイを飛ばした実行はリリース記録が無いので、`prune` を打たず、表を本文に残したまま閉じる。
+整理は閉じる条件に含めない。閉じるかは今の閉じる条件だけで決め、整理は閉じた後に行う。整理が失敗しても閉じた Issue は開き直さず、失敗を報告に載せる。
+
+デプロイを飛ばした実行はリリース記録が無いので、閉じた後に `ndf loop acceptance prune --issue <番号>... --no-release` を打つ。照らす写しが無いので、渡した Issue の本文にある表は、すべて Issue のコメントに残してから本文から消す。要求仕様書もリリース記録も読まない。代表の Issue をまだ閉じていなければ、その表は代表の Issue を閉じるときに整理する。
 
 | 表の状態 | 扱い |
 | --- | --- |
@@ -365,7 +367,7 @@ Git の起動は、取得の前にコミットが手元にあるかの確かめ�
 
 squash マージでは、同じスプリントで足して消したファイルがベースブランチの履歴に一度も現れない。このためベースブランチの履歴は読み先にしない。
 
-**リリース後テストは、リリース 1 件につきコマンドを 1 回だけ打つ。** 工程の始めに `ndf loop acceptance show` へ対象の全 Issue を `--issue`、記録の PR を `--release`、バージョンを `--version`、書き出し先を `--out` で渡す。要求仕様書の本文のファイルと確認の区分が同じ結果に返る。区分は対応の記録の写しから読み、Issue の本文は読まない。
+**リリース後テストは、リリース 1 件につきコマンドを 1 回だけ打つ。** 工程の始めに `ndf loop acceptance show` へ対象の全 Issue を `--issue`、記録の PR を `--release`、バージョンを `--version`、書き出し先を `--out` で渡す。リリースの単位が 2 つ以上なら、`records` で記録を選んだときと同じ単位を `--unit` で渡す。要求仕様書の本文のファイルと確認の区分が同じ結果に返る。区分は対応の記録の写しから読み、Issue の本文は読まない。
 
 要素は要求仕様書 1 本につき 1 つで、本文は 1 回だけ返す。確認の記録は、その中で Issue と実行を区別して返す。
 
@@ -376,11 +378,12 @@ squash マージでは、同じスプリントで足して消したファイル�
 
 Issue ごとに、`runs` のうちその Issue を含み、マージが最も新しい実行を 1 つ選ぶ。違う実行の行は 1 つにまとめず、ある Issue の確認の記録を別の Issue に当てない。そのような実行が無いか、実行の印が空の Issue は区分を返さず、担当はすべての条件を確かめる。
 
-**区分が `マージ前` というだけでは合格にしない。** 確かめた後に、別の実装の単位やリリースブランチで対象のコードが変わることがある。リリース後テストが実行し直さずに合格にできるのは、次の 3 つをすべて確かめられる条件だけで、証跡にはその URL と対象のコミットを書く。1 つでも確かめられなければ、配布した版で確かめる。
+**区分が `マージ前` というだけでは合格にしない。** 確かめた後に、別の実装の単位やリリースブランチで対象のコードが変わることがある。リリース後テストが実行し直さずに合格にできるのは、次をすべて確かめられる条件だけで、証跡にはその URL と対象のコミットを書く。1 つでも確かめられなければ、配布した版で確かめる。
 
 - 手段に書かれたテストかコマンドの成功が、マージした PR の CI か完了判定の記録にあり、対象のコミットが分かる
 - 記録の後に条件の文が変わっていない（行の条件の版が、配布した要求仕様書の条件の文と合う）
 - 証跡が宣言した検証の対象範囲（完了判定の記録の「対象範囲」）に、対象のコミットと配布コミットの差分が無い（`git diff --quiet <対象のコミット> <配布コミット> -- <対象範囲のパス>...`）。別のスプリントの変更も、この差分に含まれる。対象範囲の宣言が無い、パスで書かれていない、依存先や共通設定を含めて影響する範囲を決められない場合は、確かめられないとして扱う
+- 差分を見る前に、対象範囲のパスがすべて対象のコミットにあることを確かめる（`git ls-tree --name-only <対象のコミット> -- <対象範囲のパス>...` の出力に全部が出る）。`git diff --quiet` は、どちらのコミットにも無いパスを渡しても終了コード 0 を返すためである。出ないパスが 1 つでもあれば、確かめられないとして扱う
 
 #### 読み書きするファイルの検査
 
@@ -401,20 +404,25 @@ Issue ごとに、`runs` のうちその Issue を含み、マージが最も新
 | `ndf loop acceptance record` | 要求仕様書と代表の Issue を決めてから、Issue の本文の書き換えのロックを代表の番号で取り、読み・書き・読み直す。`--run <実行の印>` と `--criteria-digest <条件一覧の版>` が必須になる。指した実行と要求仕様書の組の表に、条件の版を一緒に書く | 要求仕様書が無ければ何も書かずに `incomplete`。条件一覧の版が今と違えば何も書かずに `check_failed`。`--run` が無ければ `invalid` | 互換なし |
 | `ndf loop acceptance show` | `--issue` を繰り返せる。要求仕様書ごとに、読むコマンドと同じ要素と、Issue と実行ごとの条件の区分・手段（`checks`）を返す。数えない行は理由を付けて別に挙げる。読む先は、`--run <実行の印>` なら代表の Issue の本文の表、`--release` なら対応の記録の写しである。`--release <記録の PR>`・`--version <値>`・`--unit <単位>`・`--out <ディレクトリ>`（意味は読むコマンドと同じ）が加わる | 読むコマンドと同じ | 互換なし |
 | `ndf loop acceptance check` | 下の「突き合わせ」。`--run <実行の印>`（必須）・`--mode <モード>`・`--criteria-digest <Issue>:<条件一覧の版>` が加わる | 要求仕様書が無ければ `incomplete`。`--mode legacy-refactor` だけは `ok` | 互換なし |
-| `ndf release-steps records` | 対応の記録がある値では、対象の Issue を `runs` の `issues` の和にして `outputs.issues` で返し、`to_test` も `--issues` が無ければこの一覧から作る。PR の本文の closing keywords は読まない。届け先は今と同じくリリース記録から選ぶ。対応の記録が無ければ今のままで、`outputs.issues` は返さない | 今のまま | 出力のキーが増える。対応の記録がある値では、Issue の出所が変わる |
+| `ndf release-steps records` | 対応の記録がある値では、対象の Issue を `runs` の `issues` の和にして `outputs.issues` で返す。`to_test` は `--bodies` と `--issues` が無くても返し、`--issues` が無ければこの一覧から作る。`--bodies` を渡しても PR の本文と書き手の権限は読まず、`bodies` は `null` にする。届け先は今と同じくリリース記録から選ぶ。対応の記録が無ければ今のままで、`outputs.issues` は返さない | 今のまま | 出力のキーが増える。対応の記録がある値では、Issue の出所が変わる |
 | `ndf loop acceptance new-run`（追加） | 手の作業の実行の印を発行して返す | — | 追加だけ |
 | `ndf release-steps record`・`record-acceptance`（後者は追加） | 「リリースの対応の記録」 | 配布コミットを確かめられない、マージしていない PR がある、単位を選べない場合は、何も書かずに `precondition` | リリース記録の JSON にキーが増える |
-| `ndf loop acceptance prune`（追加） | `--issue` を繰り返せる。`--unit` を受ける。ほかは「閉じるときの表の整理」 | 対応の記録を読めなければ本文を変えずに `precondition` | 追加だけ |
+| `ndf loop acceptance prune`（追加） | `--issue` を繰り返せる。`--release`（と `--version`）か `--no-release` のどちらか 1 つが必須。`--unit` を受ける。ほかは「閉じるときの表の整理」 | 対応の記録を読めなければ本文を変えずに `precondition` | 追加だけ |
 
 **リリースの後の対象の Issue は、対応の記録から決める。** 新方式の PR は `Refs` で Issue を指すため、今の closing keywords だけの集め方では対象から落ちる。
 
-| 手順 | 対象の Issue の出所 |
-| --- | --- |
-| デプロイの工程で最初の `record` の後に打つ `records --bodies` | `outputs.issues`。作業の保存先へ保存し、`to_test` と一緒に使う |
-| リリース後テストの `acceptance show` の `--issue` | 保存した一覧。無ければ `records` を打ち直して `outputs.issues` を使う。PR の本文を後で直しても一覧は変わらない |
-| スプリントを閉じる工程の手順 2 | `outputs.issues`。PR の本文から集めるのは、対応の記録が無いときと、デプロイを飛ばした実行だけである |
+`records` の呼び出しでは、`outputs.issues` のキーがあるかで出所を分ける。キーがあれば、空の配列でもその一覧を使う。空なら対象の Issue は無く、PR の本文からは集めない。キーが無いのは対応の記録が無いリリースで、今と同じく、信用する書き手の本文から集めた一覧と `to_test` を使う。
 
-対応の記録の `issues` を PR の本文から取る場合は、今と同じく write 以上の権限を持つ書き手の本文だけを使う。
+| 手順 | `records` の打ち方 | 対象の Issue の出所（キーがあるとき） |
+| --- | --- | --- |
+| デプロイの工程で最初の `record` の後 | 今と同じ `records --bodies` | `outputs.issues` を作業の保存先へ保存し、`to_test` と一緒に使う |
+| デプロイの工程で 2 つ目以降の届け先の `record` の後 | 打たない（今と同じ） | 保存した一覧 |
+| リリース後テストの工程の始めと、止まった実行の再開 | `records --bodies` を打ち直し、`--issues` は渡さない | `outputs.issues`。保存した一覧はこれで置き換え、`acceptance show` の `--issue` にも渡す |
+| スプリントを閉じる工程の手順 2 | 今の手順 1 の `records --bodies` | `outputs.issues`。デプロイを飛ばした実行は、今と同じく PR の本文から集める |
+
+対応の記録を `record-acceptance --reason` で訂正した担当は、`records` を打ち直し、保存した一覧と `to_test` を置き換える。リリース後テストの始めと再開でも打ち直すので、訂正の前の一覧は使われない。どの呼び出しにも、単位が 2 つ以上なら `--unit` を付ける。
+
+対応の記録の `issues` を PR の本文から取る場合は、今と同じく write 以上の権限を持つ書き手の本文だけを使う。権限の無い人の PR の本文で、テストと閉じる対象の Issue を選ばせないためである。そのため対応の記録を初めて書くときは、書き手の権限の照会が増える。オーナー以外のメンバーとコラボレーターの PR の書き手ごとに、REST の要求が 1 回である（同じ実行で照会済みの書き手は除く）。対応の記録がある値の `records` は PR の本文を読まないので、読むたびの照会は増えない。
 
 `record` は、条件を確かめたときの条件一覧の版を受け取る。確かめてから書くまでに条件が並び替わると、同じ番号が別の条件を指すためである。担当は、確かめた条件の番号と版を、単位の指示（単位の経路）か読むコマンドの出力から同時に受け取る。
 
@@ -425,10 +433,10 @@ Issue ごとに、`runs` のうちその Issue を含み、マージが最も新
 | 実装計画を書く・条件を直す | `stamp` が 1 回 | 手元の要求仕様書の読み出し 1 回 |
 | 単位の起動の前 | 無し | 無し（読み先が変わるだけ） |
 | スプリント PR の前 | 無し | 代表の Issue の本文の照会 1 回 |
-| リリース記録を書く（workflow・バージョン番号を持たないリポジトリ） | 無し | 最初の 1 回だけ、PR と Issue の本文の照会が各 1 回 |
-| リリース記録を手で置く | `record-acceptance` が 1 回 | 記録の PR のコメント、PR と Issue の本文の照会が各 1 回 |
+| リリース記録を書く（workflow・バージョン番号を持たないリポジトリ） | 無し | 最初の 1 回だけ、PR と Issue の本文の照会が各 1 回と、未照会の PR の書き手ごとの権限の照会（REST）が 1 回 |
+| リリース記録を手で置く | `record-acceptance` が 1 回 | 記録の PR のコメント、PR と Issue の本文の照会が各 1 回と、未照会の PR の書き手ごとの権限の照会（REST）が 1 回 |
 | リリース後テスト | リリース 1 件につき `acceptance show` が 1 回 | 記録の PR のコメントの照会 1 回と、`git fetch` が 1 回まで |
-| スプリントを閉じる | リリース 1 件につき `prune` が 1 回 | 記録の PR のコメントの照会 1 回と、代表の Issue ごとの本文の読み 1 回 |
+| スプリントを閉じる | リリース 1 件につき `prune` が 1 回 | 記録の PR のコメントの照会 1 回と、代表の Issue ごとの本文の読み 1 回。デプロイを飛ばした実行は、閉じた Issue ごとの本文の読み 1 回 |
 
 照会 1 回は、100 件までの入力の場合である。この表の起動は、今ある呼び出しに組み込まない。
 
@@ -584,10 +592,13 @@ sequenceDiagram
 
 | 項目 | 内容 |
 | --- | --- |
-| 成果物の記録 | 要求の工程の出力として、対象の Issue の番号ごとの要求仕様書のパスを、今の実行（ステートマシン）に持つ |
-| 工程の外で書いた要求仕様書 | 担当が今の `ndf progress finish` に同じ出力を渡す。対象の Issue のどれかにパスが無ければ完了にしない |
-| `--carry` で作り直した実行 | 引き継ぎ元の完了と出力を引き継ぐ |
+| 出力の規約 | 文脈のキー `requirements_docs` を `contracts/workflow/context.schema.json` に足し、要求の工程の定義（`contracts/workflow/stages/requirements.json`）の `outputs` に宣言する。今の定義は出力のキーを持たず、`finish` は宣言の無いキーを捨てるためである |
+| 成果物の記録 | 要求の工程の出力は、要求仕様書のパスの一覧である。出力を文脈へ書くコマンドがファイルを読み、パスごとに内容の SHA-256 を添えて今の実行（ステートマシン）に持つ。担当はハッシュを書かない |
+| 同じ検査を通す入口 | 工程を流すプラン、`ndf progress finish`（工程の外で書いた要求仕様書）、`ndf progress new --requirements`。対象の Issue のどれかを名前に含むパスが無いか、ファイルを読めなければ完了にしない |
+| 要求の工程を無効にして作る実行 | 出力のキーを持つ工程になるので、今の決まりのとおり `--carry` が要り、引き継ぎ元の `requirements_docs` を写す |
 | 新しく始めた実行 | 記録が無いので要求の工程が走る。前の試行のファイルやベースブランチの旧版があれば、読んで今の報告に合わせて書き直す |
+
+作業場所の用意は、メインディレクトリから移すファイルの内容を、記録した SHA-256 と照らす。違えば移さずに `precondition` で止まる。同じ Issue の別の試行が、同じパスを書き直していることがあるためである。担当は内容を読み、今の内容でよければ `ndf progress retry` の後に `finish` で記録し直し、よくなければ要求の工程をやり直す。照らすのは移すときだけで、作業場所へ移した後の直しは差分で読む。作業場所の用意の工程の定義（`worktree.json`）は、`requirements_docs` を任意の入力に持つ。
 
 作業場所の用意が移すのは、対象の番号の要求仕様書だけである。移し方は、今のメインディレクトリの変更を移す手順（`worktree` の手順 3）を使う。
 
@@ -750,11 +761,11 @@ NDF の更新より前に実装がマージされた Issue（以下、旧方式�
 
    | 条件の状態 | 扱い |
    | --- | --- |
-   | 旧い表が `マージ前` で、下の 3 つをすべて確かめられる | 実行し直さず合格にし、証跡にその URL と対象のコミットを書く |
-   | 旧い表が `マージ前` だが、3 つのどれかを確かめられない | 今回確かめる |
+   | 旧い表が `マージ前` で、下の確認がすべて通る | 実行し直さず合格にし、証跡にその URL と対象のコミットを書く |
+   | 旧い表が `マージ前` だが、確かめられないものがある | 今回確かめる |
    | 旧い表が `リリース後`、または表も行も無く区分が分からない | 今回確かめる |
 
-   確かめる 3 つは、新方式と同じである（「読むコマンド（追加）」の「区分が `マージ前` というだけでは合格にしない」）。旧い表には条件の版が無いので、「記録の後に条件の文が変わっていない」は担当が条件の文を比べて確かめる。
+   確かめる内容は、新方式と同じである（「読むコマンド（追加）」の「区分が `マージ前` というだけでは合格にしない」）。旧い表には条件の版が無いので、「記録の後に条件の文が変わっていない」は担当が条件の文を比べて確かめる。
 
 4. 今のリリース後テストと同じく、結果の表と `ndf release-steps verification-record` で、新方式の Issue の結果と一緒に合否を記録する。このコマンドと閉じる判定（`ndf records close-check`）は要求仕様書を読まない
 
@@ -816,7 +827,7 @@ NDF の更新より前に実装がマージされた Issue（以下、旧方式�
 | 決定 2 | `acceptance` の無い旧い記録には 1 回だけ追記し、2 回目は何も書かない。訂正は元を残して追記する。単位が 2 つの版では、指定した単位の PR だけが `runs` に入り、指定が無ければ止まる | 記録の有無だけで重複を決める、単位を混ぜると落ちる |
 | 決定 2 | まとめた要求仕様書の 2 つの Issue が別々の実行で確かめられていると、本文は 1 本、確認の記録は Issue と実行ごとに返る | 1 つの表にまとめると落ちる |
 | 決定 4 | 閉じるときの整理で、写しと同じ表は消え、写しの無い表はコメントに残ってから消える。単位が 2 つの版では、指定した単位の写しと比べる | 表を残す、コメントに残さず消す、単位を混ぜると落ちる |
-| 決定 4 | デプロイを飛ばした実行は、`prune` を打たずに閉じられ、表が残る（手順書の変更はレビューで確かめる） | — |
+| 決定 4 | `prune --no-release` は、表をコメントに残してから本文から消す。`--release` も `--no-release` も無ければ何も変えない | 表を残す、コメントに残さず消す、指定が無いまま消すと落ちる |
 | 決定 2 | 要求仕様書が 2 本あるスプリントでは、「通した工程」に `確認の表` の行が 2 つ載り、対応の記録の `tables` に両方の表が入る | 代表の Issue を 1 つだけ読むと落ちる |
 | 決定 2 | `record` が途中の PR で失敗した後に確認の表を変えて打ち直しても、記録の PR の `acceptance` は変わらず、増えない | 打ち直しで作り直すと落ちる |
 | 決定 2 | バージョン番号を持たないリポジトリで、最初の届け先の記録に `acceptance` が入り、2 つ目の届け先と届け先の一覧の訂正の後も同じ内容が読める | 通常の `record` にだけ入れる、届け先ごとに作り直すと落ちる |
@@ -836,14 +847,16 @@ NDF の更新より前に実装がマージされた Issue（以下、旧方式�
 | 決定 2 | `--out` は書いたファイルを `body_path` で返す。書き先がリンク、またはほかの利用者が差し替えられるディレクトリなら何も書かずに止まり、読む側の `issues/` が差し替えられる場合も内容を返さない | リンクの先へ書く、ディレクトリの権限を確かめないと落ちる |
 | 決定 2 | グループやほかの利用者が読める同名のファイルがある書き先でも、公開したファイルは所有者だけが読める | 既存の権限を引き継ぐと落ちる |
 | 決定 2 | モードでは書き込めないが拡張 ACL の項目があるファイル（ACL の確かめをテストで差し替える）は、内容を返さない | モードだけを見ると落ちる |
-| 決定 2 | 要求仕様書のファイルがあっても、今の実行に要求の工程の完了が無ければ工程を飛ばさない。`finish` は対象の Issue のパスが欠けた出力を断る | ファイルの有無で飛ばす、欠けた出力を通すと落ちる |
+| 決定 2 | 要求仕様書のファイルがあっても、今の実行に要求の工程の完了が無ければ工程を飛ばさない。`finish` と `new --requirements` は対象の Issue のパスが欠けた出力を断り、通した出力は内容の SHA-256 と一緒に文脈に残る | ファイルの有無で飛ばす、欠けた出力を通す、出力を捨てると落ちる |
+| 決定 2 | 要求の工程の完了の後に同じパスが書き直されると、作業場所の用意はファイルを移さずに止まる | 照らさずに移すと落ちる |
+| 決定 2 | 対応の記録がある値の `records --bodies` は、PR の本文を読まずに `outputs.issues` と `to_test` を返し、`--bodies` が無くても返す。対応の記録が無い値は `outputs.issues` のキーを持たない | 本文と権限を読む、`to_test` を返さない、無い値で空の配列を返すと落ちる |
 | 決定 2 | まとめた番号の要求仕様書を、ドキュメント再構成が設計書と組にする | 番号 1 つの名前だけで探すと落ちる |
 
 ## 設計の結果
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4735 | 実装する | — | `plugins/ndf/src/ndf/core/requirements_docs.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/core/issue_body.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/src/ndf/core/plan/review_units_decide.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/loop/acceptance.py`、`plugins/ndf/src/ndf/domains/loop/acceptance_decide.py`、`plugins/ndf/src/ndf/domains/loop/cli.py`、`plugins/ndf/src/ndf/domains/materials/cli.py`、`plugins/ndf/src/ndf/domains/materials/collect.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/domains/records/cleanup_stage.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_read.py`、`plugins/ndf/src/ndf/domains/release/record_unversioned.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/src/ndf/contracts/worker_paths.py`、`plugins/ndf/src/ndf/progress/issue_values.py`、`plugins/ndf/contracts/schemas/io/records.args.schema.json`、`plugins/ndf/contracts/schemas/io/records.result.schema.json`、`plugins/ndf/contracts/schemas/io/materials.result.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/worker/document-rebuild.md`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/docs/contracts/files.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/quality-gates/references/design-match.md`、`plugins/ndf/skills/quality-gates/references/definition-of-done.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/skills/fix/SKILL.md`、`plugins/ndf/skills/pr-review/SKILL.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/worktree/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md`、`docs/glossary/ndf-workflow.md`、`plugins/ndf/tests/core/test_requirements_docs.py`（新設）、`plugins/ndf/tests/core/test_issue_docs.py`、`plugins/ndf/tests/domains/loop/test_loop_acceptance.py`、`plugins/ndf/tests/domains/materials/test_materials_cli.py`、`plugins/ndf/tests/progress/test_units_run.py`、`plugins/ndf/tests/progress/test_invoke_issue_copies.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py` |
+| #4735 | 実装する | — | `plugins/ndf/src/ndf/core/requirements_docs.py`（新設）、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/core/issue_body.py`（新設）、`plugins/ndf/src/ndf/progress/command.py`、`plugins/ndf/contracts/workflow/context.schema.json`、`plugins/ndf/contracts/workflow/stages/requirements.json`、`plugins/ndf/contracts/workflow/stages/worktree.json`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/adapters/git.py`、`plugins/ndf/src/ndf/core/plan/inputs_decide.py`、`plugins/ndf/src/ndf/core/plan/review_units_decide.py`、`plugins/ndf/src/ndf/core/route/__init__.py`、`plugins/ndf/contracts/templates/params.json`、`plugins/ndf/skills/development-workflow/references/agent-layers.md`、`plugins/ndf/src/ndf/domains/records/cli.py`、`plugins/ndf/src/ndf/domains/loop/acceptance.py`、`plugins/ndf/src/ndf/domains/loop/acceptance_decide.py`、`plugins/ndf/src/ndf/domains/loop/cli.py`、`plugins/ndf/src/ndf/domains/materials/cli.py`、`plugins/ndf/src/ndf/domains/materials/collect.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/src/ndf/progress/units_invoke.py`、`plugins/ndf/src/ndf/progress/invoke.py`、`plugins/ndf/src/ndf/progress/records.py`、`plugins/ndf/src/ndf/domains/records/cleanup_stage.py`、`plugins/ndf/src/ndf/domains/release/record.py`、`plugins/ndf/src/ndf/domains/release/record_read.py`、`plugins/ndf/src/ndf/domains/release/record_unversioned.py`、`plugins/ndf/src/ndf/domains/release/record_decide.py`、`plugins/ndf/src/ndf/domains/release/cli.py`、`plugins/ndf/skills/release/SKILL.md`、`plugins/ndf/skills/release/references/release-steps.md`、`plugins/ndf/src/ndf/contracts/worker_paths.py`、`plugins/ndf/src/ndf/progress/issue_values.py`、`plugins/ndf/contracts/schemas/io/records.args.schema.json`、`plugins/ndf/contracts/schemas/io/records.result.schema.json`、`plugins/ndf/contracts/schemas/io/materials.result.schema.json`、`plugins/ndf/contracts/domains/ndf-files.json`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/contracts/worker/document-rebuild.md`、`plugins/ndf/docs/contracts/commands.md`、`plugins/ndf/docs/contracts/files.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/requirements-design/references/spec-template.md`、`plugins/ndf/skills/requirements-design/references/document-roles.md`、`plugins/ndf/skills/design/SKILL.md`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/design/references/deliverables.md`、`plugins/ndf/skills/development-workflow/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/development-workflow/references/glossary.md`、`plugins/ndf/skills/progress-tracking/SKILL.md`、`plugins/ndf/skills/quality-gates/SKILL.md`、`plugins/ndf/skills/quality-gates/references/design-match.md`、`plugins/ndf/skills/quality-gates/references/definition-of-done.md`、`plugins/ndf/skills/release-verification/SKILL.md`、`plugins/ndf/skills/fix/SKILL.md`、`plugins/ndf/skills/pr-review/SKILL.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/worktree/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md`、`plugins/ndf/skills/implementation-plan/SKILL.md`、`docs/glossary/glossary.json`、`docs/glossary.md`、`docs/glossary/ndf-design.md`、`docs/glossary/ndf-workflow.md`、`plugins/ndf/tests/core/test_requirements_docs.py`（新設）、`plugins/ndf/tests/core/test_issue_docs.py`、`plugins/ndf/tests/domains/loop/test_loop_acceptance.py`、`plugins/ndf/tests/domains/materials/test_materials_cli.py`、`plugins/ndf/tests/progress/test_units_run.py`、`plugins/ndf/tests/progress/test_invoke_issue_copies.py`、`plugins/ndf/tests/domains/docrebuild/test_docrebuild_run.py` |
 
 ## 未確認のまま残ること
 
