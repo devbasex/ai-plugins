@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ndf import contracts
 from ndf.contracts import writing
-from ndf.domains.crossreview import criteria_decide, drive, store
+from ndf.domains.crossreview import changes, criteria_decide, drive, fixer, settings, store
 from ndf.domains.crossreview import finish_decide as fin
+from ndf.domains.crossreview.journal import FindingJournal
 
 from ._repos import BRANCH, Repos, commit, sh
 from .test_crossreview_run import FAIL, PR, Recording, _run, _state
@@ -202,26 +204,24 @@ def test_issue_3955_claude_first_seated_in_a_full_round_is_not_limited(wt: Path,
     ("path", "distinction"),
     [("issues/issue-7-design.md", True), ("issues/issue-7-requirements.md", True), ("notes.md", False)],
 )
-def test_issue_4543_the_distinction_goes_only_with_design_documents(
-    repos: Repos, tmp_path: Path, capsys, monkeypatch, hub, path: str, distinction: bool
-) -> None:
-    """設計書か要求仕様のコピーを変える PR だけが、レビュー担当と修正担当へ書き分けの小見出しを渡す。"""
-    (repos.other / path).parent.mkdir(parents=True, exist_ok=True)
-    commit(repos.other, path, "# 文書\n\n本文\n", "文書")
-    sh(repos.other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
-    sh(repos.main, "fetch", "-q", "origin")
-    finding = {**MAJOR, "path": path, "line": 3}
-    fake = Recording(tmp_path / "st", {"codex": [[finding], []], "kiro": [[], []]})
-    _run(capsys, monkeypatch, fake, repos.add_worktree(tmp_path / "doc"))
+def test_issue_4543_the_distinction_goes_only_with_design_documents(tmp_path: Path, monkeypatch, path: str, distinction: bool) -> None:
+    """設計書か要求仕様のコピーを変える PR だけが、レビュー担当と修正担当へ書き分けの小見出しを渡す（git は起動しない）。"""
+    monkeypatch.setattr(changes, "changed", lambda *_: changes.Changed((path,), {}))
+    monkeypatch.setattr(changes, "review_diff", lambda *_: "")
+    g = SimpleNamespace(rev_parse=lambda *_: "head", merge_base=lambda *_: "base")
+    cfg = settings.RunConfig(tmp_path, BRANCH, "origin/main", PR, tmp_path, False, ("codex",))
+    run = drive._Run(cfg, g, store.state_pr(tmp_path, PR), {}, FindingJournal(), [], [], [])  # type: ignore[arg-type]
+    prep = drive._prepare_round(run, 1)
+    review = drive._review_prompt(run, 1, prep)
+    fix = fixer._fix_prompt(run, [{**MAJOR, "id": "r1-1", "path": path}], (), tmp_path / "result.json")
     full = writing.criteria().rstrip()
-    assert {out for _, out, _ in fake.prompts} >= {"round1-codex.out", "round1-fix.out"}
-    assert all((full in p) is distinction for _, _, p in fake.prompts)
-    assert all((_stripped() in p) is not distinction for _, _, p in fake.prompts)
+    for prompt in (review, fix):
+        assert (full in prompt) is distinction
+        assert (_stripped() in prompt) is not distinction
     # 要求仕様のコピーを変える PR だけが、修正担当へコピーへの指摘の扱いを、基準の全文より前に渡す（決定 7）
     handling = criteria_decide.fixer_requirements_copy()
     copy = path.endswith("-requirements.md")
-    for _, out, prompt in fake.prompts:
-        assert (handling in prompt) is (copy and "-fix" in out)
+    assert handling not in review
+    assert (handling in fix) is copy
     if copy:
-        fix = _prompt(fake, "round1-fix.out")
         assert fix.index(handling) < fix.index(full)
