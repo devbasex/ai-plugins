@@ -6,14 +6,14 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
 from ndf.adapters.git import GitError
-from ndf.adapters.github import GitHubError
+from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, definition, model, reopening, run, stages, store
@@ -23,19 +23,18 @@ from ndf.progress.run_view import FINISH_HELD
 from ndf.progress.records import github_records, sync_records
 
 
-def _revoker(cwd: Path) -> reopening.Revoke:
-    """承認の取り消しを PR へ書き、マージキューから外す口。どちらかができなければ `model.Refused`（開き直しを記録しない）。"""
-    get_hub = shared_hub(cwd)
+def revoker(get_hub: Callable[[], GitHub], not_done: str) -> reopening.Revoke:
+    """承認の取り消しを PR へ書き、マージキューから外す口。どちらかができなければ `model.Refused`（`not_done` は記録しないこと）。"""
 
     def revoke(revocations: list[merge_approval.Revocation]) -> None:
+        if not revocations:
+            return
         try:
             hub = get_hub()
             merge_approval.write_revocations(hub, revocations, hub.viewer())
         except (merge_approval.TrailError, GitHubError, GitError) as exc:
             numbers = "・".join(f"#{n}" for n in sorted({r.target.number for r in revocations}))
-            raise model.Refused(
-                f"PR {numbers} の承認の取り消しとマージキューからの取り外しを終えられないので、開き直さない: {exc}"
-            ) from None
+            raise model.Refused(f"PR {numbers} の承認の取り消しとマージキューからの取り外しを終えられないので、{not_done}: {exc}") from None
 
     return revoke
 
@@ -63,7 +62,7 @@ def _reopen_stage(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str
 
     読み取りから追記までは、回答と共有する排他（`store.approval_lock`）の中で行う。"""
     with store.approval_lock(st, a.machine_id):
-        planned, seqs = _append_reopen(a, st, _revoker(cwd))
+        planned, seqs = _append_reopen(a, st, revoker(shared_hub(cwd), "開き直さない"))
     _, errors = sync_records(run.read(st, a.machine_id), cwd, github_records)
     unsynced = [f"{e}（ndf progress resync {a.machine_id} で揃える）" for e in errors]
     return command.with_warnings(_reopened_result(a, planned, seqs), after=[*planned.warnings, *unsynced])
@@ -261,6 +260,9 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
         raise model.Refused(refused)
     held = _standing_answer(v, read, cwd, st.root) is None
     drafts, dropped = _finish_drafts(a, v, read, held)
+    if held:
+        # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す
+        revoker(shared_hub(cwd), "回答待ちを書かない")(approval_decide.stage_revocations(v, a.stage))
     with store.transaction(st) as conn:
         return held, store.append_events(conn, a.machine_id, drafts, v.events[-1].seq), dropped
 

@@ -34,7 +34,7 @@ from typing import Any, Optional
 from ndf import process_group
 from ndf.contracts import causes, facts, limits, result
 from ndf.contracts.worker_kinds import Recorded
-from ndf.core import durable
+from ndf.core import durable, merge_approval
 from ndf.core.plan import cli as plan_cli
 from ndf.progress import approval_decide, command, definition, invoke, issue_values, model, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, Action, Move, StepProgress, answer_word, step_progress
@@ -322,6 +322,8 @@ class Env:
     # 記録した承認を今の対象に照らす口と、読んだ対象を捨てる口（GitHub を読むのは `ndf.progress.gate`）
     standing: approval_decide.StandingOf = approval_decide.unreadable
     forget: Callable[[], None] = lambda: None
+    # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
+    revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None
 
 
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:

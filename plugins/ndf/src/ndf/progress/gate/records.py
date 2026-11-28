@@ -17,7 +17,7 @@ from ndf import identity
 from ndf.contracts import facts
 from ndf.progress import approval_decide, invoke, model, run
 from ndf.progress.gate.asking import REJECTING, Answer, Question, Target, sprint_issues
-from ndf.progress.run_view import read_accepted_head
+from ndf.progress.run_view import closes_only, read_accepted_head
 
 # --- 変更要求の記録 ---------------------------------------------------------------------------------
 
@@ -113,6 +113,7 @@ def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Option
     承認の後に文書だけが加わって出し直さなかった（#3020）なら、そのときの head を返す（`root` は状態の保存先）。
     工程の直近の開き直し・手で終えた回答待ち・質問の出し直しより前の回答と、工程の今の対象と違う PR を見た回答は読まない
     （`approved_seen` と同じ境界と対象の確かめ）。
+    最後の回答が追認（`closes_only`）でも None を返す。
     最後の回答が数えない MVV 判定の回答（`model.mvv_answer_void`）なら、その前の回答へさかのぼらずに None を返す（#3959 の決定 3）。
     """
     answered = (ev for ev in v.events if ev.draft.kind == run.ANSWERED and run.event_payload(ev).get("gate") == kind)
@@ -129,7 +130,7 @@ def approved_head(v: run.View, kind: str, root: Optional[Path] = None) -> Option
     if not got:
         return None
     p = run.event_payload(got[-1])
-    if model.mvv_answer_void(p, kind) or approval_decide.saw_another_pr(v, str(got[-1].draft.row_key), p):
+    if closes_only(p) or model.mvv_answer_void(p, kind) or approval_decide.saw_another_pr(v, str(got[-1].draft.row_key), p):
         return None
     last = next(a for a in answers(v) if a["seq"] == got[-1].seq)
     if last["answer"] != run.APPROVED:

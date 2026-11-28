@@ -21,6 +21,7 @@ from ndf.progress.run_view import (
     STEP_EVENT,
     StageAnswers,
     View,
+    closes_only,
     event_payload,
     read_accepted_head,
     work_root,
@@ -35,7 +36,7 @@ class Hands(Protocol):
     """回答を読む手が使う駆動の操作。"""
 
     machine_id: str
-    env: Any
+    env: Any  # `run.Env`
 
     def warn(self, text: str) -> None: ...
 
@@ -149,6 +150,7 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
         why = "承認の後に対象が変わった: " + " / ".join(got.differences)
         if got.merged:
             why = f"{why}（承認と違う内容がマージされた。今の head {got.head}）"
+        d.env.revoke(approval_decide.stage_revocations(v, m.stage.name))
         wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
         d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
         d.warn(why)
@@ -176,7 +178,7 @@ def approved_seen(answers: StageAnswers, root: Path) -> Optional[dict[str, Any]]
     if ev is None:
         return None
     p = event_payload(ev)
-    if approval_decide.saw_another_pr(answers.view, answers.stage, p):
+    if closes_only(p) or approval_decide.saw_another_pr(answers.view, answers.stage, p):
         return None
     seen = p.get("seen")
     if not isinstance(seen, dict):

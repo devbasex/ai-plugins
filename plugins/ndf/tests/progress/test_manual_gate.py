@@ -14,6 +14,7 @@ import merge_hub
 import pytest
 from result_json import last_result
 
+from ndf.core import merge_approval
 from ndf.progress import command, gate, invoke, run, store
 from ndf.progress.gate import answering, finishing, release, targets
 
@@ -112,14 +113,16 @@ _FLAGS = {
 }
 
 
-def _answer(st, tid, repo, env, shown: dict, value: str = "approved", key: str = "k-1", notes: Path | None = None) -> dict:
+def _answer(
+    st, tid, repo, env, shown: dict, value: str = "approved", key: str = "k-1", notes: Path | None = None, post=lambda row: True
+) -> dict:
     """提示した route が固定する対象を見て回答する（`ndf answer` と同じ引数）。"""
     argv = shown["routes"][value]["argv"]
     seen = gate.Target(**{_FLAGS[f]: v for f, v in zip(argv, argv[1:]) if f in _FLAGS})
     qid = shown["metrics"]["gate"]["id"]
     env.reader.forget()
     a = gate.Answer(qid, value, "回答", "human:reviewer", key, notes, seen=seen)
-    return gate.answer(st, tid, a, answering.github_observe(repo, st.root, reader=env.reader), lambda row: True)
+    return gate.answer(st, tid, a, answering.github_observe(repo, st.root, reader=env.reader), post)
 
 
 def _merge(env, head: str = merge_hub.HEAD) -> None:
@@ -459,3 +462,29 @@ def test_reread_is_refused_for_a_hand_finished_wait(repo, st, env, capsys):
 
     assert out["status"] == "stopped" and "--later reopen" in out["cause"]["detail"], out
     assert _kinds(st, tid, DESIGN) == before
+
+
+def test_a_hand_finished_deploy_revokes_the_old_approval_and_its_answer_does_not_allow_a_merge(repo, st, env, capsys):
+    env.script["release"] = [lambda r: invoke.StageResult(run.result.stopped("plan", "test_failed", "落ちた"), {})]
+    post = gate.github_post(repo, hub=lambda: env.hub)
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    _answer(st, tid, repo, env, _next(st, tid, repo, env))
+    _answer(st, tid, repo, env, _next(st, tid, repo, env), key="k-release", post=post)
+    _next(st, tid, repo, env)
+
+    def judged(head):
+        target = merge_approval.MergeTarget(merge_hub.REPO, 8, "main", head)
+        return merge_approval.merge_judgment(merge_approval.merge_rows(env.hub, 8, env.hub.viewer()), target)
+
+    assert judged(merge_hub.HEAD) is not None
+    env.hub.pulls_of[8] = merge_hub.pull(8, head=merge_hub.OTHER)
+
+    assert _finish(capsys, repo, tid, DEPLOY, _released_values(repo))["status"] == "ok"
+
+    assert judged(merge_hub.HEAD) is None
+    _answer(st, tid, repo, env, _next(st, tid, repo, env), key="k-held", post=post)
+    assert judged(merge_hub.OTHER) is None
+    assert gate.approved_head(run.read(st, tid), "release") is None
+    _next(st, tid, repo, env)
+    assert _state(st, tid, DEPLOY) == "finished" and judged(merge_hub.OTHER) is None

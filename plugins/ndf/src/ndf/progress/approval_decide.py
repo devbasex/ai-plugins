@@ -9,9 +9,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
+from ndf.core import merge_approval
 from ndf.progress import invoke, model, stages
 from ndf.progress.folding import step_progress
-from ndf.progress.run_view import ANSWERED, STEP_EVENT, View, ends_approvals, event_payload
+from ndf.progress.run_view import ANSWERED, STEP_EVENT, View, closes_only, ends_approvals, event_payload
 
 # 設計承認ゲートの区分（承認した PR のマージまで確かめる承認ゲート）
 DESIGN_GATE = next(g for g in model.table()["gates"] if g == "design")
@@ -73,7 +74,7 @@ def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step
     if found is None:
         return None
     p = event_payload(found)
-    return None if p.get("answer") != invoke.APPROVED or model.mvv_answer_void(p, gate) else found
+    return None if p.get("answer") != invoke.APPROVED or closes_only(p) or model.mvv_answer_void(p, gate) else found
 
 
 def target_pr(v: View, stage: stages.StageDef, gate: Optional[str]) -> Optional[int]:
@@ -90,6 +91,58 @@ def saw_another_pr(v: View, stage: str, answer: Mapping[str, Any]) -> bool:
         return False
     number = target_pr(v, v.snap.stage(stage), gate)
     return number is not None and number != held
+
+
+def _target_of(seen: Any, head: Any = None) -> Optional[merge_approval.MergeTarget]:
+    """本番へ反映される承認の対象（事象の `seen` か判定の `target`）。そろっていなければ None（証跡を書かない承認）。"""
+    if not isinstance(seen, Mapping) or seen.get("production") is not True:
+        return None
+    repo, number, base, sha = seen.get("repo"), seen.get("pr"), seen.get("base"), head or seen.get("head")
+    if not (isinstance(repo, str) and type(number) is int and isinstance(base, str) and isinstance(sha, str)):
+        return None
+    return merge_approval.MergeTarget(repo, number, base, sha)
+
+
+def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
+    """事象が証跡を書いた承認の対象と記録の識別子。承認の回答と、省くと決めた MVV 判定の記録（判定のコマンドが証跡を書く）を読む。"""
+    p = event_payload(ev)
+    if ev.draft.kind == ANSWERED:
+        seen = p.get("seen")
+        target = _target_of(seen) if p.get("answer") == invoke.APPROVED and not closes_only(p) else None
+        if target is None:
+            return None
+        return target, merge_approval.presented_record_id(str(p.get("gate_id")), seen.get("presentation"))
+    if ev.draft.kind != STEP_EVENT:
+        return None
+    report = p.get("report")
+    outputs = report.get("outputs") if isinstance(report, Mapping) else None
+    held = outputs.get(model.MVV_KEY) if isinstance(outputs, Mapping) else None
+    if not isinstance(held, Mapping) or held.get("skip") is not True:
+        return None
+    target = _target_of(held.get("target"), held.get("head"))
+    # 記録の識別子は別のステートマシンの判定と同じになるので、証跡を書いたコメントの URL で指す
+    url = held.get("note_url")
+    return (target, url) if target is not None and isinstance(url, str) and url else None
+
+
+def revocations(since: Mapping[str, Sequence[model.Event]], machine_id: str, names: Sequence[str]) -> list[merge_approval.Revocation]:
+    found: dict[merge_approval.MergeTarget, merge_approval.Revocation] = {}
+    for name in names:
+        for ev in since[name]:
+            trail = _trail(ev)
+            if trail is None:
+                continue
+            target, approval = trail
+            approvals = found[target].approvals if target in found else frozenset()
+            found[target] = merge_approval.Revocation(target, approvals | {approval}, f"reopen:{machine_id}:{name}:{ev.seq}")
+    return list(found.values())
+
+
+def stage_revocations(v: View, stage: str) -> list[merge_approval.Revocation]:
+    """工程の直近の開き直しより後の承認の取り消し。手で終えた回答待ちか質問の出し直しで承認の境界が移るときに、移る前に渡す。"""
+    cut = v.last_reopened(stage)
+    rows = [ev for ev in v.events if ev.draft.row_key == stage and ev.seq > cut]
+    return revocations({stage: rows}, v.machine_id, [stage])
 
 
 def content_differences(now: Mapping[str, Any], seen: Mapping[str, Any]) -> list[str]:

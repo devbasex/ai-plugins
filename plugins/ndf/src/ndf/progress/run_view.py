@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
@@ -180,6 +180,11 @@ def ends_approvals(ev: model.Event) -> bool:
         return True
     p = event_payload(ev)
     return ev.draft.kind == STEP_EVENT and p.get("status") == "waiting" and p.get("report") is None
+
+
+def closes_only(payload: Mapping[str, Any]) -> bool:
+    """回答が、実行済みのリリースを持つ工程を閉じるだけの承認（追認 `after_release`）か。マージや後の操作の承認に数えない。"""
+    return payload.get("after_release") is True
 
 
 _UNSEEN: Any = object()

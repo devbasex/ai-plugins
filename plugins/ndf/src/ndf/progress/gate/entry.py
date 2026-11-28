@@ -41,7 +41,7 @@ from ndf.contracts.worker_kinds import (
     work_kinds,
 )
 from ndf.core import branch_strategy, route
-from ndf.progress import command, invoke, model, run, store
+from ndf.progress import command, invoke, model, reopening, run, store
 from ndf.progress.gate.answering import (
     Answer,
     Observe,
@@ -588,10 +588,10 @@ def ask_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def _drive_env(st: store.Store, reader: TargetReader) -> run.Env:
-    """レーンの行を終え、記録した承認を今の対象に照らせる `Env`。"""
+def _drive_env(st: store.Store, reader: TargetReader, revoke: reopening.Revoke) -> run.Env:
+    """レーンの行を終え、記録した承認を今の対象に照らし、境界の前になる承認を取り消せる `Env`。"""
     env = lane_env(run.Env(facts=command.facts_of))
-    return replace(env, standing=standing(reader, st.root), forget=reader.forget)
+    return replace(env, standing=standing(reader, st.root), forget=reader.forget, revoke=revoke)
 
 
 def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
@@ -601,8 +601,9 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     reader = TargetReader(hub)  # 1 回の呼び出しで、対象の PR とマージ先の設定を 1 回だけ読む
     seen = observe if observe is not None else github_observe(cwd, st.root, hub, reader)
     took = _took(st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
-    why = recheck(st, a.machine_id, seen, git_docs_only(cwd))
-    out = run.COMMANDS[a.action](run.with_env(a, _drive_env(st, reader)), cwd, st)
+    revoke = finishing.revoker(hub, "承認の待ちを書き直さない")
+    why = recheck(st, a.machine_id, seen, git_docs_only(cwd), revoke)
+    out = run.COMMANDS[a.action](run.with_env(a, _drive_env(st, reader, revoke)), cwd, st)
     if a.action in ("wait", "work"):
         reader.forget()  # 待ちと作業の間に PR が変わりうるので、承認資料は読み直した対象で作る
     return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in (took, why) if w])
@@ -620,7 +621,8 @@ def _took(st: store.Store, machine_id: str, observe: Observe, post: Post = no_po
 def _cmd_reread(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Optional[Observe] = None) -> dict[str, Any]:
     """`ndf progress reread <ID>`: 承認の前の確認をやり直し、承認ゲートの待ちを今の対象（head・本文・題）で出し直す（#4446）。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
-    out = reread(st, a.machine_id, cwd, _drive_env(st, TargetReader(shared_hub(cwd))))
+    hub = shared_hub(cwd)
+    out = reread(st, a.machine_id, cwd, _drive_env(st, TargetReader(hub), finishing.revoker(hub, "承認の待ちを書き直さない")))
     return present(st, a.machine_id, cwd, out, seen)
 
 

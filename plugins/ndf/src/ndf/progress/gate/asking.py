@@ -378,7 +378,9 @@ def material(v: run.View, q: Question, *, private: bool = True) -> str:
         lines.append(f"- 見る head: {q.target.head}")
     if q.target.base:
         lines.append(f"- マージ先: {q.target.base}")
-    if q.target.production:
+    if q.gate == RELEASE_GATE and run.step_progress(v, q.stage).held_finish is not None:
+        lines.append(f"- {AFTER_RELEASE_LINE}")
+    elif q.target.production:
         lines.append(f"- {PRODUCTION_LINE}")
     if q.gate == RELEASE_GATE and isinstance(ctx.get("product_version"), str):
         lines.append(f"- 出すバージョン: {ctx['product_version']}")
@@ -477,6 +479,8 @@ def _private_temp(directory: Path, text: str) -> Iterator[str]:
 PRESENTED_SUFFIX = ".target.json"
 # 承認資料の、本番へ反映され得ることを示す行（`ndf ci ask` の承認資料と同じ文）
 PRODUCTION_LINE = merge_approval.PRODUCTION_MATERIAL_LINE
+# 手で終えたデプロイの回答待ちの承認資料の行（回答は追認で、マージの承認の証跡を書かない）
+AFTER_RELEASE_LINE = "リリースは実行済みで、この回答は事前の承認ではない（工程を閉じるだけで、マージの承認にならない）"
 
 
 def _presented_target_moved(held: Target, now: Target) -> bool:
