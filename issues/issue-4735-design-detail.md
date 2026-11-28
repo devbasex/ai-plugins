@@ -20,8 +20,10 @@ plugins/ndf/src/ndf/
 ├── core/
 │   ├── issue_docs.py
 │   ├── issue_body.py *
+│   ├── requirements_decide.py *
 │   ├── requirements_docs.py *
 │   ├── requirements_history.py *
+│   ├── run_trailer_decide.py *
 │   ├── worker.py
 │   ├── plan/inputs_decide.py
 │   ├── plan/review_units_decide.py
@@ -42,51 +44,55 @@ plugins/ndf/src/ndf/
                  acceptance_record.py *, acceptance_record_decide.py *}
 ```
 
-依存は一方向だけで、循環は無い。層は `checks/rules.json` の `structure.layers` の順に `contracts`・`adapters`・`core`・`progress`・`domains` と並ぶ。各層は、並びで前にある層に依存する。要求仕様書の読み出し（`core/requirements_docs.py`・`core/requirements_history.py`）と本文の書き換え（`core/issue_body.py`）は `core` に置く。`progress` と `domains` の呼ぶ側がそこを使う。`core` から `progress` を呼ばないため、起点コミットの解決は `progress.command.base_ref` を使わずに `Git.commit_or_none` で行う。構成要素の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
+依存は一方向だけで、循環は無い。層は `checks/rules.json` の `structure.layers` の順に `contracts`・`adapters`・`core`・`progress`・`domains` と並ぶ。各層は、並びで前にある層に依存する。要求仕様書の読み出し（`core/requirements_decide.py`・`core/requirements_history.py`・`core/requirements_docs.py`）、スプリント PR の「通した工程」に書く実行の行の形（`core/run_trailer_decide.py`）、本文の書き換え（`core/issue_body.py`）は `core` に置く。`progress` と `domains` の呼ぶ側がそこを使う。`core` から `progress` を呼ばないため、起点コミットの解決は `progress.command.base_ref` を使わずに `Git.commit_or_none` で行う。要求仕様書の 3 つのモジュールは `requirements_docs` → `requirements_history` → `requirements_decide` の向きにだけ import する（`requirements_docs` は `requirements_decide` も直接読む）。型と解析を一番下に置くのは、読み出し（`lookup`）が履歴の検索を呼び、履歴の検索も同じ型と解析を使うためである。実行の行は `progress` が書き `domains/release` が読むので、形と定数はどちらからも読める `core` に置く。構成要素の関係は設計文書の「構成要素」の図を指し、ここでは描き直さない。
 
-**新設のモジュールを設計文書の構成要素より 6 つ多く置く。** 6 つは次のモジュールである。
+**新設のモジュールを設計文書の構成要素より 8 つ多く置く。** 8 つは次のモジュールである。
 
+- `core/requirements_decide.py`
 - `core/requirements_history.py`
+- `core/run_trailer_decide.py`
 - `progress/requirements_stage.py`
 - `domains/records/requirements_cmd.py`
 - `domains/loop/acceptance_release.py`
 - `domains/release/acceptance_record.py`
 - `domains/release/acceptance_record_decide.py`
 
-`progress/requirements_stage.py` を分けるのは、`progress/command.py` に行を足せないためである。このファイルは行数の上限（`checks/rules.json` の `structure.max_lines` の 1,000 行）にちょうど達している。ほかの 5 つは、1 つのモジュールに置くと、上限に近づくか、判断だけの関数と I/O が同じモジュールに混ざるためである。判断だけの関数は、名前が `_decide` で終わるモジュールに置き、外部の I/O を持たない。新設のモジュールは設計文書の「設計の結果」の触るファイルに足した。
+`progress/requirements_stage.py` を分けるのは、`progress/command.py` に行を足せないためである。このファイルは行数の上限（`checks/rules.json` の `structure.max_lines` の 1,000 行）にちょうど達している。`core/requirements_decide.py` と `core/run_trailer_decide.py` は、上に書いた import の循環と、下の層が上の層を読むことを避けるためである。ほかの 5 つは、1 つのモジュールに置くと、上限に近づくか、判断だけの関数と I/O が同じモジュールに混ざるためである。判断だけの関数は、名前が `_decide` で終わるモジュールに置き、外部の I/O を持たない。新設のモジュールは設計文書の「設計の結果」の触るファイルに足した。
 
 | パス | 種類 | 役割 1 文 | 依存する先 | クラスまたはモジュール | メソッドと最上位の関数 |
 | --- | --- | --- | --- | --- | --- |
-| `contracts/worker_paths.py` | 変更 | 所有者だけが読める権限でファイルを置き、バイト列で読む | `contracts/worker_paths_open.py` | モジュール | 新設 `read_bytes`・`has_acl`。変更 `write_file`・`staged_write`・`_fill_data` |
+| `contracts/worker_paths.py` | 変更 | 所有者だけが読める権限でファイルを置き、バイト列で読み、名前が空のときだけ作る | `contracts/worker_paths_open.py` | モジュール | 新設 `read_bytes`・`has_acl`・`create_file`。変更 `write_file`・`staged_write`・`_fill_data` |
 | `contracts/internal.py` | 変更 | 保存した工程の定義へ `requirements_docs` のキーを足す移し方を持つ | `contracts/schemas/internal/common.schema.json` | モジュール | 新設 `_snapshot_v2` |
 | `adapters/git.py` | 変更 | ツリーの一覧・名前つきの履歴・オブジェクトの有無・SHA の取得を 1 回の起動で行う | git | `Git` | 新設 `tree_entries`・`name_status_log`・`missing_objects`・`fetch_commits` |
 | `core/issue_docs.py` | 変更 | 要求仕様書のパスの形と元の Issue の行を読む | 無し | モジュール | 新設 `requirements_issues`・`requirements_path`・`representative_issue`・`origin_issues` |
-| `core/requirements_docs.py` | 新設 | Issue の番号から要求仕様書を探して返し、条件の版を計算する | `core/issue_docs`・`core/plan/inputs_decide`・`contracts/worker_paths`・`adapters/git` | モジュール | `Doc`・`Criterion`・`Lookup`・`RequirementsError`・`criterion_digest`・`criteria_of`・`criteria_list_digest`・`parse_doc`・`base_commit`・`worktree_candidates`・`tree_candidates`・`lookup`・`find` |
-| `core/requirements_history.py` | 新設 | 消えた要求仕様書の最終版と、配布した版の要求仕様書を git の履歴から選ぶ | `core/requirements_docs`・`adapters/git` | モジュール | `Touch`・`final_version`・`branch_deleted`・`release_docs` |
+| `core/requirements_decide.py` | 新設 | 要求仕様書の型と、読んだバイト列の解析、条件の版の計算（I/O を持たない） | `core/issue_docs`・`core/plan/inputs_decide` | モジュール | `Doc`・`Criterion`・`Lookup`・`RequirementsError`・`criterion_digest`・`criteria_of`・`criteria_list_digest`・`parse_doc`・`needs_requirements` |
+| `core/requirements_docs.py` | 新設 | Issue の番号から要求仕様書を探して返す | `core/issue_docs`・`core/requirements_decide`・`core/requirements_history`・`contracts/worker_paths`・`adapters/git` | モジュール | `base_commit`・`worktree_candidates`・`tree_candidates`・`lookup`・`find` |
+| `core/requirements_history.py` | 新設 | 消えた要求仕様書の最終版と、配布した版の要求仕様書を git の履歴から選ぶ | `core/requirements_decide`・`adapters/git` | モジュール | `Touch`・`final_version`・`branch_deleted`・`release_docs` |
+| `core/run_trailer_decide.py` | 新設 | スプリント PR の「通した工程」に書く実行の行を組み立て、読む | 無し | `Trailer`・モジュール | `TRAILER_WORDS`（定数）・`run_lines`・`parse_trailer` |
 | `core/issue_body.py` | 新設 | Issue の本文を、番号ごとのロックの中で読んで自分のセクションだけ差し替える | `adapters/github`・`filelock` | モジュール | `BodyStore`・`GitHubBodies`・`Rewritten`・`lock_path`・`rewrite` |
 | `core/plan/inputs_decide.py` | 変更 | 実行と要求仕様書の組ごとの確認の表を読む（`progress` と `domains` が共に使う） | 無し | `TableRow`・`RunTable`・モジュール | 新設 `RUN_HEADING`（定数）・`read_tables`・`counted` |
-| `core/plan/review_units_decide.py` | 変更 | 実装計画の版の行と単位の外の行を読み、単位に版を持たせる | `core/requirements_docs` の型 | `Unit`・モジュール | 新設 `criteria_versions`・`outside_units`・`stamped`。変更 `Unit`・`lineup`・`acceptance_args` |
+| `core/plan/review_units_decide.py` | 変更 | 実装計画の版の行と単位の外の行を読み、単位に版を持たせる | `core/requirements_decide` の型 | `Unit`・モジュール | 新設 `criteria_versions`・`outside_units`・`stamped`。変更 `Unit`・`lineup`・`acceptance_args` |
 | `core/route/__init__.py` | 変更 | テンプレートの差し込み `acceptance` を値が無いときに自動で組む処理で、実行の印とモードを足す | 無し | モジュール | 変更 `launch_values`・`check_acceptance` |
 | `core/worker.py` | 変更 | 確認の記録の手順の文を要求仕様書と実行の印の形にする | 無し | モジュール | 変更 `ACCEPTANCE_RULES`（定数） |
 | `progress/command.py` | 変更 | 文脈に実行の印を持たせ、要求の工程の出力を新設のモジュールへ渡す | `progress/requirements_stage` | モジュール | 変更 `_prepare_new`・`_cmd_finish`・`parser`。削除 `_requirements` |
-| `progress/requirements_stage.py` | 新設 | 実行の印、要求の工程の出力の記録、要求仕様書の移送を持つ | `core/requirements_docs`・`progress/store`・`contracts/worker_paths` | モジュール | `run_mark`・`context_run`・`recorded_docs`・`creation_finish`・`finish_requirements`・`MoveStep`・`resume_step`・`move_one`・`move_requirements`・`add_parser` |
+| `progress/requirements_stage.py` | 新設 | 実行の印、要求の工程の出力の記録、要求仕様書の移送を持つ | `core/requirements_docs`・`core/requirements_decide`・`progress/store`・`contracts/worker_paths` | モジュール | `run_mark`・`context_run`・`recorded_docs`・`creation_finish`・`finish_requirements`・`MoveStep`・`resume_step`・`move_one`・`move_requirements`・`add_parser` |
 | `progress/invoke.py` | 変更 | 工程の入力のモードと実行の印をプランの値へ渡す | `progress/requirements_stage` | モジュール | 変更 `_fill_from_issue` |
-| `progress/issue_values.py` | 変更 | PR の本文の要求の部分（要求仕様書へのリンクと `Refs` の行）の文を組み立てる | `core/requirements_docs` の型 | モジュール | 新設 `requirements_refs` |
-| `progress/units_invoke.py` | 変更 | 条件の数と版を要求仕様書から作り、スプリント PR の前に全条件を照らす | `core/requirements_docs`・`core/plan/inputs_decide`（`read_tables`・`counted`） | モジュール | 新設 `_all_recorded`。変更 `_read_units`・`_unit_json`・`_held_lineup`・`sprint_pr`。削除 `_criteria_count` |
-| `progress/records.py` | 変更 | 進行の記録を共通の書き換えで書き、スプリント PR の「通した工程」に実行の行を足す | `core/issue_body`・`core/requirements_docs` | モジュール | 新設 `run_lines`。変更 `pr_section`・`sync_records`・`GitHubRecords` |
+| `progress/issue_values.py` | 変更 | PR の本文の要求の部分（要求仕様書へのリンクと `Refs` の行）の文を組み立てる | `core/requirements_decide` の型 | モジュール | 新設 `requirements_refs` |
+| `progress/units_invoke.py` | 変更 | 条件の数と版を要求仕様書から作り、スプリント PR の前に全条件を照らす | `core/requirements_docs`・`core/requirements_decide`・`core/plan/inputs_decide`（`read_tables`・`counted`） | モジュール | 新設 `_all_recorded`。変更 `_read_units`・`_unit_json`・`_held_lineup`・`sprint_pr`。削除 `_criteria_count` |
+| `progress/records.py` | 変更 | 進行の記録を共通の書き換えで書き、スプリント PR の「通した工程」に実行の行を足す | `core/issue_body`・`core/requirements_docs`・`core/run_trailer_decide` | モジュール | 変更 `pr_section`・`sync_records`・`GitHubRecords` |
 | `domains/records/cleanup_stage.py` | 変更 | クリーンアップの記録を共通の書き換えで書く | `core/issue_body` | モジュール | 変更 `record_issue`・`record_cleanup_stage` |
 | `domains/records/requirements_cmd.py` | 新設 | `ndf records requirements show`・`stamp`・`pr-body` のエントリポイント | `core/requirements_docs`・`core/requirements_history`・`domains/release/acceptance_record`・`progress/issue_values` | モジュール | `add_parsers`・`_show`・`_stamp`・`_pr_body`・`write_out`・`stamp_plan` |
 | `domains/records/cli.py` | 変更 | `requirements` のサブコマンドを登録し、`close-check --verification` に実行の確かめを足す | `domains/records/requirements_cmd` | モジュール | 変更 `_parser`・`_judged`・`_add_close_check`。新設 `_skipped_deploy` |
 | `domains/records/close_decide.py` | 変更 | 確認対象の版が今と同じ行だけで合否を出す | `domains/release/record_decide` | モジュール | 変更 `records_verdict`・`_targets_verdict`・`_last_check`。新設 `current_rows` |
-| `domains/loop/acceptance_decide.py` | 変更 | 実行と要求仕様書の組ごとの確認の表を書き換える | `core/plan/inputs_decide`・`core/requirements_docs` の型 | `Check`・モジュール | 新設 `table_text`・`table_digest`・`without_tables`。変更 `Check`・`recorded_body`。削除 `criteria`・`read_checks`・`unrecorded`・`merged`・`checks_table`・`recorded_rows` |
+| `domains/loop/acceptance_decide.py` | 変更 | 実行と要求仕様書の組ごとの確認の表を書き換える | `core/plan/inputs_decide`・`core/requirements_decide` の型 | `Check`・モジュール | 新設 `table_text`・`table_digest`・`without_tables`。変更 `Check`・`recorded_body`。削除 `criteria`・`read_checks`・`unrecorded`・`merged`・`checks_table`・`recorded_rows` |
 | `domains/loop/acceptance.py` | 変更 | `record`・`show`・`check`・`new-run` のエントリポイント | `core/requirements_docs`・`core/issue_body` | モジュール | 新設 `_new_run`・`parse_digests`。変更 `_record`・`_show`・`_check`・`_check_one`・`add_parsers`。削除 `lock_path`・`_unsettled`・`_reapply` |
 | `domains/loop/acceptance_release.py` | 新設 | `show --release` と `prune` | `core/requirements_history`・`domains/release/acceptance_record` | モジュール | `show_release`・`prune`・`_prune_one` |
-| `domains/materials/collect.py` | 変更 | 種類と影響を要求仕様書から読み、候補の出所に要求仕様書を足す | `core/requirements_docs` の型 | モジュール | 変更 `issue_materials`・`gather` |
+| `domains/materials/collect.py` | 変更 | 種類と影響を要求仕様書から読み、候補の出所に要求仕様書を足す | `core/requirements_decide` の型 | モジュール | 変更 `issue_materials`・`gather` |
 | `domains/materials/cli.py` | 変更 | 要求仕様書を 1 回の読み出しで引いて `gather` へ渡す | `core/requirements_docs` | モジュール | 変更 `main` |
 | `domains/docrebuild/drive.py` | 変更 | 複数の番号を名前に持つ要求仕様書も設計書と組にする | `core/issue_docs` | モジュール | 変更 `requirements_of`。削除 `REQUIREMENTS_FILE` |
 | `domains/release/record_decide.py` | 変更 | リリース記録に `acceptance` を持たせ、テストの行を版で絞る | 無し | `Record`・モジュール | 変更 `Record`・`render_record`・`parse_record_json`・`to_test`・`_pair_rows` |
-| `domains/release/acceptance_record_decide.py` | 新設 | 対応の記録の組み立て・確認対象の版・実行の選び方・有効な記録の選び方 | 無し（判断だけ） | `AcceptanceMap`・`RunEntry`・`Trailer`・モジュール | `parse_trailer`・`canonical`・`target_digest`・`first_targets`・`corrected_targets`・`chosen_run`・`valid_map`・`map_of` |
-| `domains/release/acceptance_record.py` | 新設 | 含めた PR と確認の表を読み、対応の記録を作って書く・読む | `domains/release/acceptance_record_decide`・`core/requirements_history` | モジュール | `build_map`・`read_map`・`record_acceptance`・`add_record_acceptance` |
+| `domains/release/acceptance_record_decide.py` | 新設 | 対応の記録の組み立て・確認対象の版・実行の選び方・有効な記録の選び方 | `core/requirements_decide`（`DIGEST_CHARS`）。判断だけ | `AcceptanceMap`・`RunEntry`・モジュール | `canonical`・`target_digest`・`first_targets`・`corrected_targets`・`chosen_run`・`valid_map`・`map_of` |
+| `domains/release/acceptance_record.py` | 新設 | 含めた PR と確認の表を読み、対応の記録を作って書く・読む | `domains/release/acceptance_record_decide`・`core/requirements_history`・`core/run_trailer_decide` | モジュール | `build_map`・`read_map`・`record_acceptance`・`add_record_acceptance` |
 | `domains/release/record.py` | 変更 | 記録の PR へ最初に `acceptance` 入りの記録を書き、テストの記録に版を書く | `domains/release/acceptance_record` | モジュール | 変更 `write`・`write_verification`・`_require_retest_reasons` |
 | `domains/release/record_unversioned.py` | 変更 | バージョン番号を持たないリポジトリの最初の届け先の記録に `acceptance` を入れる | `domains/release/acceptance_record` | モジュール | 変更 `write_unversioned`・`_made` |
 | `domains/release/record_read.py` | 変更 | 対応の記録がある値で `outputs.issues`・`acceptance_targets` を返す | `domains/release/acceptance_record` | モジュール | 変更 `read_release`・`_records_outputs` |
@@ -129,7 +135,7 @@ plugins/ndf/src/ndf/
 | `requirements_issues` | `issues/issue-7-8-requirements.md` → `{7, 8}` | `issue-78-requirements.md` は `{78}` で `{7}` に当たらない | 設計書のパスは空集合 |
 | `origin_issues` | 2 行で `{7, 8}` | 最初の `##` の後の行は数えない | 別のリポジトリの URL は数えない |
 
-## 要求仕様書の読み出し（`core/requirements_docs.py`）
+## 要求仕様書の読み出し（`core/requirements_decide.py`・`core/requirements_docs.py`）
 
 満たす決定: 決定 2・決定 10、受け入れ条件 2・7・8、不変条件 I2・I3・I6
 
@@ -137,19 +143,20 @@ plugins/ndf/src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Criterion` | `core/requirements_docs.py` | 新設（型） | `NamedTuple(number: int, text: str, digest: str)` | 受け入れ条件 1 つと条件の版 |
-| `Doc` | `core/requirements_docs.py` | 新設（型） | `NamedTuple(path: str, source: str, commit: Optional[str], issues: tuple[int, ...], body: str, criteria: tuple[Criterion, ...], criteria_digest: str)` | 読んだ要求仕様書 1 本 |
-| `Lookup` | `core/requirements_docs.py` | 新設（型） | `NamedTuple(docs: dict[int, Doc], missing: tuple[int, ...])` | 番号ごとの要求仕様書と、見つからない番号 |
-| `RequirementsError` | `core/requirements_docs.py` | 新設（例外） | `(cause: str, detail: str, gaps: Sequence[dict[str, str]] = ())` | 読めない理由を結果 JSON の `cause` で持つ |
-| `criterion_digest` | `core/requirements_docs.py` | 新設 | `(text: str) -> str` | チェックボックスの印と先頭の番号を除き前後の空白を落とした文の SHA-256 の先頭 12 桁を返す |
-| `criteria_of` | `core/requirements_docs.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを上から番号を振って読み、文の重なりを断る |
-| `criteria_list_digest` | `core/requirements_docs.py` | 新設 | `(criteria: Sequence[Criterion]) -> str` | 条件の版を番号の順に改行でつないだ文字列の SHA-256 の先頭 12 桁を返す |
-| `parse_doc` | `core/requirements_docs.py` | 新設 | `(path: str, raw: bytes, *, source: str, commit: Optional[str], repo: str) -> Doc` | バイト列を UTF-8 で読み、元の Issue の行と条件を確かめて `Doc` にする |
+| `Criterion` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(number: int, text: str, digest: str)` | 受け入れ条件 1 つと条件の版 |
+| `Doc` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(path: str, source: str, commit: Optional[str], issues: tuple[int, ...], body: str, criteria: tuple[Criterion, ...], criteria_digest: str)` | 読んだ要求仕様書 1 本 |
+| `Lookup` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(docs: dict[int, Doc], missing: tuple[int, ...])` | 番号ごとの要求仕様書と、見つからない番号 |
+| `RequirementsError` | `core/requirements_decide.py` | 新設（例外） | `(cause: str, detail: str, gaps: Sequence[dict[str, str]] = ())` | 読めない理由を結果 JSON の `cause` で持つ |
+| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(text: str) -> str` | チェックボックスの印と先頭の番号を除き前後の空白を落とした文の SHA-256 の先頭 12 桁を返す |
+| `criteria_of` | `core/requirements_decide.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを上から番号を振って読み、文の重なりを断る |
+| `criteria_list_digest` | `core/requirements_decide.py` | 新設 | `(criteria: Sequence[Criterion]) -> str` | 条件の版を番号の順に改行でつないだ文字列の SHA-256 の先頭 12 桁を返す |
+| `parse_doc` | `core/requirements_decide.py` | 新設 | `(path: str, raw: bytes, *, source: str, commit: Optional[str], repo: str) -> Doc` | バイト列を UTF-8 で読み、元の Issue の行と条件を確かめて `Doc` にする |
 | `base_commit` | `core/requirements_docs.py` | 新設 | `(git: Git, remote: str, base: str) -> str` | `<remote>/<base>` を 1 回だけコミットに解決する |
 | `worktree_candidates` | `core/requirements_docs.py` | 新設 | `(root: Path, numbers: frozenset[int]) -> dict[str, bytes]` | 作業場所の `issues/` から、番号を名前に含む要求仕様書を検査を通して読む |
 | `tree_candidates` | `core/requirements_docs.py` | 新設 | `(git: Git, commit: str, numbers: frozenset[int]) -> dict[str, bytes]` | コミットのツリーから、番号を名前に含む通常ファイルの要求仕様書を読む |
 | `lookup` | `core/requirements_docs.py` | 新設 | `(numbers: Sequence[int], *, root: Path, git: Git, repo: str, base: str, remote: str, ref: Optional[str] = None) -> Lookup` | 読み先を順にたどって番号ごとの要求仕様書を返し、見つからない番号を `missing` に入れる |
 | `find` | `core/requirements_docs.py` | 新設 | `(numbers: Sequence[int], **kw: Any) -> list[Doc]` | `lookup` の結果を要求仕様書の重なりなしの並びで返し、`missing` があれば `incomplete` で止まる |
+| `needs_requirements` | `core/requirements_decide.py` | 新設 | `(mode: str) -> bool` | そのモードが要求仕様書を持つかを返す。偽は `legacy-refactor` だけで、空の文字列は真 |
 
 - `criteria_of`
   - 事後条件: 番号は 1 始まりで、数え方は今の `inputs_decide.criteria` と同じ。文の版が同じ条件が 2 つあれば、重なる番号を挙げて `RequirementsError("check_failed")`
@@ -190,7 +197,7 @@ plugins/ndf/src/ndf/
 
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
-| `DIGEST_CHARS` | 定数 | `core/requirements_docs.py` | `12`（条件の版・条件一覧の版・実行の印・確認対象の版で共有する。ほかのモジュールはここを読む） |
+| `DIGEST_CHARS` | 定数 | `core/requirements_decide.py` | `12`（条件の版・条件一覧の版・実行の印・確認対象の版で共有する。ほかのモジュールはここを読む） |
 | `SOURCES` | 定数 | `core/requirements_docs.py` | スキーマ `records.result.schema.json` の列挙を読む。今の値は `("worktree", "history", "tree", "release")`（結果 JSON の `source` の値） |
 
 ### 既存の部品の再利用
@@ -215,6 +222,7 @@ plugins/ndf/src/ndf/
 | `worktree_candidates` | 追跡していないファイルも読む | 番号の一部（`78` と `7`）は当たらない | リンク・ほかの利用者が書ける・ACL の項目（`has_acl` を差し替え）で内容を返さない |
 | `tree_candidates` | 通常ファイルを読む | 100755 も読む | リンクのエントリで止まる |
 | `lookup` | 順 1・順 2・順 3 のそれぞれで読める | ローカルのベースブランチが古くても起点より前の削除は返らない | 同じ読み先に 2 本で止まる。浅い clone で止まる |
+| `needs_requirements` | `standard` は真 | 空の文字列は真 | `legacy-refactor` だけが偽 |
 | `find` | 2 つの番号が 1 本を指すと要素 1 つ | 番号 1 つ | 見つからない番号で `incomplete` |
 
 ## 履歴とリリースの読み出し（`core/requirements_history.py`）
@@ -225,13 +233,13 @@ plugins/ndf/src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Touch` | `core/requirements_history.py` | 新設（型） | `NamedTuple(commit: str, parents: tuple[str, ...], path: str, status: str)` | 履歴の中で要求仕様書を変えたコミットとパス（`A`・`M`・`D`） |
-| `final_version` | `core/requirements_history.py` | 新設 | `(touches: Sequence[Touch], numbers: frozenset[int], heads: Sequence[str], fallback: Sequence[str], ancestors: Callable[[str, str], bool], blobs: Callable[[Sequence[str]], list[Optional[bytes]]]) -> dict[str, bytes]` | 設計文書の「消えた要求仕様書の最終版の選び方」の順 1〜4 で、番号ごとに 1 つの削除直前の内容を選ぶ |
+| `Touch` | `core/requirements_history.py` | 新設（型） | `NamedTuple(commit: str, path: str, status: str)` | 履歴の中で要求仕様書を変えたコミットとパス（`A`・`M`・`D`） |
+| `final_version` | `core/requirements_history.py` | 新設 | `(touches: Sequence[Touch], parents: Mapping[str, tuple[str, ...]], numbers: frozenset[int], heads: Sequence[str], fallback: Sequence[str], blobs: Callable[[Sequence[str]], list[Optional[bytes]]]) -> dict[str, bytes]` | 設計文書の「消えた要求仕様書の最終版の選び方」の順 1〜4 で、番号ごとに 1 つの削除直前の内容を選ぶ |
 | `branch_deleted` | `core/requirements_history.py` | 新設 | `(git: Git, base: str, numbers: frozenset[int]) -> dict[str, bytes]` | `<base>..HEAD` で消えた要求仕様書の最終版を返す |
 | `release_docs` | `core/requirements_history.py` | 新設 | `(git: Git, remote: str, mapping: Mapping[str, Any], numbers: frozenset[int], repo: str) -> list[Doc]` | 対応の記録の配布コミットと PR の head から、配布した要求仕様書を読む |
 
 - `final_version`
-  - 事前条件: `touches` は調べる履歴をすべて読み終えたもの
+  - 事前条件: `touches` は調べる履歴をすべて読み終えたもの。`parents` は、調べる範囲のすべてのコミット（要求仕様書を変えていないものを含む）の親
   - 事後条件: 返す内容は削除コミットの第 1 親での blob。選べない番号は `RequirementsError("precondition")`
 - `release_docs`
   - 事後条件: 返す `Doc` の `source` は `release`、`commit` は配布コミット（消えたファイルは削除コミットの第 1 親）
@@ -255,13 +263,13 @@ plugins/ndf/src/ndf/
 | `final_version` | 内容が違い、ほかのすべての削除を祖先に持つ削除がある | その削除の直前の内容（順 3） |
 | `final_version` | ほか | 止める（順 4） |
 
-- 計算量の注意: 祖先の判定は削除コミットの組ごとに `ancestors` を呼ぶ。削除は番号ごとに数件で、`git merge-base --is-ancestor` の起動が増えるのはこの組だけである
+- 計算量の注意: 祖先の判定と、head の履歴に削除コミットがあるかの判定は、`parents` をメモリ上でたどる。`git merge-base` は打たないので、削除の候補が増えても Git の起動は増えない。`parents` を作る `git log` はパスで絞らない。パスで絞ると、要求仕様書を変えていないコミットが出力から落ち、親をたどれなくなるためである。要求仕様書のパスへの絞り込みは、出力を読んだ後に行う
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `final_version` | `Git.is_ancestor`・`Git.blobs` | `adapters/git.py` を読んだ | 使う（引数で受けて、テストで差し替える） |
+| `final_version` | `Git.is_ancestor`・`Git.blobs` | `adapters/git.py` を読んだ | `Git.blobs` は使う（引数で受けて、テストで差し替える）。`Git.is_ancestor` は使わない（呼ぶたびに git を起動する） |
 | `branch_deleted`・`release_docs` | `Git.log_of`・`Git.changed_files` | `adapters/git.py` を読んだ | 使えない（親とパスの状態を 1 回で取れない）。新設の `Git.name_status_log` を使う |
 | `release_docs` | `domains/release/record_unversioned._first_parent_history` | `grep -rn 'def _first_parent_history'` | 使えない（第 1 親だけをたどり、PR の head の側の削除を見ない） |
 
@@ -269,9 +277,9 @@ plugins/ndf/src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `final_version` | 統合で旧版を消した後に最終版も消すと最終版 | squash で配布コミットに旧版の削除だけが残ると PR の head の最終版 | 決められなければ止まる。探した順の最初の削除を返さない |
+| `final_version` | 統合で旧版を消した後に最終版も消すと最終版 | squash で配布コミットに旧版の削除だけが残ると PR の head の最終版。要求仕様書を変えていないコミットとマージを挟んでも、後の削除を選ぶ | 決められなければ止まる。探した順の最初の削除を返さない |
 | `branch_deleted` | このブランチで消した版を返す | 起点より前の削除は拾わない | 浅い clone で止まる |
-| `release_docs` | リリースブランチで直した版を返す。未マージの `strict` の squash でも読める | マージの後にベースブランチが進んでも同じ版 | git の起動が PR と Issue の数によらず各 1 回以下（`Git` を差し替えて数える） |
+| `release_docs` | リリースブランチで直した版を返す。未マージの `strict` の squash でも読める | マージの後にベースブランチが進んでも同じ版 | git の起動が PR と Issue の数にも削除の候補の数にもよらず各 1 回以下で、`git merge-base` を打たない（`Git` を差し替えて数える） |
 
 ## 読むコマンド（`domains/records/requirements_cmd.py`）
 
@@ -359,7 +367,7 @@ plugins/ndf/src/ndf/
 - `show_release`
   - 事後条件: 要求仕様書 1 本につき 1 要素で、`checks` は Issue ごとに `acceptance_record_decide.chosen_run` の実行の行だけを持つ。実行が無いか印が空の Issue は区分を返さない
 - `prune`
-  - 副作用: Issue ごとに本文を読む。退避する表があればコメントを読み、識別子 `<!-- ndf:acceptance-table <値> -->` と表の文が同じ信用する書き手のコメントが無いときだけ投稿する。投稿の後は `issue_body.rewrite` がロックの中で本文を読み直して消す
+  - 副作用: Issue ごとに、まず `issue_body.rewrite` を 1 回呼び、ロックの中で読んだ本文を対応の記録のコピーと比べる。退避する表が無ければ、`change` がコピーと同じ表を消した本文を返して終わる（本文の読みは 1 回）。退避する表があれば、この回の `change` は本文を変えずに返し、退避する表を控える。続けてコメントを読み、識別子 `<!-- ndf:acceptance-table <値> -->` と表の文が同じ信用する書き手のコメントが無いときだけ投稿する。投稿の後に `rewrite` をもう 1 回呼び、ロックの中で読み直した本文から、コピーと同じ表と退避した表を 1 回の PATCH で消す
 
 ### 異常系の処理
 
@@ -370,7 +378,7 @@ plugins/ndf/src/ndf/
 | `_record` | 無い番号を渡した | 引数の誤り | `criteria` の番号の集合 | 止める | `invalid` | 直して打ち直せる |
 | `_record` | 当て直しの上限を超えても記録がそろわない | ロックの外の書き手 | `issue_body.rewrite` の `settled` | 止める | `incomplete`（今と同じ文） | 打ち直せる |
 | `_check` | 要求仕様書が無い | 同上 | `find` | 止める | `incomplete`。`--mode legacy-refactor` なら読まずに `ok` | 書いて打ち直せる |
-| `_check` | `--criteria` に版の指定が無い・版が違う | 実装計画が古い | `parse_digests` と今の版 | 止める | 無ければ `invalid`、違えば `check_failed` | `stamp` を打ち直す |
+| `_check` | `--criteria` で条件を絞る Issue に対応する `--criteria-digest <Issue>:<条件一覧の版>` が無い、または指定した版が現在の版と違う | 実装計画が古い | `parse_digests` と今の版 | 止める | 無ければ `invalid`、違えば `check_failed` | `stamp` を打ち直す |
 | `show_release` | `--records` の Issue の集合か版が今読んだ記録と違う | `records` の後の訂正 | `acceptance_targets` の比較 | 止める（何も返さない） | `precondition`。`records` から打ち直すと書く | 打ち直せる |
 | `prune` | 対応の記録を読めない | 記録が無い・編集された | `acceptance_record.read_map` | 止める（本文を変えない） | `precondition` | 打ち直せる |
 | `_prune_one` | コメントの投稿の後で本文の更新に失敗 | GitHub の一時的な失敗 | `GitHubError` | 呼び出し元へ返す（その Issue を失敗の項目にする） | 項目に理由。全体は `incomplete` | 打ち直すと投稿を省いて本文の更新から続く |
@@ -397,8 +405,8 @@ plugins/ndf/src/ndf/
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `read_tables`・`table_text` | `core/plan/inputs_decide.checks_table_spans`・`check_rows`・`split_row`・`cell` | `core/plan/inputs_decide.py` を読んだ | 使う（表の切り出しと行の分割） |
-| `counted` | `core/requirements_docs.Criterion` | この文書 | 使えない（`requirements_docs` が `inputs_decide.criteria` を読むので、型を受けると循環する）。（番号、条件の版）の組で受ける |
-| `table_digest` | `core/requirements_docs.DIGEST_CHARS` | この文書 | 使う |
+| `counted` | `core/requirements_decide.Criterion` | この文書 | 使えない（`requirements_decide` が `inputs_decide.criteria` を読むので、型を受けると循環する）。（番号、条件の版）の組で受ける |
+| `table_digest` | `core/requirements_decide.DIGEST_CHARS` | この文書 | 使う |
 | `without_tables` | `inputs_decide.section_span` | 同上 | 使う |
 | `parse_digests` | `acceptance.parse_criteria`（`<Issue>:<番号>` の読み方） | `domains/loop/acceptance.py` を読んだ | 使えない（値が番号でなく版）。形の確かめだけ同じ書き方にする |
 | `_new_run` | `domains/docrebuild/drive.new_check_id` | `grep -rn 'token_hex' src/ndf` | 使えない（桁数が違う）。`secrets.token_hex` を使う |
@@ -415,7 +423,7 @@ plugins/ndf/src/ndf/
 | `_check` | `--criteria` の和集合。指定の無い Issue が混ざれば全条件 | `--no-criteria` は今のまま | 無い番号で失敗。本文の「進行」が `legacy-refactor` でも `--mode` が違えば止まる |
 | `_new_run` | 12 桁の 16 進 | 2 回で違う値 | `record`・`check` は `--run` が無ければ `invalid` |
 | `show_release` | まとめた要求仕様書の 2 つの Issue が別の実行なら本文 1 本・記録は Issue と実行ごと | すべての実行が `legacy-refactor` の Issue だけが「要求仕様書なし」 | 訂正の後の `--records`、Issue が足されただけの訂正で止まる |
-| `prune` | 対応の記録のコピーと同じ表は消え、コピーの無い表は退避してから消える | `--no-release` はすべて退避 | `--release` も `--no-release` も無ければ何も変えない。信用しない書き手の同じ識別子では投稿を省かない。退避の間の本文の変更が残る |
+| `prune` | 対応の記録のコピーと同じ表は消え、コピーの無い表は退避してから消える | `--no-release` はすべて退避。コピーと同じ表だけなら本文の読み 1 回・更新 1 回、退避があれば読み 2 回・更新 1 回（呼び出しを差し替えて数える） | `--release` も `--no-release` も無ければ何も変えない。信用しない書き手の同じ識別子では投稿を省かない。退避の間の本文の変更が残る |
 
 ## Issue の本文の書き換え（`core/issue_body.py`）
 
@@ -511,31 +519,39 @@ plugins/ndf/src/ndf/
 | `_fill_from_issue` | `progress/invoke.py` | 変更 | 今のまま | 工程の入力の `mode` と、文脈の実行の印（`requirements_stage.context_run`）を値 `mode`・`run` に入れる |
 | `_read_units` | `progress/units_invoke.py` | 変更 | `(g: Git, remote: str, plans: Sequence[PlanDoc], issues: Sequence[int], mode: str, root: Path) -> tuple[Unit, ...]` | `legacy-refactor` は今のまま本文から数え、ほかは要求仕様書から数と版を作る |
 | `_unit_json`・`_held_lineup` | `progress/units_invoke.py` | 変更 | 今のまま | `units.json` に版を書き、読むときに今の版と違えば並びを作り直す |
-| `_all_recorded` | `progress/units_invoke.py` | 新設 | `(ctx: Context) -> None` | すべての単位のマージの後に、全 Issue の全条件を代表の Issue の本文の 1 回の照会で照らす |
+| `_all_recorded` | `progress/units_invoke.py` | 新設 | `(ctx: Context) -> None` | すべての単位のマージの後に、全 Issue の全条件を代表の Issue の本文の 1 回の照会で照らす。`legacy-refactor` は何も読まない |
 | `sprint_pr` | `progress/units_invoke.py` | 変更 | 今のまま | PR を開く前に `_all_recorded` を呼ぶ |
 | `requirements_refs` | `progress/issue_values.py` | 新設 | `(docs: Sequence[Doc], issues: Sequence[int], repo: str) -> str` | 要求仕様書ごとのリンクの行と、全 Issue の `Refs #<番号>` の行を作る |
 | `_pr_body` | `domains/records/requirements_cmd.py` | 新設 | `(args: argparse.Namespace, root: Path) -> dict[str, Any]` | push した head の要求仕様書から `requirements_refs` の文を作り、`--out` のファイルを置き換える |
 
 - `_all_recorded`
+  - 事前条件: 工程の入力のモードを `requirements_decide.needs_requirements` で確かめる。偽（`legacy-refactor`）なら、要求仕様書も Issue の本文も読まずに戻る。単位ごとの `check`・`_read_units`・`pr-body` も同じ関数でモードを分ける
   - 事後条件: 記録の無い条件があれば、条件を挙げて `UnitsStopped("incomplete")`。区分 `リリース後` の行は検証の結果が無くても記録ありに数える
   - 副作用: `domains/loop/acceptance.read_bodies` と同じ形の 1 回の GraphQL の照会（`GitHub.nodes`）。子プロセスは起動しない
 - `requirements_refs`
   - 事後条件: リンクは `https://github.com/<repo>/blob/<Doc.commit>/<path>`。要求仕様書の行は重なりなし、`Refs #<番号>` は `issues` の全件
-- `_pr_body`（`ndf records requirements pr-body --issue=<番号>... --mode=<モード> --branch <ブランチ> --remote <名前> --out <ファイル>`）
-  - 事前条件: head は作業場所の `HEAD` を 1 回だけ解決した SHA。`--remote` の `refs/heads/<ブランチ>`（`git ls-remote`）がその SHA であること。`requirements_docs.find(..., ref=<SHA>)` で読み、作業場所の要求仕様書（`worktree_candidates`）が読んだ内容と同じであること
+- `_pr_body`（`ndf records requirements pr-body --issue=<番号>... --mode=<モード> --branch <ブランチ> --remote <名前> --out <ファイル> [--pushed <ファイル>]`）
+  - 事前条件: head は作業場所の `HEAD` を 1 回だけ解決した SHA。その SHA がリモートへ反映されていること。`--pushed` のファイル（`push` のステップが反映を確かめた SHA を書く）の中身が head と同じなら、リモートへは照会しない。ファイルが無いか中身が違うときだけ、`--remote` の `refs/heads/<ブランチ>`（`git ls-remote`）がその SHA であることを確かめる。`requirements_docs.find(..., ref=<SHA>)` で読み、作業場所の要求仕様書（`worktree_candidates`）が読んだ内容と同じであること
   - 事後条件: `--issue` が 0 件か `--mode` が `legacy-refactor` なら、何も読まず書かずに `ok`。ほかは `--out` の中身が `requirements_refs` の文だけになる。モードが空なら要求仕様書を求める
   - 副作用: `--out` を `worker_paths.write_file(private=True)` で置き換え、`check_unshared` を通す
 
 **PR の本文は、push の後に流すステップで head から作り直す。** 設計と実装のテンプレート（`contracts/templates/design.json`・`impl.json`）の `push` と `pr` の間に、次のステップを足す。
 
 ```json
-{"id": "pr-body", "run": ["ndf", "records", "requirements", "pr-body", "--issue={{refs}}", "--mode={{mode}}", "--branch={{branch}}", "--remote={{remote}}", "--out={{body_file}}"]}
+{"id": "pr-body", "run": ["ndf", "records", "requirements", "pr-body", "--issue={{refs}}", "--mode={{mode}}", "--branch={{branch}}", "--remote={{remote}}", "--out={{body_file}}", "--pushed", "{state_dir}/pushed-head"]}
 ```
+
+- 2 つのテンプレートの最初の `push` のステップは、共有の定義の `run` と `probe` を上書きし、反映を確かめた head の SHA を `{state_dir}/pushed-head` に書く。共有の定義（`parts/steps.json`）は変えない
+
+  | キー | シェルの文（`$0` はブランチ、`$1` はリモート、`$2` は `{state_dir}/pushed-head`） |
+  | --- | --- |
+  | `run` | `h=$(git rev-parse HEAD) && git push -- "$1" "$h:refs/heads/$0" && printf '%s\n' "$h" > "$2"` |
+  | `probe` | `h=$(git rev-parse HEAD) && test "$(git ls-remote -- "$1" "refs/heads/$0" \| cut -f1)" = "$h" && printf '%s\n' "$h" > "$2"` |
 
 - 2 つのテンプレートの `params` に `refs` と `mode` を足し、`params.json` の `mode` の既定は空の文字列にする。`ndf progress` から組むと、`refs` は工程の入力のすべての Issue（今の `invoke._fill_refs`）、`mode` は工程の入力が入る。単位の経路の実装のプランも同じ値になる。`invoke` と `units_invoke` はこのために変えない
 - `issue_values` が、プランを組む時点に本文のファイルを書く処理は変えない（このモジュールに足すのは `requirements_refs` である）。プランを組む時点では今のまま Issue の本文を `body_file` に書き、`legacy-refactor` ではそれがそのまま PR の本文になる。ほかのモードはステップが置き換える。組む時点で要求仕様書を読まないのは、その時点の `HEAD` が PR の head ではなく、worker のコミットの前の内容を指すためである
 - `ndf route render`・`run` の単発の利用で `refs` を省くと、ステップは何もせず、渡した `body_file` がそのまま本文になる。`refs` を渡すと `body_file` を置き換えるので、`params.json` の `body_file` の説明に書く
-- 打ち直しは止まったステップから始まり、`push` を通らない。直したコミットを push せずに打ち直すと PR の head に無い内容へのリンクができるので、ステップがリモートの head と照らす
+- 打ち直しは止まったステップから始まり、`push` を通らない。直したコミットを push せずに打ち直すと PR の head に無い内容へのリンクができる。このとき `HEAD` は `pushed-head` の SHA と違うので、ステップはリモートの head と照らして止まる。`HEAD` が同じなら、その SHA は反映を確かめた後なので照会しない
 - PR が既にあれば、今のまま `pr` のステップの `probe` がその番号を使い、本文は書き換えない。ステップはその場合も流れ、要求仕様書を読めなければ止まる
 - 置き場所を `ndf records requirements` にする理由は 2 つある。要求仕様書を読むコマンドと同じ読み方を使えることと、`domains` から `progress` の `requirements_refs` を呼ぶ向きが層の決まりに合うことである。`pr` のテンプレートと共有の `pr` のステップ（`parts/steps.json`）は変えないので、コミットから本文を組む経路と `fix`・`close` のテンプレートには影響しない
 
@@ -561,7 +577,7 @@ plugins/ndf/src/ndf/
 | `_all_recorded` | `domains/loop/acceptance.read_bodies` | `domains/loop/acceptance.py` を読んだ | 使えない（`domains` の層にあり `progress` から呼べない）。同じ `GitHub.nodes` を呼び、表は `inputs_decide.read_tables`・`counted` で読む |
 | `requirements_refs` | `pr` のテンプレートの `Refs` の行（`contracts/templates/pr.json`） | `grep -rn Refs contracts/templates` | 使えない（コミットの件名から組む）。同じ行の形にそろえる |
 | `_pr_body` | `_show` の `--ref`・`--out`、`write_out` | 「読むコマンド」の節 | 使えない（要求仕様書の本文を書き出し、PR の本文の形を作らず、head の照らしもしない）。読み出しは `requirements_docs.find`、書き出しは `worker_paths.write_file` を使う |
-| `pr-body` のステップ | `parts/steps.json` の `pr`・`push` の `probe` | `contracts/templates/parts/steps.json` を読んだ | `pr` は `fix`・`close` と共有するので変えない。リモートの head の照らし方は `push` の `probe` と同じにする |
+| `pr-body` のステップ | `parts/steps.json` の `pr`・`push` の `probe` | `contracts/templates/parts/steps.json` を読んだ | `pr` は `fix`・`close` と共有するので変えない。`push` は設計と実装のテンプレートだけで `run` と `probe` を上書きする。記録が使えないときのリモートの head の照らし方は `push` の `probe` と同じにする |
 
 ### 単体テストの観点
 
@@ -569,12 +585,12 @@ plugins/ndf/src/ndf/
 | --- | --- | --- | --- |
 | `lineup` | 版が合えば今の並び | `digests` が None（`legacy-refactor`）は今のまま | 並べ替えの後の古い版・版の行の無い計画・割り当ての漏れで止まる |
 | `acceptance_args` | `--run`・`--mode`・`--criteria-digest` が付く | 補った単位も `--run` を持つ | — |
-| `_all_recorded` | 全件に記録があれば通る。区分 `リリース後` の記録だけで通る | 要求仕様書 3 本でも照会 1 回（呼び出しを差し替えて数える） | 単位の外の条件に記録が無ければ止まる |
+| `_all_recorded` | 全件に記録があれば通る。区分 `リリース後` の記録だけで通る | 要求仕様書 3 本でも照会 1 回（呼び出しを差し替えて数える）。`legacy-refactor` は単位をすべてマージした後、要求仕様書も確認の行も無いままスプリント PR を開け、照会は 0 回 | 単位の外の条件に記録が無ければ止まる |
 | `requirements_refs` | 要求仕様書ごとのリンクと全 Issue の `Refs` | 2 つの Issue が 1 本を指すとリンクは 1 行、`Refs` は 2 行 | `Refs` が 1 件欠けると落ちる |
-| `_pr_body` | `--out` が head のコミットを指すリンクと `Refs` に置き換わる | `legacy-refactor` と `--issue` 0 件は `--out` を変えずに `ok`。モードが空なら要求仕様書を求める | head に無い・作業場所と違う・リモートの head と違う場合は、`--out` を変えずに止まる |
+| `_pr_body` | `--out` が head のコミットを指すリンクと `Refs` に置き換わる | `legacy-refactor` と `--issue` 0 件は `--out` を変えずに `ok`。モードが空なら要求仕様書を求める | head に無い・作業場所と違う・リモートの head と違う場合は、`--out` を変えずに止まる。`--pushed` が head と同じなら `git ls-remote` は 0 回、違うか無ければ 1 回（呼び出しを差し替えて数える） |
 | 設計と実装のテンプレート | 組んだプランで `pr-body` が `push` の後、`pr` の前に流れる | `refs` を省いても組める。単位の経路のテンプレートにも残る | `pr-body` が止まれば `pr` のステップを流さない |
 
-## 進行の記録・クリーンアップの記録（`progress/records.py`・`domains/records/cleanup_stage.py`）
+## 進行の記録・クリーンアップの記録（`progress/records.py`・`core/run_trailer_decide.py`・`domains/records/cleanup_stage.py`）
 
 満たす決定: 決定 4、受け入れ条件 10
 
@@ -583,8 +599,8 @@ plugins/ndf/src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `GitHubRecords`・`Records` | `progress/records.py` | 変更 | `core/issue_body.GitHubBodies`・`BodyStore` を指す名前にする | 読み書きの型を共通にする |
-| `run_lines` | `progress/records.py` | 新設 | `(issues: Sequence[int], tables: Sequence[tuple[int, str]], run: str, mode: str) -> str` | 「通した工程」に足す `対象の Issue`・`確認の表`・`実行`・`モード` の行を作る |
-| `pr_section` | `progress/records.py` | 変更 | `(v: View, tables: Sequence[tuple[int, str]]) -> str` | 今の工程の行の前に `run_lines` を置く |
+| `run_lines` | `core/run_trailer_decide.py` | 新設 | `(issues: Sequence[int], tables: Sequence[tuple[int, str]], run: str, mode: str) -> str` | 「通した工程」に足す `対象の Issue`・`確認の表`・`実行`・`モード` の行を作る |
+| `pr_section` | `progress/records.py` | 変更 | `(v: View, tables: Sequence[tuple[int, str]]) -> str` | 今の工程の行の前に `run_trailer_decide.run_lines` の行を置く |
 | `sync_records` | `progress/records.py` | 変更 | 今のまま | 書き先ごとに `issue_body.rewrite` で書く。PR の書き先では `requirements_docs.lookup` で `tables` を作る |
 | `record_issue` | `domains/records/cleanup_stage.py` | 変更 | `(store: BodyStore, cwd: Path, issue: int, stamp: str) -> dict[str, Any]` | `issue_body.rewrite` で工程「クリーンアップ」の記録を付ける |
 | `record_cleanup_stage` | `domains/records/cleanup_stage.py` | 変更 | `(hub: GitHub, prs: Iterable[int], cwd: Path) -> list[dict[str, Any]]` | `record_issue` へストアと作業場所を渡す |
@@ -604,13 +620,13 @@ plugins/ndf/src/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `run_lines` | `pr_section` の行の組み立て・`acceptance_record_decide.TRAILER_WORDS` | `progress/records.py` を読んだ | 使う（行の語は `TRAILER_WORDS` を読み、読む側の `parse_trailer` と同じ語にする） |
+| `run_lines` | `pr_section` の行の組み立て | `progress/records.py` を読んだ | 使う（同じ行の形にする）。行の語は `run_trailer_decide.TRAILER_WORDS` を読み、読む側の `parse_trailer` と同じ語にする |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `run_lines` | 要求仕様書 2 本で `確認の表` の行が 2 つ | Issue 1 つ | — |
+| `run_lines`・`parse_trailer` | 要求仕様書 2 本で `確認の表` の行が 2 つ。書いた行を読み戻すと同じ値 | Issue 1 つ | 行の無い本文は None |
 | `sync_records`・`record_issue` | 今のテストが通る | 変更なしで PATCH しない | 確認の記録と重なっても両方残る |
 
 ## リリースの対応の記録（`domains/release/`・`domains/records/`）
@@ -623,9 +639,9 @@ plugins/ndf/src/ndf/
 | --- | --- | --- | --- | --- |
 | `RunEntry` | `domains/release/acceptance_record_decide.py` | 新設（型） | `NamedTuple(pr: int, head: str, base: str, merged_at: str, issues: tuple[int, ...], run: str, mode: str, tables: tuple[dict[str, Any], ...])` | `runs` の 1 件 |
 | `AcceptanceMap` | 同上 | 新設（型） | `NamedTuple(commit: str, release_pr: Optional[int], release_head: Optional[str], runs: tuple[RunEntry, ...], targets: dict[int, str], version: str, unit: Optional[str])` | 対応の記録 |
-| `Trailer` | 同上 | 新設（型） | `NamedTuple(issues: tuple[int, ...], tables: tuple[tuple[int, str], ...], run: str, mode: str)` | 「通した工程」の行 |
+| `Trailer` | `core/run_trailer_decide.py` | 新設（型） | `NamedTuple(issues: tuple[int, ...], tables: tuple[tuple[int, str], ...], run: str, mode: str)` | 「通した工程」の行 |
 | `parse_trailer` | 同上 | 新設 | `(body: str) -> Optional[Trailer]` | PR の本文の「通した工程」から実行の行を読む |
-| `canonical` | 同上 | 新設 | `(value: Any) -> bytes` | キーを名前順、空白なし、UTF-8 の JSON。`tables` はパス、`rows` は条件の版の順に並べる |
+| `canonical` | `domains/release/acceptance_record_decide.py` | 新設 | `(value: Any) -> bytes` | キーを名前順、空白なし、UTF-8 の JSON。`tables` はパス、`rows` は条件の版の順に並べる |
 | `target_digest` | 同上 | 新設 | `(*parts: Any) -> str` | `canonical` をつないだものの SHA-256 の先頭 12 桁 |
 | `first_targets` | 同上 | 新設 | `(m: AcceptanceMap) -> dict[int, str]` | 最初の記録の Issue ごとの版（`commit`・番号・選ぶ実行の値。入力は設計文書の「確認対象の版」） |
 | `corrected_targets` | 同上 | 新設 | `(prev: Mapping[int, str], before: Mapping[int, Any], after: Mapping[int, Any]) -> dict[int, str]` | 訂正の前後の読み出し結果を比べ、同じなら引き継ぎ、違えば前の版とつないで新しい版にする |
@@ -682,14 +698,14 @@ plugins/ndf/src/ndf/
 | 名前 | 種類 | 保存先 | 既定値 |
 | --- | --- | --- | --- |
 | `ACCEPTANCE_KEY` | 定数 | `domains/release/acceptance_record_decide.py` | `"acceptance"`（リリース記録の JSON のキー。スキーマの正は `release-verification.schema.json`） |
-| `TRAILER_WORDS` | 定数 | 同上 | `("対象の Issue", "確認の表", "実行", "モード")`（`progress/records.run_lines` もここを読む） |
+| `TRAILER_WORDS` | 定数 | `core/run_trailer_decide.py` | `("対象の Issue", "確認の表", "実行", "モード")`（`run_lines` と `parse_trailer` がここを読む） |
 
 ### 既存の部品の再利用
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
 | `build_map` | `record.released`・`landed_commit`・`included_pulls`・`GitHub.pulls`・`GitHub.nodes`・`GitHub.trusts` | `domains/release/record.py`・`adapters/github.py` を読んだ | 使う |
-| `parse_trailer` | `adapters/github_pulls.closing_keyword_issues` | `grep -rn closing_keyword_issues` | 使う（行の無い PR の Issue） |
+| `build_map`（行の無い PR の Issue） | `adapters/github_pulls.closing_keyword_issues` | `grep -rn closing_keyword_issues` | 使う |
 | `valid_map` | `record_read.candidates`（信用する書き手と訂正の選び方） | `domains/release/record_read.py` を読んだ | 使えない（バージョンと届け先の一覧の選び方で、最初の投稿を選ばない）。`Authored.edited` と `GitHub.trusts` は使う |
 | `canonical`・`target_digest` | `record_decide._json_block` | `domains/release/record_decide.py` を読んだ | 使えない（表示用で、キーの順と空白を決めない） |
 | `corrected_targets` | `requirements_history.release_docs` | この文書 | 使う（前後の読み出し） |
@@ -737,11 +753,14 @@ plugins/ndf/src/ndf/
 | `_snapshot_v2` | `contracts/internal.py` | 新設 | `(row: Row) -> Row` | 保存した定義の要求の工程の `outputs` に `requirements_docs`、作業場所の用意の任意の入力に同じキーを足す |
 
 - `finish_requirements`
-  - 事後条件: 状態は変えない。`outputs_recorded` の事象が 1 件増える。対象の Issue のどれかを名前に含むパスが無ければ書かない
+  - 事後条件（要求の工程が未完了）: 今の `finish` と同じく終了のマーカー（`manual_finished`）を書き、出力を文脈へ書く。工程は完了になる
+  - 事後条件（要求の工程が完了済み）: 状態は変えない。`outputs_recorded` の事象が 1 件増える
+  - どちらの場合も、対象の Issue のどれかを名前に含むパスが無ければ何も書かない
 - `move_one`
   - 事前条件: 実行とパスの組ごとのファイルロック（Git の共通ディレクトリの下）を、進捗を読む前に取る
   - 事後条件: 照合したバイト列そのものを作業場所へ書く。元の名前の既存ファイルを上書きしない
-  - 副作用: 退避先 `issues/.ndf-move-<ID の先頭 12 桁>-<ファイル名>`（所有者だけのディレクトリ）への `os.link` と `unlink`（既にあれば失敗する方法）。事象 `requirements_move` の追記。`git checkout -- <パス>`（元が追跡ファイルのとき）
+  - 副作用: 退避先 `issues/.ndf-move-<ID の先頭 12 桁>-<ファイル名>`（所有者だけのディレクトリ）への `os.link` と `unlink`（既にあれば失敗する方法）。事象 `requirements_move` の追記
+  - 順 6（元が追跡ファイルのとき）: 復元元のコミットを `git.commit_or_none("HEAD")` で 1 回だけ解決し、`Git.blobs` で `<そのコミット>:<パス>` のバイト列を読み、`worker_paths.create_file` で作る。`git checkout -- <パス>` は使わない。インデックスから復元し、そこにあるファイルを上書きするためである。名前が埋まっていて内容が復元するバイト列と同じなら、戻し終えたものとして完了にする（作った直後の中断からの再開）。違えば何も変えずに `precondition` で止まる
 
 ### 異常系の処理
 
@@ -776,13 +795,13 @@ plugins/ndf/src/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `run_mark` | `core/requirements_docs.DIGEST_CHARS`・`hashlib` | この文書 | 使う |
+| `run_mark` | `core/requirements_decide.DIGEST_CHARS`・`hashlib` | この文書 | 使う |
 | `context_run` | `command.machine_context` | `progress/command.py` を読んだ | 使う（文脈を読んでから `run` を引く） |
 | `resume_step` | 無し | `grep -rn resume src/ndf/progress` | 新設（`units_invoke.resume_of` は単位の回の再開で、移送の進捗を読まない） |
 | `move_requirements`・`add_parser` | `command.with_store`・`add_cwd`・`add_stage_target` | `progress/command.py` を読んだ | 使う（ストアの開き方と引数の形を同じにする） |
 | `recorded_docs` | `requirements_docs.worktree_candidates` の検査 | この文書 | 使う |
 | `creation_finish`・`finish_requirements` | `command._requirements`・`_cmd_finish`・`stages.outputs_draft`・`_append` | `progress/command.py` を読んだ | 使う（移して要求の工程の分岐を足す） |
-| `move_one` | `contracts/worker_paths.read_bytes`・`write_file`・`check_owned` | `contracts/worker_paths.py` を読んだ | 使う。退避は `os.link`（既にあれば `FileExistsError`）で、`os.rename` は既存を上書きするので使わない |
+| `move_one` | `contracts/worker_paths.read_bytes`・`write_file`・`check_owned` | `contracts/worker_paths.py` を読んだ | 使う。退避は `os.link`（既にあれば `FileExistsError`）で、`os.rename` は既存を上書きするので使わない。順 6 の復元は新設の `create_file` と `Git.blobs` を使う（`write_file` は既存を置き換える） |
 | `move_one` | `worktree` の手順 3（メインディレクトリの変更を移す） | `plugins/ndf/skills/worktree/SKILL.md` を読んだ | 使えない（照合が無い） |
 | `_snapshot_v2` | `_snapshot_v1`・`stage_value_key` | `contracts/internal.py` を読んだ | 使う（同じ形で足す） |
 
@@ -791,8 +810,8 @@ plugins/ndf/src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `context_run` | 別のステートマシンで値が変わる | `--carry` でコピー元と同じ。旧いステートマシンは再開しても `--carry` しても ID から導いた値 | — |
-| `finish_requirements` | 完了した工程に打つと出力だけが残り状態は変わらない | 更新より前の定義を保存した実行でも残る（`_snapshot_v2`） | パスの欠けた出力を断る |
-| `move_one` | 照合したバイト列を書く | 退避の直後・書いた直後の中断から終わる | 照合の後の書き直しで移さない。二重の起動で退避ファイルを上書きしない |
+| `finish_requirements` | 未完了の工程に打つと完了になり出力が残る。完了した工程に打つと出力だけが残り状態は変わらない | 更新より前の定義を保存した実行でも残る（`_snapshot_v2`） | パスの欠けた出力を断る |
+| `move_one` | 照合したバイト列を書く | 退避の直後・書いた直後・順 6 でファイルを作った直後の中断から終わる | 照合の後の書き直しで移さない。二重の起動で退避ファイルを上書きしない。順 6 の直前に元の名前へ書かれた内容を上書きしない |
 
 ## Git アダプターと保存先の検査（`adapters/git.py`・`contracts/worker_paths.py`）
 
@@ -803,11 +822,12 @@ plugins/ndf/src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Git.tree_entries` | `adapters/git.py` | 新設 | `(self, commit: str, prefix: str) -> list[tuple[str, str, str, str]]` | `git ls-tree -r -z` 1 回で（モード・種類・id・パス）を返す |
-| `Git.name_status_log` | 同上 | 新設 | `(self, revs: Sequence[str], paths: Sequence[str]) -> list[tuple[str, tuple[str, ...], list[tuple[str, str]]]]` | `git log --format=%H %P --name-status -z --no-renames` 1 回で、コミット・親・（状態・パス）の並びを返す |
+| `Git.name_status_log` | 同上 | 新設 | `(self, revs: Sequence[str]) -> list[tuple[str, tuple[str, ...], list[tuple[str, str]]]]` | `git log --format=%H %P --name-status -z --no-renames` 1 回で、範囲のすべてのコミットの（コミット・親・（状態・パス）の並び）を返す。パスでは絞らない |
 | `Git.missing_objects` | 同上 | 新設 | `(self, specs: Sequence[str]) -> frozenset[str]` | `git cat-file --batch-check` 1 回で、`missing` と返る指定の集合を返す |
 | `Git.fetch_commits` | 同上 | 新設 | `(self, remote: str, shas: Sequence[str]) -> Completed` | SHA を指定した 1 回の `git fetch` |
 | `read_bytes` | `contracts/worker_paths.py` | 新設 | `(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[bytes]` | `read_file` と同じ検査でバイト列を返す（`read_file` はこれを呼んで復号する） |
 | `has_acl` | 同上 | 新設 | `(fd: int) -> bool` | 開いた記述子に拡張 ACL の項目があるか（Linux は `_has_acl`、macOS は `_has_acl_darwin`）。確かめられなければ真 |
+| `create_file` | 同上 | 新設 | `(wd: WorkDir, name: str, data: bytes) -> bool` | 一時ディレクトリに書いてから `os.link` で公開する。名前が埋まっていれば何も変えずに偽を返す |
 | `write_file`・`staged_write`・`_fill_data` | 同上 | 変更 | 今の引数に `owner_only: bool = False` を足す | 真なら公開の前に新しい inode を 0600 にし、置き換える前のファイルの権限を引き継がない |
 
 ### 異常系の処理
@@ -875,7 +895,7 @@ plugins/ndf/src/ndf/
 | `skills/requirements-design/SKILL.md`・`references/spec-template.md`・`references/document-roles.md` | 本文へ要求を書く手順と一致の確かめを消し、要求仕様書に `元の Issue:` の行を書く。不具合は「今の姿」に根本原因を書く。設計文書の「進行中の作業」の手順を置く |
 | `skills/design/SKILL.md`・`references/design-template.md`・`references/deliverables.md` | 手順 7 の「仕様のコピーが課題の本文と一致しているか」を消し、要求仕様書を読む |
 | `skills/development-workflow/SKILL.md`・`references/approval-request.md`・`references/agent-layers.md`・`references/glossary.md` | 出所の表を要求仕様書にし、「種類と影響」の行を足す。手で組むプランの例に `--run`・`--mode` を足す |
-| `skills/progress-tracking/SKILL.md` | 受け入れ条件のマーカーを付ける手順を消し、閉じた後の照合し直しと `prune` を置く |
+| `skills/progress-tracking/SKILL.md` | 受け入れ条件のマーカーを付ける手順を消し、閉じた後の照合し直し（閉じる前に番号と版を作業の保存先の `closing.json` に書き、打ち直しはそこから続ける）と `prune` を置く |
 | `skills/quality-gates/SKILL.md`・`references/design-match.md`・`references/definition-of-done.md`・`skills/fix/SKILL.md`・`skills/pr-review/SKILL.md`・`skills/pr/SKILL.md` | 要求への指摘の直しと実装で変えた条件の直しを要求仕様書の差分にする。PR の本文を要求仕様書へのリンクと `Refs` にする |
 | `skills/release-verification/SKILL.md`・`skills/release/SKILL.md`・`references/release-steps.md` | `acceptance show --release` を 1 回打つ手順、マージの前の証跡を使う条件の確かめ（`git cat-file --batch-check` と `git --literal-pathspecs diff --quiet`）、`record-acceptance`、旧方式の Issue（設計文書の「マージ済みで残るのがリリース後テストだけの場合」）の手順 |
 | `skills/worktree/SKILL.md`・`skills/document-rebuild/SKILL.md`・`skills/implementation-plan/SKILL.md` | `move-requirements` を打つ手順、まとめた要求仕様書を組にすること、`stamp` を打つ手順と「単位の外」の行 |
