@@ -301,7 +301,7 @@ contracts/
 | --- | --- |
 | `gate/entry.present` | 設計承認ゲートで `required` なら、`carried` の値から `build` して `stale` を見る。違いがあれば資料を出さず、`reset_drafts` を書いて `ndf progress next` を案内する。合えば承認資料に単位の表・警告・省いた課題を足す。質問の PR は `review.pr` にする |
 | `gate/answering.answer` | 回答の確定の前に、同じ値から `build` して `stale` を見る。違いがあれば回答を書かず、`reset_drafts` を書く。承認なら payload に `design_target` を足す。工程「実装」の再承認（決定 10 の変換で求める承認。下の「この変更より前のスプリントの変換」）の回答では、その承認の待ちを返した `gate` の結果の `report.design_target` を payload に足す。設計 PR の照合ではないので `stale` は見ない |
-| `gate/answering.recheck` | 承認の回答の後に head かマージ先が変わっていれば、待ちへ戻すかわりに `reset_drafts` を書く。却下の回答は、対象が変わっていても比べずに読み、工程を失敗にして止める。再開するかは利用者が決める。変更の要求は回答した時点でレビューへ戻るので、ここでは扱わない |
+| `gate/answering.recheck` | 承認の回答の後に head かマージ先が変わっていれば、待ちへ戻すかわりに `reset_drafts` を書く。設計承認ゲートの却下が記録済みなら、`recheck` は PR を照合せず、何も書かずに戻る。続いて `run._consume` が却下を読み、工程の失敗を記録する。再開するかは利用者が決める。変更の要求は回答した時点でレビューへ戻るので、`recheck` では扱わない |
 | `run._start`・`_run_step` | 入力を `stages.carried_inputs` で組む。`_run_step` は工程の script のステップの子へ `NDF_MACHINE_ID`（`StageRun.env_extra`。`invoke._call_script` も渡す）を足し、`design-sync` が読む |
 | `run._consume` | MVV 判定が人の承認を省いて作る回答にも `design_target` を足す。判定の結果が持つ承認の対象（出力 `mvv_gate.target` の `repo`・`pr`・`base`・`head`。判定が読んだ PR の値）を、記録の `review` の 4 つと比べる。1 つでも違うか欠ければ、人の承認を省く回答を作らず、`reset_drafts` を書いてレビューへ戻す |
 | `run._step_draft` | `units-check`・`docs-ci`・`design-mvv`・`design-merge-approved` のどれか（`design-pr-review` は下の「異常系の処理」）が `approval_stale` で止まれば、`reset_drafts` の後に失敗のイベントを同じ書き込みで書く（未了に戻すイベントは、工程が実行中の状態のときしか書けないので、失敗のイベントより先に書く）。`retry` と `next` で `design-pr-review` から流れる |
