@@ -149,7 +149,7 @@
         "behind": {
           "type": "boolean",
           "const": true,
-          "description": "head が最新でないのでマージを断られた（merge。拒否の後に読み直した mergeStateStatus が behind のときだけ）"
+          "description": "head が最新でないのでマージを断られた（merge。拒否の後に読み直した PR の head とマージ先が要求を送ったときと同じで、停止理由が not_ci、mergeStateStatus が behind のときだけ）"
         },
         "verdict": {
           "type": "string",
