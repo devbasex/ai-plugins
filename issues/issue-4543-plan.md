@@ -5,7 +5,7 @@
 ## 関連リンク
 
 - 要求仕様: [issue-4543-requirements.md](./issue-4543-requirements.md)（正は https://github.com/devbasex/ai-plugins/issues/4543 の本文）。受け入れ条件は番号で指す
-- 設計書: [issue-4543-design.md](./issue-4543-design.md)。詳細設計は設計書の「どこを変えるか」に畳んである。下の「決定」はこの設計書の「決定の記録」の番号である
+- 設計書: [issue-4543-design.md](./issue-4543-design.md)。詳細設計は [issue-4543-design-detail.md](./issue-4543-design-detail.md) にある。下の「決定」はこの設計書の「決定の記録」の番号である
 - モード: `standard`（機能追加で、AI への指示を組むプログラムと、配る手順書を変えるため）
 
 ## 設計承認で利用者が決めること
@@ -31,7 +31,7 @@
 | `src/ndf/core/issue_docs.py`、`src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` の 1 か所にする | 5 |
 | `src/ndf/domains/crossreview/drive.py`、`src/ndf/domains/crossreview/fixer.py` | 小見出しの渡し分けと、要求仕様のコピーの扱いの指示 | 5・6 |
 | `contracts/data/review-criteria.json` | 要求仕様のコピーへの指摘の扱いの文 | 6 |
-| `src/ndf/domains/crossreview/criteria_decide.py`（足す） | 上の文を読み出す関数。理由は、指摘の基準の表を読むのがこのモジュールで、`fixer.py` から表を直接読まないためである（今の `fixer_ci_only` と同じ形） | 6 |
+| `src/ndf/domains/crossreview/criteria_decide.py` | 上の文を読み出す関数。指摘の基準の表を読むのがこのモジュールで、`fixer.py` から表を直接読まないため（今の `fixer_ci_only` と同じ形） | 6 |
 | `skills/design/references/design-template.md`、`skills/pr/SKILL.md`、`skills/requirements-design/SKILL.md`、`skills/development-workflow/references/approval-request.md`、`skills/decision-request/SKILL.md`、`skills/document-style/SKILL.md` | 小見出しを指す指示を足す | 7 |
 | `tests/contracts/test_writing.py`、`tests/domains/records/test_reading.py`、`tests/worker/test_rules.py`、`tests/domains/crossreview/test_crossreview_documents.py`（足す） | 理由は、設計書の「テスト設計」の渡し分けと決定 7 をテストで確かめるためである | 1・3〜6 |
 
@@ -125,7 +125,6 @@
 | `approval-request.md` は 487 行で、Markdown の分割の基準（500 行まで）に近い | 足すのは 2〜3 行にし、直し方は `document-rebuild` の SKILL.md を指す |
 | [テンプレートの形をそろえる PR 4548](https://github.com/devbasex/ai-plugins/pull/4548)（未マージ）が、手順書 6 ファイルのうち設計書のテンプレート・PR・要求・承認資料の手順書と、`kinds.json`・`document-rebuild` の SKILL.md を変える | 着手の時に状態を読む。先にマージされていれば main を取り込み、「承認する人が読む欄」が `design-writing.md` へ移っていれば、そちらへ指示を足す |
 | 読み手役の指摘が期待どおりに出ない | 小見出しの言い回しを直して読ませ直す。中身（設計書の表）を変える必要があれば、設計へ戻す |
-| 設計書は新しい関数を 1 つと見積もっているが、この計画は扱いの文の読み出しをもう 1 つ足す | 読み出しは表の値を返すだけにする。レビューで関数を足さない形が見つかれば、そちらにする |
 
 ## 切り戻し手順
 

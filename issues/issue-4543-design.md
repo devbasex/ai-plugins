@@ -290,7 +290,7 @@ graph TD
 
 ## どこを変えるか
 
-詳細設計はこのセクションに畳む。新設する関数は小見出しを外す 1 つだけで、シグネチャを変える関数は 0 のため。外す関数は、渡された本文から目印のコメントで囲まれた範囲を除いて返し、各経路の呼ぶ側が決定 6 の条件で呼ぶ。
+詳細設計は[別ファイル](./issue-4543-design-detail.md)にある。新設する関数が 3 つ（小見出しを外す、要求仕様のコピーを名前で見分ける、修正担当へ足す文を読む）あるためである。外す関数は、渡された本文から目印のコメントで囲まれた範囲を除いて返し、各経路の呼ぶ側が決定 6 の条件で呼ぶ。
 
 | ファイル | 変える中身 | 決定 |
 | --- | --- | --- |
@@ -300,7 +300,7 @@ graph TD
 | `plugins/ndf/src/ndf/core/worker.py` と `plugins/ndf/contracts/worker/kinds.json` | 決定 6 の表の 4 つの作業の定義にだけ、小見出しを渡す値を持たせる。ほかの作業へ渡す全文からは外す | 6 |
 | `plugins/ndf/src/ndf/core/issue_docs.py` と `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` に置く。`drive.py` の `REQUIREMENTS_FILE` は定義をやめ、`issue_docs.py` の定義を参照する | 6 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` | 変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す。変更に要求仕様のコピーがあれば、修正担当への指示に決定 7 の扱いを足す | 6・7 |
-| `plugins/ndf/contracts/data/review-criteria.json` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を置く | 7 |
+| `plugins/ndf/contracts/data/review-criteria.json` と `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を JSON に置き、`criteria_decide.py` がそれを読む | 7 |
 | `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `distinction` を `false` にすると足す | 6 |
 | `plugins/ndf/skills/design/references/design-template.md` | 「承認する人が読む欄」のセクションに「要約の段落と解き方の全体像は書き分けの小見出しに従って書く」という指示を足し、その小見出しを指す。テンプレート本体のコードブロックにある「解き方の全体像」の説明は、「この設計では〜」と分かる形で書くように直す。`legacy-refactor` の「目的」「目指す姿」にも同じ指示を足す | 1 |
 | `plugins/ndf/skills/pr/SKILL.md` | 「PR の作成・更新」の本文の書き方に、概要（`## Summary`・`## 概要`）は書き分けの小見出しに従って書くと足す。設計 PR と実装 PR の両方に当たると書き、「利用者向けの変化」「移行の手順」は対象外とする | 1 |
@@ -325,7 +325,7 @@ graph TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4543 | 実装する | — | `plugins/ndf/contracts/data/writing-criteria.md`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/writing.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/decision-request/SKILL.md`、`plugins/ndf/skills/document-style/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md` |
+| #4543 | 実装する | — | `plugins/ndf/contracts/data/writing-criteria.md`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/writing.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/decision-request/SKILL.md`、`plugins/ndf/skills/document-style/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md` |
 
 ## 未確認のまま残ること
 
