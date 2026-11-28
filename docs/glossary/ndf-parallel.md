@@ -6,6 +6,9 @@
 
 | 語 | 識別子 | 意味 | 廃止した語 | 廃止した識別子 | SSOT |
 | --- | --- | --- | --- | --- | --- |
+| スプリント実行計画 | `sprint_plan` | 1 つのスプリントの中の作業（課題のまとまりの設計か実装）・分けた理由・依存を持つ計画。SSOT は JSON で、始めた後はスプリントのステートマシンの事象が持つ | — | — | `issues/issue-4550-design.md` |
+| 並列開発計画 | `parallel_plan` | 同時に進めるレーン・分けた理由・依存を持つ計画。SSOT は JSON で、始めた後は計画のステートマシンとレーンのステートマシンの事象が持つ | — | — | `issues/issue-4550-design.md` |
+| 計画の作業 | `plan_work` | スプリント実行計画が順を決める 1 単位。課題のまとまりの設計か実装で、1 つが子のステートマシン 1 本になる | — | — | `issues/issue-4550-design.md` |
 | 実行計画 | — | スプリントの課題を、バンドル・工程ごとの依存・触る箇所・着手できる時点で並べた表。オーケストレーターが持つ | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | バンドル | `bundle` | 1 本の設計 Pull Request で決める課題の集合 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |
 | 課題グループ | — | マイルストーンの説明に書く、触る場所の見込みと依存で分けた課題の集合。実行計画のバンドルの初期値 | — | — | `docs/specifications/ndf-execution-plan-and-parallel-capacity.md` |

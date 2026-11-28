@@ -1297,6 +1297,27 @@
       "source": "docs/specifications/ndf-documentation-mode.md"
     },
     {
+      "term": "スプリント実行計画",
+      "context": "ndf-parallel",
+      "meaning": "1 つのスプリントの中の作業（課題のまとまりの設計か実装）・分けた理由・依存を持つ計画。SSOT は JSON で、始めた後はスプリントのステートマシンの事象が持つ",
+      "code": "sprint_plan",
+      "source": "issues/issue-4550-design.md"
+    },
+    {
+      "term": "並列開発計画",
+      "context": "ndf-parallel",
+      "meaning": "同時に進めるレーン・分けた理由・依存を持つ計画。SSOT は JSON で、始めた後は計画のステートマシンとレーンのステートマシンの事象が持つ",
+      "code": "parallel_plan",
+      "source": "issues/issue-4550-design.md"
+    },
+    {
+      "term": "計画の作業",
+      "context": "ndf-parallel",
+      "meaning": "スプリント実行計画が順を決める 1 単位。課題のまとまりの設計か実装で、1 つが子のステートマシン 1 本になる",
+      "code": "plan_work",
+      "source": "issues/issue-4550-design.md"
+    },
+    {
       "term": "実行計画",
       "context": "ndf-parallel",
       "meaning": "スプリントの課題を、バンドル・工程ごとの依存・触る箇所・着手できる時点で並べた表。オーケストレーターが持つ",
