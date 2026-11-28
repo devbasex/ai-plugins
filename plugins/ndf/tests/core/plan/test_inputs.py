@@ -187,3 +187,24 @@ def test_current_design_target_lines_fences_and_sections():
         ("テスト設計", 13, "`y`"),
         ("決定の記録", 17, "`w`"),
     ]
+
+
+# --- HTML コメントの中の記入例（#4735 の r2-1・r2-2） ---
+
+_COMMENTED = "<!-- 記入例\n```md\n```\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | 例 |\n-->\n"
+
+
+def test_the_example_in_an_html_comment_is_not_a_record():
+    from ndf.domains.loop.acceptance_decide import read_checks
+
+    assert read_checks(_COMMENTED) == {}
+
+
+def test_recorded_body_keeps_the_html_comment_and_replaces_the_real_table():
+    from ndf.domains.loop.acceptance_decide import read_checks, recorded_body
+
+    real = "## 受け入れ条件\n\n- [ ] 甲\n\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | 古い |\n"
+    got = recorded_body(_COMMENTED + "\n" + real, {1: "新しい"}, [])
+    assert got.startswith(_COMMENTED)
+    assert "古い" not in got
+    assert read_checks(got)[1].means == "新しい"

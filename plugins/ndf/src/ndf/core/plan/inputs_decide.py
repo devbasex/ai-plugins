@@ -23,8 +23,9 @@ CHECKS_HEADING = "## 受け入れ条件の確認"
 CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
-# コードブロックの範囲を読む（リスト項目の中の字下げは、行頭からの字下げの数では判定できない）
-_MARKDOWN = MarkdownIt("commonmark")
+# コードブロックと HTML コメントの範囲を読む（リスト項目の中の字下げは、行頭からの字下げの数では判定できない）。
+# 使うのはブロックの範囲だけなので、インラインは解析しない
+_MARKDOWN = MarkdownIt("commonmark").disable(["inline", "text_join"])
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
@@ -57,40 +58,55 @@ def body_lines(body: str) -> list[str]:
 
 
 def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
-    """コードブロックの外で、行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
-    return next((i for i, line in outside_fences(lines) if line.rstrip() == heading), None)
+    """囲みと HTML コメントの外で、行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
+    found = _after_heading(lines, heading)
+    return None if found is None else found[0]
+
+
+def _after_heading(lines: Sequence[str], heading: str) -> Optional[tuple[int, list[tuple[int, str]]]]:
+    """`heading_at` の添字と、それより後ろの囲みと HTML コメントの外の行（添字は `lines` のもの）。無ければ None。
+
+    見出しの検索とセクションの読み出しが、1 回の解析を共有する。
+    """
+    visible = list(outside_fences(lines))
+    return next(((i, visible[k + 1 :]) for k, (i, line) in enumerate(visible) if line.rstrip() == heading), None)
 
 
 def section_lines(body: str, heading: str) -> Optional[list[str]]:
-    """見出しのセクションの行（コードブロックの外）。セクションが無ければ None。見出しは行全体が一致するものだけ。"""
-    lines = body_lines(body)
-    at = heading_at(lines, heading)
-    if at is None:
+    """見出しのセクションの行（囲みと HTML コメントの外）。セクションが無ければ None。見出しは行全体が一致するものだけ。"""
+    found = _after_heading(body_lines(body), heading)
+    if found is None:
         return None
     out = []
-    for _, line in outside_fences(lines[at + 1 :]):
+    for _, line in found[1]:
         if SECTION_END.match(line):
             break
         out.append(line)
     return out
 
 
-def _code_tokens(lines: Sequence[str], *kinds: str) -> list[Token]:
-    """`lines` のコードブロックのトークン（`kinds` の種類）。`map` は行の添字の範囲。"""
+def _block_tokens(lines: Sequence[str]) -> list[Token]:
+    """`lines` のブロックのトークンのうち、行の添字の範囲（`map`）を持つもの。"""
     # 行の中に残った CR は改行と数えられるので、添字がずれないように空白にする
     text = "\n".join(line.replace("\r", " ") for line in lines)
-    return [t for t in _MARKDOWN.parse(text) if t.type in kinds and t.map]
+    return [t for t in _MARKDOWN.parse(text) if t.map]
+
+
+def _hidden(token: Token) -> bool:
+    """行を読まないブロック（囲みと HTML コメント。記入例を本物の見出し・条件・表として読まない）か。"""
+    return token.type == "fence" or (token.type == "html_block" and token.content.lstrip().startswith("<!--"))
 
 
 def outside_fences(lines: Iterable[str]) -> Iterator[tuple[int, str]]:
-    """囲み（` ``` ` か `~~~` のコードブロック）の外の行を `(添字 0 始まり, 行)` で返す。囲みの開閉の行は返さない。
+    """囲み（` ``` ` か `~~~` のコードブロック）と HTML コメントのブロックの外の行を `(添字 0 始まり, 行)` で返す。
+    囲みの開閉の行と、`<!--` で始まるコメントの行は返さない。
 
-    囲みの範囲は CommonMark の解析（markdown-it-py）で決める。リスト項目の中の囲みは、項目の本文の位置から字下げを数える。
+    範囲は CommonMark の解析（markdown-it-py）で決める。リスト項目の中の囲みは、項目の本文の位置から字下げを数える。
     """
     found = list(lines)
-    fenced = {i for t in _code_tokens(found, "fence") for i in range(*t.map)}
+    hidden = {i for t in _block_tokens(found) if _hidden(t) for i in range(*t.map)}
     for i, line in enumerate(found):
-        if i not in fenced:
+        if i not in hidden:
             yield i, line
 
 
@@ -100,7 +116,7 @@ def code_lines(lines: Sequence[str]) -> dict[int, str]:
     コードの行は、リストと囲みに属する字下げだけを除いたもので、コード本体の相対的な字下げと空行は残る。
     """
     out: dict[int, str] = {}
-    for token in _code_tokens(lines, "fence", "code_block"):
+    for token in (t for t in _block_tokens(lines) if t.type in ("fence", "code_block")):
         start = token.map[0] + (token.type == "fence")
         content = token.content.removesuffix("\n").split("\n") if token.content else []
         out.update(enumerate(content, start))
@@ -116,18 +132,18 @@ def criteria_blocks(body: str) -> list[str]:
     """受け入れ条件のセクションのチェックボックスを、字下げした継続の行を含めて返す（上から。番号の数え方は `criteria` と同じ）。
 
     先頭の行はチェックボックスの後ろの文、続く行は書かれたままで、改行でつなぐ。空行では終わらず、字下げの無い行で終わる。
-    字下げしたコードブロックの行も条件の続きに含める。コードブロックの中の行は、条件の始まりにもセクションの終わりにもしない。
+    字下げしたコードブロックの行も条件の続きに含める。コードブロックと HTML コメントの中の行は、条件の始まりにもセクションの終わりにもしない。
     空白と空行の整え方は、呼び手が決める。
     """
     lines = body_lines(body)
-    at = heading_at(lines, HEADING)
-    if at is None:
+    found = _after_heading(lines, HEADING)
+    if found is None:
         return []
-    rest = lines[at + 1 :]
-    outside = {i for i, _ in outside_fences(rest)}
+    at, visible = found
+    outside = {i for i, _ in visible}
     blocks: list[list[str]] = []
     inside = False
-    for i, line in enumerate(rest):
+    for i, line in enumerate(lines[at + 1 :], at + 1):
         if i in outside:
             if SECTION_END.match(line):
                 break
@@ -176,13 +192,13 @@ def cells(line: str) -> list[str]:
 
 
 def section_span(lines: Sequence[str], heading: str) -> Optional[tuple[int, int]]:
-    """見出しのセクションの本文の行の範囲（見出しの次の行から、囲みの外の次の `#`・`##` の見出しの前まで）。無ければ None。"""
-    at = heading_at(lines, heading)
-    if at is None:
+    """見出しのセクションの本文の行の範囲（見出しの次の行から、囲みと HTML コメントの外の次の `#`・`##` の見出しの前まで）。無ければ None。"""
+    found = _after_heading(lines, heading)
+    if found is None:
         return None
-    start = at + 1
-    end = next((start + i for i, line in outside_fences(lines[start:]) if SECTION_END.match(line)), len(lines))
-    return start, end
+    at, visible = found
+    end = next((i for i, line in visible if SECTION_END.match(line)), len(lines))
+    return at + 1, end
 
 
 def checks_table_spans(lines: Sequence[str]) -> list[tuple[int, int]]:
