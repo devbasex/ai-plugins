@@ -145,6 +145,11 @@ class Order:
         self.outside.update(keys)
         self.started.update(keys)
 
+    def again(self, key: str) -> None:
+        """始めた単位を、空きができれば始め直す単位に戻す。"""
+        self.started.discard(key)
+        self.ready.add(key)
+
     def finish(self, key: str) -> None:
         """マージを作業場所へ反映できた単位。"""
         self.taken.add(key)
@@ -264,16 +269,16 @@ class _Flow:
             # 用意の間に利用上限が分かった単位は投入せず、始めていない単位に戻す
             self.order.started.discard(key)
         elif started.call is None:
-            self.land(executor, key, started, None)
+            self.land(key, started, None)
         else:
             self.running[executor.submit(started.call)] = (key, started)
 
-    def land(self, executor: Any, key: str, started: Started, future: Any) -> None:
+    def land(self, key: str, started: Started, future: Any) -> None:
         """終わった単位をマージする。"""
-        self.settle(executor, key, lambda: started.land(None if future is None else future.result()))
+        self.settle(key, lambda: started.land(None if future is None else future.result()))
 
-    def settle(self, executor: Any, key: str, merge: Callable[[], tuple[dict[str, Any], github_pulls.MergedPull]]) -> None:
-        """`merge` の結果を受ける。`Outdated` の単位は始め直す（利用上限の後は始めずに失敗にする）。
+    def settle(self, key: str, merge: Callable[[], tuple[dict[str, Any], github_pulls.MergedPull]]) -> None:
+        """`merge` の結果を受ける。`Outdated` の単位は、空きの本数の中で始め直す（利用上限の後は始めずに失敗にする）。
 
         始め直しは、単位の HEAD を最新にしても別のマージが先に入ったときだけ繰り返すので、回数はマージの数を超えない。
         """
@@ -283,7 +288,7 @@ class _Flow:
             if self.halted():
                 self.failures[key] = exc
             else:
-                self._start(executor, key)
+                self.order.again(key)
             return
         except Queued as exc:
             if exc.ticket.resent_now:
@@ -307,14 +312,14 @@ class _Flow:
             timeout = self.board.until() if waiting else None
             done, _ = workers.wait(list(self.running), timeout=timeout, return_when=futures.FIRST_COMPLETED)
             for future in sorted(done, key=lambda f: self.order.position[self.running[f][0]]):
-                self.land(executor, *self.running.pop(future), future)
+                self.land(*self.running.pop(future), future)
                 self.fill(executor, limit)
         elif waiting:
             self.ops.watching.sleep(self.board.until())
         else:
             return False
         self.take_in()
-        self.poll(executor)
+        self.poll()
         return True
 
     def take_in(self, retry: bool = False) -> bool:
@@ -337,19 +342,19 @@ class _Flow:
                 self.failures[key] = UnitsStopped(github_merge.MERGE_QUEUE_PENDING, detail)
         return True
 
-    def poll(self, executor: Any) -> None:
+    def poll(self) -> None:
         """次の問い合わせの時刻に達していれば、待ちの PR の状態をまとめて読み、反映待ちを反映し直し、上限を超えた待ちを外す。"""
         if self.broken is not None or not self.board.due():
             return
         states = self.board.read()
         for key in sorted(states, key=self.order.position.__getitem__):
-            self._apply(executor, key, states[key])
+            self._apply(key, states[key])
         self.take_in(retry=True)
         for key in [k for k in self.board.queued if self.board.expired(k)]:
             self._expired_in_queue(key, self.board.queued.pop(key).number)
         self.board.schedule(states)
 
-    def _apply(self, executor: Any, key: str, state: units_queue.State) -> None:
+    def _apply(self, key: str, state: units_queue.State) -> None:
         """読んだ状態の次の手を当てる。"""
         ticket = self.board.queued[key]
         record = units_queue.held_record(ticket.record, ticket.number)
@@ -359,7 +364,7 @@ class _Flow:
         del self.board.queued[key]
         if act == units_queue.DONE:
             merged = unit_item(self.order.units[key], ticket.number, "merged"), github_pulls.MergedPull(ticket.number, state.merge_sha)
-            self.settle(executor, key, lambda: merged)
+            self.settle(key, lambda: merged)
         elif act == units_queue.FAIL:
             self.failures[key] = UnitsStopped("precondition", dropped(ticket.number, state))
             if state.kind == units_queue.OPEN and key in self.resent:
@@ -367,7 +372,7 @@ class _Flow:
         else:
             units_queue.mark_resent(ticket.record, ticket.number, self.ops.watching.clock())
             self.resent.add(key)
-            self.settle(executor, key, ticket.resend)
+            self.settle(key, ticket.resend)
             if key in self.failures:
                 self.stuck.add(key)
 

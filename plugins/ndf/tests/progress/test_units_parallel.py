@@ -533,6 +533,26 @@ def test_a_closed_pull_or_a_drop_after_an_earlier_resend_releases_the_supplement
     assert fake.names("resend") == [] and fake.names("start") == ["A", "w4"]
 
 
+def test_a_resent_unit_refused_as_behind_is_started_again_within_the_limit(tmp_path):
+    units = [_unit("A"), _unit("X"), _unit("Y")]
+    # A の打ち直しが古い HEAD で断られたとき、同時に流せる 1 本は X が使っている
+    fake = Waiting(tmp_path, units, ["A"], [], ["X"], ["A"], ["Y"], queue=["A"], states={"A": [OPEN]})
+    ticket = fake.ticket
+
+    def outdated_ticket(name):
+        def resend():
+            raise units_flow.Outdated("not_ci", f"{name} が古い")
+
+        return ticket(name)._replace(resend=resend)
+
+    fake.ticket = outdated_ticket
+
+    got = fake.flow(limit=1)
+
+    assert fake.widest == 1 and fake.names("start").count("A") == 2
+    assert not got.failures and len(got.items) == 3
+
+
 def test_the_queue_state_is_read_without_the_rest_fallback():
     def pull(**kw):
         base = dict(number=1, state="open", merged=False, head_sha="h", head_ref="b", base_ref="s", body="", merge_state="clean",
