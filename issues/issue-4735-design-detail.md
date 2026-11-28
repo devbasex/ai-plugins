@@ -83,9 +83,9 @@ plugins/ndf/src/ndf/
 | `progress/records.py` | 変更 | 進行の記録を共通の書き換えで書き、スプリント PR の「通した工程」に実行の行を足す | `core/issue_body`・`core/requirements_docs`・`core/run_trailer_decide` | モジュール | 変更 `pr_section`・`sync_records`・`GitHubRecords` |
 | `domains/records/cleanup_stage.py` | 変更 | クリーンアップの記録を共通の書き換えで書く | `core/issue_body` | モジュール | 変更 `record_issue`・`record_cleanup_stage` |
 | `domains/records/requirements_cmd.py` | 新設 | `ndf records requirements show`・`stamp`・`pr-body` のエントリポイント | `core/requirements_docs`・`core/requirements_history`・`domains/release/acceptance_record`・`progress/issue_values` | モジュール | `add_parsers`・`_show`・`_stamp`・`_pr_body`・`write_out`・`stamp_plan` |
-| `domains/records/cli.py` | 変更 | `requirements` と `close-release` のサブコマンドを登録し、`close-check --verification` に実行の確かめを足す | `domains/records/requirements_cmd`・`domains/records/close_release` | モジュール | 変更 `_parser`・`_judged`・`_add_close_check`。新設 `_skipped_deploy` |
-| `domains/records/close_decide.py` | 変更 | 確認対象の版が今と同じ行だけで合否を出し、閉じた後の扱いを決める | `domains/release/record_decide` | モジュール | 変更 `records_verdict`・`_targets_verdict`・`_last_check`。新設 `current_rows`・`ClosedEntry`・`after_close` |
-| `domains/records/close_release.py` | 新設 | `ndf records close-release`（閉じる・記録を読み直す・開き直す） | `domains/records/close_decide`・`domains/release/record_read`・`adapters/github`・`adapters/publish`・`adapters/git` | モジュール | `state_path`・`read_state`・`write_state`・`close_release`・`add_close_release` |
+| `domains/records/cli.py` | 変更 | `requirements` と `close-release` のサブコマンドを登録し、`close-check --verification` に実行の確かめを足す | `domains/records/requirements_cmd`・`domains/records/close_release` | モジュール | 変更 `_parser`・`_judged`・`_add_close_check`・`_records_view`。新設 `_skipped_deploy` |
+| `domains/records/close_decide.py` | 変更 | 確認対象の版が今と同じ行だけで合否を出し、閉じる条件の判定と閉じた後の扱いを決める | `domains/release/record_decide` | モジュール | 変更 `records_verdict`・`_targets_verdict`・`_last_check`。新設 `current_rows`・`ClosedEntry`・`close_verdict`・`after_close` |
+| `domains/records/close_release.py` | 新設 | `ndf records close-release`（閉じる・記録を読み直す・開き直す・表を整理する） | `domains/records/close_decide`・`domains/release/record_read`・`domains/loop/acceptance_release`・`progress/flow`・`adapters/github`・`adapters/publish`・`adapters/git` | モジュール | `state_path`・`read_state`・`write_state`・`close_release`・`add_close_release` |
 | `domains/loop/acceptance_decide.py` | 変更 | 実行と要求仕様書の組ごとの確認の表を書き換える | `core/plan/inputs_decide`・`core/requirements_decide` の型 | `Check`・モジュール | 新設 `table_text`・`table_digest`・`without_tables`。変更 `Check`・`recorded_body`。削除 `criteria`・`read_checks`・`unrecorded`・`merged`・`checks_table`・`recorded_rows` |
 | `domains/loop/acceptance.py` | 変更 | `record`・`show`・`check`・`new-run` のエントリポイント | `core/requirements_docs`・`core/issue_body` | モジュール | 新設 `_new_run`・`parse_digests`。変更 `_record`・`_show`・`_check`・`_check_one`・`add_parsers`。削除 `lock_path`・`_unsettled`・`_reapply` |
 | `domains/loop/acceptance_release.py` | 新設 | `show --release` と `prune` | `core/requirements_history`・`domains/release/acceptance_record` | モジュール | `show_release`・`prune`・`_prune_one` |
@@ -188,7 +188,7 @@ plugins/ndf/src/ndf/
 | --- | --- | --- |
 | `lookup` | `ref` あり | `tree_candidates(ref)` だけを読む |
 | `lookup` | `ref` なし、作業場所に候補あり | 作業場所の候補を返す（順 1） |
-| `lookup` | `ref` なし、作業場所に無く、`<起点>..HEAD` で消えている | `requirements_history.branch_deleted` の最終版を返す（順 2） |
+| `lookup` | `ref` なし、作業場所に無く、`<起点>..HEAD` で消えている | `requirements_history.branch_deleted` の最終版を返す（順 2。`Doc.commit` は `Deleted.commit`） |
 | `lookup` | `ref` なし、上のどちらにも無い | `tree_candidates(base_commit)` を返す（順 3） |
 | `lookup` | どこにも無い | `missing` に入れる |
 
@@ -235,22 +235,20 @@ plugins/ndf/src/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `Touch` | `core/requirements_history.py` | 新設（型） | `NamedTuple(commit: str, path: str, status: str, old: str, new: str, merge: bool)` | 履歴の中で要求仕様書を変えたコミット、パス、状態（`A`・`M`・`D`）、変更前後の blob の id、マージコミットかどうか |
-| `final_version` | `core/requirements_history.py` | 新設 | `(touches: Sequence[Touch], parents: Mapping[str, tuple[str, ...]], numbers: frozenset[int], heads: Sequence[str], fallback: Sequence[str], blobs: Callable[[Sequence[str]], list[Optional[bytes]]]) -> dict[str, bytes]` | 設計文書の「消えた要求仕様書の最終版の選び方」の順 1〜4 で、番号ごとに 1 つの削除直前の内容を選ぶ |
-| `branch_deleted` | `core/requirements_history.py` | 新設 | `(git: Git, base: str, numbers: frozenset[int]) -> dict[str, bytes]` | `<base>..HEAD` で消えた要求仕様書の最終版を返す |
+| `Touch` | `core/requirements_history.py` | 新設（型） | `NamedTuple(commit: str, path: str, status: str, old: str)` | 履歴の中で要求仕様書を変えたコミット、パス、状態（`A`・`M`・`D`）、変更前の blob の id |
+| `Deleted` | `core/requirements_history.py` | 新設（型） | `NamedTuple(commit: str, raw: bytes)` | 消えた要求仕様書の最終版。`commit` はそのパスにその内容があるコミット |
+| `final_version` | `core/requirements_history.py` | 新設 | `(touches: Sequence[Touch], parents: Mapping[str, tuple[str, ...]], numbers: frozenset[int], heads: Sequence[str], fallback: Sequence[str], blobs: Callable[[Sequence[str]], list[Optional[bytes]]]) -> dict[str, Deleted]` | 設計文書の「消えた要求仕様書の最終版の選び方」の順 1〜4 で、番号ごとに 1 つの削除直前の内容を選ぶ |
+| `branch_deleted` | `core/requirements_history.py` | 新設 | `(git: Git, base: str, numbers: frozenset[int]) -> dict[str, Deleted]` | `<base>..HEAD` で消えた要求仕様書の最終版を返す |
 | `release_docs` | `core/requirements_history.py` | 新設 | `(git: Git, remote: str, mapping: Mapping[str, Any], numbers: frozenset[int], repo: str) -> list[Doc]` | 対応の記録の配布コミットと PR の head から、配布した要求仕様書を読む |
 
 - `final_version`
   - 事前条件: `touches` は調べる履歴をすべて読み終えたもの。`parents` は、調べる範囲のすべてのコミット（要求仕様書を変えていないものを含む）の親
-  - 事後条件: 返す内容は、削除のエントリが持つ変更前の blob（`old`）。選べない番号は `RequirementsError("precondition")`
-  - マージコミットのエントリの数え方: `git log` は親ごとの差分を 1 エントリずつ返し、差分の無い親のエントリは出さない
-
-    | エントリ | 数え方 |
-    | --- | --- |
-    | `D` | 削除として数える。ただし `old` が、同じパスのいずれかの `M` のエントリの `old`（後の版に置き換え済みの内容）なら数えない。片側の削除がマージに伝わっただけの、古い版である。除くと同じパスの削除が 1 つも残らない場合は数える |
-    | `A` | すべての親に対する `A` がそろうパスだけを追加として数える（マージの解消で足したファイル） |
+  - 事後条件: 返す内容は、削除のエントリが持つ変更前の blob（`old`）。`commit` は、削除したコミットの親のうち `<親>:<パス>` の内容がそれと同じ最初のもの。選べない番号は `RequirementsError("precondition")`
+  - `blobs` は 1 回だけ呼ぶ。指定には、削除の候補ごとの `old` と、削除したコミットの全部の親の `<親>:<パス>` を並べる
+  - マージコミットのエントリは、競合の解消で人が変えた分だけが出る（`name_status_log` の `--diff-merges=remerge`）。片側の削除がそのまま伝わったマージには、エントリが無い。マージの親や blob の一致から伝播を推定する規則は持たない
+  - 両側が別々に直した内容を競合の解消で消した場合、`old` は git が作り直したマージの結果で、リポジトリに無い。`blobs` が None を返すので、`precondition` で止まる
 - `release_docs`
-  - 事後条件: 返す `Doc` の `source` は `release`、`commit` は配布コミット（消えたファイルは削除コミットの第 1 親。マージコミットで消えた場合はそのマージコミット）
+  - 事後条件: 返す `Doc` の `source` は `release`、`commit` は配布コミット（消えたファイルは `Deleted.commit`）。どちらも `<commit>:<path>` に返した本文がある
   - 副作用: `Git.missing_objects`・`fetch_commits`・`name_status_log`・`tree_entries`・`blobs` を各 1 回以下呼ぶ。`fetch_commits` は手元に無い SHA があるときだけ打ち、ブランチの名前と `refs/pull/<N>/head` は使わない
 
 ### 異常系の処理
@@ -288,7 +286,7 @@ plugins/ndf/src/ndf/
 | `final_version` | 統合で旧版を消した後に最終版も消すと最終版 | squash で配布コミットに旧版の削除だけが残ると PR の head の最終版。要求仕様書を変えていないコミットとマージを挟んでも、後の削除を選ぶ | 決められなければ止まる。探した順の最初の削除を返さない |
 | `branch_deleted` | このブランチで消した版を返す | 起点より前の削除は拾わない | 浅い clone で止まる |
 | `release_docs` | リリースブランチで直した版を返す。未マージの `strict` の squash でも読める | マージの後にベースブランチが進んでも同じ版 | git の起動が PR と Issue の数にも削除の候補の数にもよらず各 1 回以下で、`git merge-base` を打たない（`Git` を差し替えて数える） |
-| `final_version`（マージの解消） | 片側が消し、他方が直した後のマージで解消として消すと、直した版を返す | 片側が直してから消し、他方が触らないマージでは、直した版を返す（触らない側の古い版を返さない） | 両側が別々に直した内容をマージで消すと、`precondition` で止まる |
+| `final_version`（マージの解消） | 片側が消し、他方が直した後のマージで競合を削除で解消すると、直した版を返し、`commit` はその版を持つ親になる | 片側が直してから消し、他方が触らないか元の内容へ戻したマージ（競合が無い）では、消した側の版を返す | 両側が別々に直した内容をマージで消すと、`precondition` で止まる |
 
 ## 読むコマンド（`domains/records/requirements_cmd.py`）
 
@@ -541,7 +539,7 @@ plugins/ndf/src/ndf/
 - `requirements_refs`
   - 事後条件: リンクは `https://github.com/<repo>/blob/<Doc.commit>/<path>`。要求仕様書の行は重なりなし、`Refs #<番号>` は `issues` の全件
 - `_pr_body`（`ndf records requirements pr-body --issue=<番号>... --mode=<モード> --branch=<ブランチ> --remote=<名前> --out=<ファイル> [-- <続けて打つコマンド>...]`）
-  - 事前条件: head は作業場所の `HEAD` を 1 回だけ解決した SHA。`--remote` の `refs/heads/<ブランチ>`（`git ls-remote`）がその SHA であることを、打つたびに照会する。`requirements_docs.find(..., ref=<SHA>)` で読み、作業場所の要求仕様書（`worktree_candidates`）が読んだ内容と同じであること
+  - 事前条件: head は作業場所の `HEAD` を 1 回だけ解決した SHA。`--remote` の `refs/heads/<ブランチ>`（`git ls-remote`）がその SHA であることを、打つたびに照会する。本文のリンクと `ls-remote` のリポジトリは `--remote`（`Git.remote_repo`）で、`gh pr create` の作り先もこれと同じであること。作り先は、環境変数 `GH_REPO` があればその値、無ければ `gh repo view --json nameWithOwner` の値で、大文字と小文字を区別せずに比べる（`gh repo view` は `GH_REPO` を読まない）。`requirements_docs.find(..., ref=<SHA>)` で読み、作業場所の要求仕様書（`worktree_candidates`）が読んだ内容と同じであること
   - 事後条件: `--issue` が 0 件か `--mode` が `legacy-refactor` なら、何も読まず書かずに `ok`。ほかは `--out` の中身が `requirements_refs` の文だけになる。モードが空なら要求仕様書を求める
   - 副作用: `--out` を `worker_paths.write_file(private=True)` で置き換え、`check_unshared` を通す
   - `--` の後にコマンドがあるとき: 成功したら結果 JSON を出さず、そのコマンドへ `os.execvp` で置き換わる（標準出力の結果と終了コードは続きのコマンドのもの）。失敗したら続きを打たずに、停止の結果 JSON を出す。テストは置き換えの関数を差し替える
@@ -578,6 +576,7 @@ plugins/ndf/src/ndf/
 | `_pr_body` | head に要求仕様書が無い・読めない | 要求仕様書をコミットしていない、元の Issue の行が欠ける | `find(ref=head)` の `RequirementsError` | 止める（`--out` を書かず、PR を作らない） | `cause` をそのまま返す（無ければ `incomplete` で番号を `gaps` に載せる）。終了コード 1。プランは `pr` で止まる | コミットして push し、打ち直す |
 | `_pr_body` | 作業場所の要求仕様書が head の内容と違う | 未コミットの直し | 作業場所と head の内容の比較 | 同上 | `precondition`。パスを書く。終了コード 1 | コミットして push し、打ち直す |
 | `_pr_body` | リモートの head が作業場所の `HEAD` と違う・照会できない | 直した後に push していない、共同作業者がリモートを進めた、リモートに届かない | `git ls-remote` の結果 | 同上 | `precondition`。手元とリモートをそろえて push するよう案内する。終了コード 1 | そろえて打ち直す |
+| `_pr_body` | `gh` の作り先が `--remote` のリポジトリと違う・調べられない | GitHub CLI の既定リポジトリを別に設定した | `GH_REPO` か `gh repo view` の値の比較 | 同上 | `precondition`。両方の名前と `gh repo set-default` を案内する。終了コード 1 | 設定をそろえて打ち直す |
 | `_pr_body` | `--out` を差し替えられる・リンク | 共有の環境 | `worker_paths` の検査（`EntryUnsafe`） | 同上 | `precondition`。終了コード 1 | 権限を直して打ち直す |
 
 ### 既存の部品の再利用
@@ -599,7 +598,7 @@ plugins/ndf/src/ndf/
 | `acceptance_args` | `--run`・`--mode`・`--criteria-digest` が付く | 補った単位も `--run` を持つ | — |
 | `_all_recorded` | 全件に記録があれば通る。区分 `リリース後` の記録だけで通る | 要求仕様書 3 本でも照会 1 回（呼び出しを差し替えて数える）。`legacy-refactor` は単位をすべてマージした後、要求仕様書も確認の行も無いままスプリント PR を開け、照会は 0 回 | 単位の外の条件に記録が無ければ止まる |
 | `requirements_refs` | 要求仕様書ごとのリンクと全 Issue の `Refs` | 2 つの Issue が 1 本を指すとリンクは 1 行、`Refs` は 2 行 | `Refs` が 1 件欠けると落ちる |
-| `_pr_body` | `--out` が head のコミットを指すリンクと `Refs` に置き換わり、続きのコマンドへ置き換わる | `legacy-refactor` と `--issue` 0 件は `--out` を変えない。モードが空なら要求仕様書を求める。`git ls-remote` は打つたびに 1 回（呼び出しを差し替えて数える） | head に無い・作業場所と違う・リモートの head と違う場合は、`--out` を変えず、続きを打たずに止まる |
+| `_pr_body` | `--out` が head のコミットを指すリンクと `Refs` に置き換わり、続きのコマンドへ置き換わる | `legacy-refactor` と `--issue` 0 件は `--out` を変えない。モードが空なら要求仕様書を求める。`git ls-remote` と作り先の照会は打つたびに各 1 回（呼び出しを差し替えて数える。`GH_REPO` があれば `gh` は 0 回） | head に無い・作業場所と違う・リモートの head と違う・`gh` の作り先が違う場合は、`--out` を変えず、続きを打たずに止まる |
 | 設計と実装のテンプレート | `refs` と要求仕様書を持つモードでは `pr` の `run` が `pr-body` で始まる | `refs` が空か `legacy-refactor` では共有の `pr` と同じ並びで、`pr-body` が現れない。単位の経路の実装のプランも同じ | 組んだプランに `body_from` のキーが残ると `model.parse` で落ちる |
 
 ## 進行の記録・クリーンアップの記録（`progress/records.py`・`core/run_trailer_decide.py`・`domains/records/cleanup_stage.py`）
@@ -675,14 +674,17 @@ plugins/ndf/src/ndf/
 | `cmd_records`・`cmd_verification_record`・`_parser`・`_records_selection` | `domains/release/cli.py` | 変更 | 今のまま | `--records` の受け渡しと `record-acceptance` の登録 |
 | `current_rows` | `domains/records/close_decide.py` | 新設 | `(issue: int, rows: Sequence[Mapping[str, Any]], target: Optional[str]) -> tuple[list[Mapping[str, Any]], bool]` | 版が今と同じ行と、版の違う行か版の無い行があるかを返す |
 | `records_verdict`・`_targets_verdict`・`_last_check` | 同上 | 変更 | 今のまま | `view` の `acceptance_targets` があれば、設計文書の `close-check` の 2 つの表で判定する |
+| `read_release`・`_records_outputs` の `released_at` | `domains/release/record_read.py` | 変更 | 今のまま | 選んだ値と単位の最後のリリース記録の投稿時刻を `outputs.released_at` に足す（`records_outputs` のスキーマにも足す） |
+| `_records_view` | `domains/records/cli.py` | 変更 | 今のまま | `records close-release` の `not_applicable` の結果も、`outputs` が `records_outputs` に合えば受ける |
 | `_skipped_deploy` | `domains/records/cli.py` | 新設 | `(root: Path, machine_id: str, issue: int, rows: Sequence[Mapping[str, Any]]) -> Optional[str]` | `machine_id` のステートマシンでデプロイの工程が飛ばされ、Issue がその入力にあり、記録の `state_machine` が `machine_id` と同じかを確かめ、違えば止める理由を返す |
 | `_judged`・`_add_close_check` | 同上 | 変更 | 今のまま | `--verification` に `--skipped-deploy` を必須にする |
 | `ClosedEntry` | `domains/records/close_decide.py` | 新設（型） | `NamedTuple(issue: int, target: str, closed_at: str)` | このコマンドが閉じた 1 件 |
-| `after_close` | 同上 | 新設 | `(entry: ClosedEntry, targeted: bool, closable: bool, state: str, closed_at: str) -> str` | `keep`・`reopen`・`report` を返す。`closed_at` が違うか開いていれば `report`、対象から外れたか閉じてよくなければ `reopen`、ほかは `keep` |
+| `close_verdict` | 同上 | 新設 | `(issue: int, view: Mapping[str, Any], conditions: Mapping[str, Condition], stage: str, retro_after: bool) -> Verdict` | 設計文書の「閉じる条件の判定」。`records_verdict` の合否に、`stage` の最終工程の記録を足す。閉じる前と照合し直すときの両方が呼ぶ |
+| `after_close` | 同上 | 新設 | `(entry: ClosedEntry, targeted: bool, closable: bool, state: str, closed_at: str) -> str` | `keep`・`reopen`・`report` を返す。`closed_at` が違うか開いていれば `report`、対象から外れたか閉じてよくなければ `reopen`、ほかは `keep`。`closable` は読み直した版での `close_verdict` が `CLOSE` かで、`entry.target` との違いだけでは開き直さない |
 | `state_path` | `domains/records/close_release.py` | 新設 | `(main_root: Path, record_pr: int, version: str, unit: Optional[str]) -> Path` | `.ndf/closing/pr<記録の PR>-<値と単位の SHA-256 の先頭 12 桁>.json` |
 | `read_state`・`write_state` | 同上 | 新設 | `(path: Path) -> list[ClosedEntry]`・`(path: Path, entries: Sequence[ClosedEntry]) -> None` | 状態ファイルを読み、置き換えて書く |
-| `close_release` | 同上 | 新設 | `(args: argparse.Namespace, root: Path) -> dict[str, Any]` | 設計文書の「閉じた後の照合し直し」の順 1〜6 |
-| `add_close_release` | 同上 | 新設 | `(sub: Any) -> None` | 引数を登録する |
+| `close_release` | 同上 | 新設 | `(args: argparse.Namespace, root: Path) -> dict[str, Any]` | 設計文書の「閉じた後の照合し直し」の順 1〜7 |
+| `add_close_release` | 同上 | 新設 | `(sub: Any) -> None` | `--pr`・`--version`・`--unit`・`--release`・`--require` と、`--stage`（`デプロイ`・`リリース後テスト`・`振り返り` のどれか。必須）を登録する |
 
 - `build_map`
   - 事前条件: `included` の PR はすべてマージ済み。`release_pr` と同じ PR だけは `strict` の squash の未マージを許す
@@ -700,9 +702,9 @@ plugins/ndf/src/ndf/
 | `write` | 途中の PR で失敗 | GitHub の失敗 | `GitHubError` | 呼び出し元へ返す | 今のまま | 打ち直すと記録の PR の `acceptance` は 1 回目のまま |
 | `write_verification` | 対応の記録がある値で `--records` が無い | 手順の漏れ | `read_map` の結果 | 止める（何も書かない） | `precondition` | `records` を打って渡す |
 | `_skipped_deploy` | デプロイを通った実行・入力に無い Issue・別の実行の記録 | 誤った経路 | ステートマシンの行と記録の `state_machine` | 止める | `precondition` | 正しい ID で打ち直す |
-| `close_release` | 対応の記録が無い | 旧い記録 | `read_release` の結果に `acceptance_targets` が無い | 止める（何も変えない） | `precondition` | 今の手順（`close-check` と `gh issue close`）で閉じる |
+| `close_release` | 対応の記録が無い | 旧い記録 | `read_release` の結果に `acceptance_targets` が無い | 止める（何も書かない） | `not_applicable`。`outputs` に読み出し結果を載せる | その出力を保存し、今の手順（`close-check` と `gh issue close`）で閉じる |
 | `close_release` | close は成功したが状態を書く前に中断 | プロセスの停止 | 打ち直しで、閉じているのに状態ファイルに無い | 既定値で続ける（開き直さない） | `already_closed`。閉じてよくなければ理由を添える | 人が決める |
-| `close_release` | 読み直し・開き直しの失敗 | GitHub の失敗 | `GitHubError` | 止める（状態ファイルを残す） | `incomplete` | 打ち直すと続きから進む |
+| `close_release` | 読み直し・開き直し・表の整理の失敗 | GitHub の失敗 | `GitHubError` | 止める（読み直しと開き直しの失敗では状態ファイルを残す。整理の失敗では閉じた Issue を開き直さない） | `incomplete` | 打ち直すと続きから進む |
 | `close_release` | ロックを取れない | 二重の起動 | `filelock.Timeout`（状態ファイルごと） | 止める | `store_in_use` | 打ち直せる |
 
 ### 処理の手順
@@ -737,7 +739,7 @@ plugins/ndf/src/ndf/
 | `record_acceptance`・`add_record_acceptance` | `cli.cmd_record` の引数の形 | `domains/release/cli.py` を読んだ | 使う（`--pr`・`--version`・`--unit` を同じ名前にする） |
 | `current_rows` | `close_decide._rows_of` | `domains/records/close_decide.py` を読んだ | 使う（Issue で絞った後に版で絞る） |
 | `_skipped_deploy` | `progress/command.read_current`・`store` | `progress/command.py` を読んだ | 使う |
-| `close_release` | `domains/records/cli._close_check`・`record_read.read_release`・`GitHub.nodes`・`GitHub.rest`・`Publisher.comment` | `domains/records/cli.py`・`adapters/github.py`・`adapters/publish.py` を読んだ | 使う。判定は `close_decide.records_verdict` を呼び、`_close_check` は呼ばない（保存したファイルを読む形のため） |
+| `close_release` | `domains/records/cli._close_check`・`record_read.read_release`・`acceptance_release.prune`・`flow.close_rules`・`close_decide.conditions_of`・`GitHub.nodes`・`GitHub.rest`・`Publisher.comment` | `domains/records/cli.py`・`adapters/github.py`・`adapters/publish.py` を読んだ | 使う。判定は `close_verdict` を呼び、`_close_check` は呼ばない（保存したファイルを読む形のため）。整理は `prune` と同じ関数（`_prune_one`）を、順 4 で読んだ記録のコピーで呼ぶ |
 
 ### 単体テストの観点
 
@@ -749,8 +751,9 @@ plugins/ndf/src/ndf/
 | `read_release` | `Refs` だけの PR の Issue が `outputs.issues`・`to_test` に入る | 0 件の一覧も空の配列で返す | 対応の記録が無い値は `outputs.issues` のキーを持たない。PR の本文と権限を読まない |
 | `records_verdict` | 確認対象の版が同じ合格で閉じる | バージョン番号を持たないリポジトリで合格の後の保留でも合格 | 訂正で足した Issue、版の無い行、`--require` で行が無い Issue は閉じない |
 | `_skipped_deploy` | デプロイを飛ばした実行の記録を受ける | — | ID なし・デプロイを通った実行・前の実行の記録で止まる |
-| `after_close` | 版が同じで閉じてよいなら `keep` | 対象から外れた Issue は `reopen` | `closed_at` が違うか開いていれば `report` |
-| `close_release` | 閉じて照合し、状態ファイルが消える | 読み直しの失敗の後の打ち直しで開き直る。打ち直しは最新の記録を読んでから閉じる。記録の読み出し 2 回・状態の照会 2 回（呼び出しを差し替えて数える） | 状態ファイルに無い閉じた Issue は開き直さない |
+| `close_verdict` | 本番の記録・テストの合格・最終工程の記録がそろえば `CLOSE` | 設定で外した条件は求めない。`デプロイ` はテストの記録が無くても閉じる | リリース記録が無い、「振り返り:」の行が無いか古い、不合格がある場合は閉じない |
+| `after_close` | 版が同じで閉じてよいなら `keep`。版が変わっても新しい版で閉じてよければ `keep` | 対象から外れた Issue は `reopen` | `closed_at` が違うか開いていれば `report` |
+| `close_release` | 閉じて照合し、表を整理して、状態ファイルが消える | 読み直しの失敗の後の打ち直しで開き直る。整理の前に中断した後の打ち直しで、閉じている Issue の表が整理される。記録の読み出し 2 回・状態の照会 2 回（呼び出しを差し替えて数える） | 状態ファイルに無い閉じた Issue は開き直さない。対応の記録が無ければ何も書かず、記録の読み出しは 1 回 |
 
 ## 実行の印と要求の工程の出力（`progress/command.py`・`progress/requirements_stage.py`）
 
@@ -783,7 +786,8 @@ plugins/ndf/src/ndf/
   - どちらの場合も、対象の Issue のどれかを名前に含むパスが無ければ何も書かない
 - `move_one`
   - 事前条件: 実行とパスの組ごとのファイルロック（Git の共通ディレクトリの下）を、進捗を読む前に取る
-  - 退避の完了: `os.link` と `unlink` の間で中断すると、元の名前と退避先が同じ inode を指して両方残る。このときは、元の名前を一時ディレクトリの名前へ `os.rename` で移し、移した先と退避ファイルの inode が同じことを確かめてから消す。違えば別のファイルに差し替わっているので、`os.link`（既存を上書きしない）で元の名前へ戻し、`precondition` で止まる
+  - 退避の完了: `os.link` と `unlink` の間で中断すると、元の名前と退避先が同じ inode を指して両方残る。このときは、元の名前を固定の名前 `<退避ファイル>.unlinking`（退避先と同じディレクトリ）へ `os.rename` で移し、移した先と退避ファイルの inode が同じことを確かめてから消す。違えば別のファイルに差し替わっているので、`os.link`（既存を上書きしない）で元の名前へ戻してから `.unlinking` を消し、`precondition` で止まる
+  - `.unlinking` の残り: `move_one` は、`resume_step` を呼ぶ前に毎回この名前を調べる。あれば前の回が移した直後に中断しているので、上と同じ確かめをする。退避ファイルと同じ inode なら消す。違えば元の名前へ戻して `.unlinking` を消し、`precondition` で止まる。元の名前が埋まっていて戻せなければ、`.unlinking` を残してその場所を知らせる。名前は実行の ID とファイル名から決まるので、打ち直しで必ず見つかる
   - 事後条件: 照合したバイト列そのものを作業場所へ書く。元の名前の既存ファイルを上書きしない
   - 副作用: 退避先 `issues/.ndf-move-<ID の先頭 12 桁>-<ファイル名>`（所有者だけのディレクトリ）への `os.link` と `unlink`（既にあれば失敗する方法）。事象 `requirements_move` の追記
   - 順 6（元が追跡ファイルのとき）: 復元元のコミットを `git.commit_or_none("HEAD")` で 1 回だけ解決し、`Git.blobs` で `<そのコミット>:<パス>` のバイト列を読み、`worker_paths.create_file` で作る。`git checkout -- <パス>` は使わない。インデックスから復元し、そこにあるファイルを上書きするためである。名前が埋まっていて内容が復元するバイト列と同じなら、戻し終えたものとして完了にする（作った直後の中断からの再開）。違えば何も変えずに `precondition` で止まる
@@ -838,7 +842,7 @@ plugins/ndf/src/ndf/
 | --- | --- | --- | --- |
 | `context_run` | 別のステートマシンで値が変わる | `--carry` でコピー元と同じ。旧いステートマシンは再開しても `--carry` しても ID から導いた値 | — |
 | `finish_requirements` | 未完了の工程に打つと完了になり出力が残る。完了した工程に打つと出力だけが残り状態は変わらない | 更新より前の定義を保存した実行でも残る（`_snapshot_v2`） | パスの欠けた出力を断る |
-| `move_one` | 照合したバイト列を書く | 退避のリンクを作った直後・退避の直後・書いた直後・順 6 でファイルを作った直後の中断から終わる。リンクの直後の中断では、元の名前を外してから順 6 でコミット済みの内容へ戻る | 照合の後の書き直しで移さない。二重の起動で退避ファイルを上書きしない。順 6 の直前に元の名前へ書かれた内容を上書きしない |
+| `move_one` | 照合したバイト列を書く | 退避のリンクを作った直後・元の名前を `.unlinking` へ移した直後・退避の直後・書いた直後・順 6 でファイルを作った直後の中断から終わる。リンクの直後の中断では、元の名前を外してから順 6 でコミット済みの内容へ戻る | 照合の後の書き直しで移さない。`.unlinking` が別のファイルなら元の名前へ戻して止まる。二重の起動で退避ファイルを上書きしない。順 6 の直前に元の名前へ書かれた内容を上書きしない |
 
 ## Git アダプターと保存先の検査（`adapters/git.py`・`contracts/worker_paths.py`）
 
@@ -849,7 +853,7 @@ plugins/ndf/src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `Git.tree_entries` | `adapters/git.py` | 新設 | `(self, commit: str, prefix: str) -> list[tuple[str, str, str, str]]` | `git ls-tree -r -z` 1 回で（モード・種類・id・パス）を返す |
-| `Git.name_status_log` | 同上 | 新設 | `(self, include: Sequence[str], exclude: Sequence[str]) -> list[tuple[str, tuple[str, ...], list[tuple[str, str, str, str]]]]` | `git log` 1 回で、範囲のすべてのコミットの（コミット・親・（状態・パス・変更前の blob・変更後の blob）の並び）を返す。引数と形式は下の箇条書き |
+| `Git.name_status_log` | 同上 | 新設 | `(self, include: Sequence[str], exclude: Sequence[str]) -> list[tuple[str, tuple[str, ...], list[tuple[str, str, str]]]]` | `git log` 1 回で、範囲のすべてのコミットの（コミット・親・（状態・パス・変更前の blob）の並び）を返す。引数と形式は下の箇条書き |
 | `Git.missing_objects` | 同上 | 新設 | `(self, specs: Sequence[str]) -> frozenset[str]` | `git cat-file --batch-check` 1 回で、`missing` と返る指定の集合を返す |
 | `Git.fetch_commits` | 同上 | 新設 | `(self, remote: str, shas: Sequence[str]) -> Completed` | SHA を指定した 1 回の `git fetch` |
 | `read_bytes` | `contracts/worker_paths.py` | 新設 | `(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[bytes]` | `read_file` と同じ検査でバイト列を返す（`read_file` はこれを呼んで復号する） |
@@ -858,10 +862,11 @@ plugins/ndf/src/ndf/
 | `write_file`・`staged_write`・`_fill_data` | 同上 | 変更 | 今の引数に `owner_only: bool = False` を足す | 真なら公開の前に新しい inode を 0600 にし、置き換える前のファイルの権限を引き継がない |
 
 - `name_status_log`
-  - コマンド: `git log --raw --no-abbrev --no-renames --diff-merges=separate -z --format=<コミットと親> --end-of-options <include>... ^<exclude>...`
+  - コマンド: `git log --raw --no-abbrev --no-renames --diff-merges=remerge -z --format=<コミットと親> --end-of-options <include>... ^<exclude>...`
   - 事前条件: `include` と `exclude` の要素は、すべて完全な SHA（40 桁か 64 桁の 16 進）。違えば起動せずに `ValueError`。ref の名前や範囲の記法は、呼び出し側が SHA に解決してから渡す。複数の head も 1 回の起動で渡す
-  - `--diff-merges=separate` を付ける。付けないと、マージコミットは SHA と親だけが出て、競合の解消で足したファイルと消したファイルを拾えない
-  - `--raw --no-abbrev` を付ける。親ごとの差分はどの親との差分かが書式に出ないので、消えた内容は変更前の blob の id で受け取る
+  - `--diff-merges=remerge` は、マージを git が自動でやり直した結果と、実際のマージコミットとの差分を出す。付けないと、マージコミットは SHA と親だけが出て、競合の解消で足したファイルと消したファイルを拾えない。親ごとの差分（`separate`）は、どの親との差分かが書式に出ず、片側の変更が伝わっただけのエントリと区別できないので使わない
+  - git 2.36 より古いとこの指定が無く、`GitError` になる。親が 3 つ以上のマージコミットには差分が出ない
+  - `--raw --no-abbrev` を付けて、消えた内容を変更前の blob の id で受け取る
 
 ### 異常系の処理
 
@@ -928,7 +933,7 @@ plugins/ndf/src/ndf/
 | `skills/requirements-design/SKILL.md`・`references/spec-template.md`・`references/document-roles.md` | 本文へ要求を書く手順と一致の確かめを消し、要求仕様書に `元の Issue:` の行を書く。不具合は「今の姿」に根本原因を書く。設計文書の「進行中の作業」の手順を置く |
 | `skills/design/SKILL.md`・`references/design-template.md`・`references/deliverables.md` | 手順 7 の「仕様のコピーが課題の本文と一致しているか」を消し、要求仕様書を読む |
 | `skills/development-workflow/SKILL.md`・`references/approval-request.md`・`references/agent-layers.md`・`references/glossary.md` | 出所の表を要求仕様書にし、「種類と影響」の行を足す。手で組むプランの例に `--run`・`--mode` を足す |
-| `skills/progress-tracking/SKILL.md` | 受け入れ条件のマーカーを付ける手順を消し、対応の記録がある値では `ndf records close-release` を打つ手順にし（`close-check`・`gh issue close`・照合し直しを手順書の AI が組み立てない）、続けて `prune` を打つ手順を置く |
+| `skills/progress-tracking/SKILL.md` | 受け入れ条件のマーカーを付ける手順を消す。デプロイを飛ばした実行でなければ、先に `records` を打たずに `ndf records close-release` を打つ手順にする（`close-check`・`gh issue close`・照合し直し・`prune` を手順書の AI が組み立てない）。`not_applicable` のときは、その出力で今の手順へ進む |
 | `skills/quality-gates/SKILL.md`・`references/design-match.md`・`references/definition-of-done.md`・`skills/fix/SKILL.md`・`skills/pr-review/SKILL.md`・`skills/pr/SKILL.md` | 要求への指摘の直しと実装で変えた条件の直しを要求仕様書の差分にする。PR の本文を要求仕様書へのリンクと `Refs` にする |
 | `skills/release-verification/SKILL.md`・`skills/release/SKILL.md`・`references/release-steps.md` | `acceptance show --release` を 1 回打つ手順、マージの前の証跡を使う条件の確かめ（`git cat-file --batch-check` と `git --literal-pathspecs diff --quiet`）、`record-acceptance`、旧方式の Issue（設計文書の「マージ済みで残るのがリリース後テストだけの場合」）の手順 |
 | `skills/worktree/SKILL.md`・`skills/document-rebuild/SKILL.md`・`skills/implementation-plan/SKILL.md` | `move-requirements` を打つ手順、まとめた要求仕様書を組にすること、`stamp` を打つ手順と「単位の外」の行 |
