@@ -525,14 +525,14 @@ def _withdrawn_in_queue(
     外すかは項目ごとに決める（`_withdraw_entry`。残した場合も結果は返す）。`seen_entry` は読み直しの前に確かめた項目の ID。
 
     証跡を読んでからキューへ入れるまでの間の工程の開き直しは、キューにまだ無い PR を外せない。読み直しより後に書かれた
-    取り消しは、開き直しの側がキューから外す。読み直せなければ、`seen_entry` の項目を外してから投げ直す
-    （入れ替わっていれば、新しい項目を判定する）。"""
+    取り消しは、開き直しの側がキューから外す。読み直せなければ、`seen_entry` の項目を外してから投げ直す。項目が
+    入れ替わっているか、ID が分からない（この呼び出しがキューへ入れた）ときは、今の項目を判定してから投げ直す。"""
     try:
         comments = hub.comments(target.number)
         if _approval(hub, target, comments) is not None:
             return None
     except (merge_approval.TrailError, github_mod.GitHubError):
-        if not hub.dequeue(target.number, seen_entry):
+        if not seen_entry or not hub.dequeue(target.number, seen_entry):
             _withdraw_entry(hub, target.number)
         raise
     _withdraw_entry(hub, target.number, seen_entry, comments)

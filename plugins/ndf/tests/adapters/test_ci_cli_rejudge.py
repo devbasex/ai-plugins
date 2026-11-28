@@ -332,3 +332,35 @@ def test_an_entry_replaced_past_the_limit_is_removed_without_judging(monkeypatch
     _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
 
     assert tried == ["e1", "e2", ""]
+
+
+@pytest.mark.parametrize("approved", [True, False])
+def test_a_failed_reread_after_adding_to_the_queue_judges_the_current_entry(monkeypatch, capsys, last_result, approved):
+    """キューへ入れた後の読み直しに失敗したら、項目の ID が分からないので、今の項目を判定してから外す（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO)
+    _approve(hub)
+    read, tried, failing = hub.comments, [], []
+
+    def comments(number):
+        if failing:
+            failing.clear()
+            raise github.GitHubError("一時的な障害")
+        return read(number)
+
+    def merge(number, **_kwargs):
+        # 追加の直後に、別のアカウントが入れ直した
+        hub.holders[7] = _other_entry(hub, "e2") if approved else github_merge.QueueHolder(3, "main", merge_hub.HEAD, "e2")
+        failing.append(True)
+        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューへ入れた", merge_hub.HEAD, added_to_queue=True)
+
+    def dequeue(number, entry=""):
+        tried.append(entry)
+        return True
+
+    monkeypatch.setattr(hub, "comments", comments)
+    monkeypatch.setattr(hub, "merge", merge)
+    monkeypatch.setattr(hub, "dequeue", dequeue)
+    _, result = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert tried == ([] if approved else ["e2"])
+    assert "一時的な障害" in result["cause"]["detail"]
