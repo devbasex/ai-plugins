@@ -54,6 +54,7 @@ from ndf.progress.run_view import (
     migration_drafts,
     event_payload,
     read_accepted_head,
+    resync_drafts,
     sync_warnings,
 )
 
@@ -341,6 +342,9 @@ def work_root(root: Path, machine_id: str) -> Path:
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
     v = read(st, machine_id)
     items, errors = sync_records(v, cwd, env.records)
+    implement, stored = design_record.IMPLEMENT_DEFINITION.stem, [e.stored() for e in errors]
+    if resync_drafts(v, implement, stored):  # 同期の前に工程「実装」が終わっていて、残した結果が変わる
+        append(st, machine_id, lambda now: resync_drafts(now, implement, stored))
     if errors:
         return result.stopped(TOOL, "transient", "; ".join(map(str, errors)), items=items, next=_cmd("resync", machine_id))
     return result.result(TOOL, result.OK, f"ステートマシン {machine_id} の進捗記録を揃えた（{len(items)} 件）", items=items)

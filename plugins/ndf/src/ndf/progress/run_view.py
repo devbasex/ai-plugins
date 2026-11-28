@@ -33,7 +33,8 @@ STEP_EVENT = _event_kind("step_recorded")
 ANSWERED = _event_kind("answered")
 FAILED = _event_kind("failed")
 FINISHED = _event_kind("finished")
-# 工程を終えた後の進捗記録の同期の結果。終了の事象があってこれが無ければ、同期を確かめていない（打ち直した `units run` が読む）
+# 工程を終えた後の進捗記録の同期と、その後の `resync` の結果。終了の事象があってこれが無ければ、同期を確かめていない
+# （打ち直した `units run` が最後の 1 件を読む）
 COMPLETION_SYNCED = _event_kind("completion_synced")
 # 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
 RETRY_EVENT = _event_kind("retry")
@@ -120,6 +121,21 @@ def completion_sync_drafts(v: View, stage: str, warnings: Sequence[str], failure
         return []
     payload = {"warnings": list(warnings), "failures": list(failures)}
     return [model.EventDraft(COMPLETION_SYNCED, ACTOR, stage, payload=payload, rev=v.rev)]
+
+
+def resync_drafts(v: View, stage_id: str, failures: Sequence[dict[str, Any]]) -> list[model.EventDraft]:
+    """`resync` の結果を、定義の id が `stage_id` の工程の同期の結果として残す事象の下書き。
+
+    工程を流して終えていない・ステートマシンが終わっていて書けない・残した結果と書けなかった保存先が同じなら空。
+    """
+    stage = next((s.name for s in v.snap.stages if s.id == stage_id), None)
+    if stage is None or model.is_terminal(v.whole) or last_event(v.row_events(stage), FINISHED) is None:
+        return []
+    found = last_event(v.row_events(stage), COMPLETION_SYNCED)
+    held = event_payload(found) if found is not None else None
+    if held is not None and held["failures"] == list(failures):
+        return []
+    return completion_sync_drafts(v, stage, held["warnings"] if held is not None else [], failures)
 
 
 def sync_warnings(machine_id: str, failures: Sequence[dict[str, Any]]) -> list[str]:

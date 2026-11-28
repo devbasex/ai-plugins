@@ -887,6 +887,25 @@ def test_units_run_interrupted_while_syncing_warns_on_the_next_run(repo, st, flo
     assert again["status"] == "ok" and any(f"ndf progress resync {tid}" in w for w in again["warnings"]), again
 
 
+def test_units_run_warns_from_the_latest_result_of_resync(repo, st, flow, capsys, tmp_path):
+    tid = _ready(capsys, repo, tmp_path)
+
+    def failing(status):
+        def records(cwd):
+            raise github.GitHubError("届かない", status=status)
+
+        return replace(flow.env, records=records)
+
+    units_cli.run_implement(st, tid, repo, failing(403))
+    run.resync(st, tid, repo, failing(502))
+    assert any("HTTP 502" in w for w in units_cli.run_implement(st, tid, repo, flow.env)["warnings"])
+    run.resync(st, tid, repo, flow.env)
+    events = len(run.read(st, tid).events)
+    run.resync(st, tid, repo, flow.env)
+    assert len(run.read(st, tid).events) == events
+    assert units_cli.run_implement(st, tid, repo, flow.env).get("warnings", []) == []
+
+
 def test_a_waiting_answer_of_units_run_is_carried_over_to_next(repo, st, flow, capsys, tmp_path):
     tid = _ready(capsys, repo, tmp_path)
     routes = {"approved": result.command("plan", "next", "x"), "rejected": None}
