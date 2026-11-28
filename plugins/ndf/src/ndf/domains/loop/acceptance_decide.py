@@ -117,6 +117,8 @@ def recorded_body(body: str, pre_merge: Mapping[int, str], post_release: Iterabl
     # 置き換える表は read_checks が読む表と同じ（`inputs.checks_table_span`。#3886 の r4-1）
     span = inputs.checks_table_span(lines)
     if span is not None:
-        return "\n".join([*lines[: span[0]], *table.split("\n"), *lines[span[1] :]])
+        # 置き換える最後の行がコメントを開いていれば、開きを残してコメントを保つ
+        opening = inputs.opened_comment(lines, span[1] - 1)
+        return "\n".join([*lines[: span[0]], *table.split("\n"), *opening, *lines[span[1] :]])
     rest = lines[start:]
     return "\n".join([*lines[:start], "", *table.split("\n"), *([""] if rest and rest[0].strip() else []), *rest])

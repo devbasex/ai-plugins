@@ -387,7 +387,7 @@ def test_drive_hands_only_this_issues_design(tmp_path: Path) -> None:
     assert got["status"] == "ok", got
     assert got["metrics"]["targets"] == [DESIGN]
     assert f"`{DESIGN}`" in worker.prompt and OTHER_DESIGN not in worker.prompt
-    assert f"`{REQ}`" in worker.prompt
+    assert f"requirement-copies/{Path(REQ).name}`" in worker.prompt and f"`{REQ}`" not in worker.prompt
 
 
 def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
@@ -399,7 +399,42 @@ def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
     worker = FakeWorker(_report(readers=[_reader(design)]))
     assert _run(tmp_path, fake, worker, issues=(7,))["status"] == "ok"
     line = next(ln for ln in worker.prompt.splitlines() if "組になる要求仕様のコピー:" in ln)
-    assert "`issues/issue-7-requirements.md`" in line and "`issues/issue-8-requirements.md`" in line
+    assert "requirement-copies/issue-7-requirements.md`" in line and "requirement-copies/issue-8-requirements.md`" in line
+
+
+def test_copy_requirements_passes_a_private_copy_of_what_was_checked(tmp_path: Path) -> None:
+    """worker へ渡すのは読んだ内容のコピーで、作業場所の要求仕様を後で差し替えても中身は変わらない。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    rel = "issues/issue-7-requirements.md"
+    _write(cwd, rel, "読んだ内容\n")
+    [copy] = drive.copy_requirements(cwd, {DESIGN: [rel]}, state)[DESIGN]
+    (cwd / rel).unlink()
+    (cwd / rel).symlink_to(tmp_path / "outside.md")
+    assert Path(copy).read_text(encoding="utf-8") == "読んだ内容\n"
+    assert Path(copy).parent.parent == state.resolve() and os.stat(copy).st_mode & 0o077 == 0
+
+
+@pytest.mark.parametrize("kind", ["link", "linked_directory", "writable_file", "writable_directory", "gone"])
+def test_copy_requirements_refuses_what_others_can_replace(tmp_path: Path, kind: str) -> None:
+    """選んだ後にリンクへ差し替わった・ほかの利用者が書き換えられる要求仕様は、読まずに止める。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    rel = "issues/issue-7-requirements.md"
+    _write(cwd, rel)
+    _write(tmp_path / "outside", "issue-7-requirements.md", "外の内容\n")
+    if kind in ("link", "gone"):
+        (cwd / rel).unlink()
+    if kind == "link":
+        (cwd / rel).symlink_to(tmp_path / "outside/issue-7-requirements.md")
+    if kind == "linked_directory":
+        (cwd / "issues").rename(cwd / "moved")
+        (cwd / "issues").symlink_to(tmp_path / "outside", target_is_directory=True)
+    if kind == "writable_file":
+        (cwd / rel).chmod(0o666)
+    if kind == "writable_directory":
+        (cwd / "issues").chmod(0o777)
+    with pytest.raises(drive.Precondition):
+        drive.copy_requirements(cwd, {DESIGN: [rel]}, state)
+    assert not (state / drive.REQUIREMENTS_COPIES / Path(rel).name).exists()
 
 
 @pytest.mark.parametrize(("base", "remote"), [("main", "origin"), ("trunk", "up")])

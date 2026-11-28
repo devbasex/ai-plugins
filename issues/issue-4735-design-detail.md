@@ -903,6 +903,7 @@ plugins/ndf/src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `requirements_of` | `domains/docrebuild/drive.py` | 変更 | 今のまま | 作業場所の `issues/` のうち、`issue_docs.requirements_issues` が設計書の番号と重なる通常ファイルを組にする |
+| `copy_requirements` | `domains/docrebuild/drive.py` | 新設 | `(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> dict[str, list[str]]` | 組になる要求仕様書を、リンクをたどらずオーナーと権限を確かめて読み（`worker_paths`）、保存先のコピーのパスを worker へ渡す。確かめられなければ `precondition` で止める |
 
 変える前は `issues/issue-<番号>-requirements.md` だけを番号ごとに探したので、`issue-7-8-requirements.md` が組にならなかった。変えた後は番号の重なりで探し、定数 `REQUIREMENTS_FILE` を消す。
 
@@ -911,6 +912,7 @@ plugins/ndf/src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `requirements_of` | `issue-7-8-design.md` と `issue-7-8-requirements.md` が組になる | 番号の一部（`78`）は当たらない | リンクは組にしない |
+| `copy_requirements` | 所有者だけが読めるコピーを渡す | 読んだ後に元を差し替えても中身は変わらない | リンク・ほかの利用者が書ける・消えた要求仕様書で止まる |
 
 ## worker の起動指示（`contracts/worker/`・`core/worker.py`）
 

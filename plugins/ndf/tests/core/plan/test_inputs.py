@@ -225,3 +225,39 @@ def test_the_row_in_a_comment_following_the_table_is_not_a_record():
 
     table = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | pytest | <!--\n| 2 | マージ前 | 未実行 |\n-->\n"
     assert list(read_checks(table)) == [1]
+
+
+# --- 確認の表の範囲とコメント（PR #4767 の r3-3・r4-4・r5-2） ---
+
+_TABLE = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n"
+
+
+@pytest.mark.parametrize("opening", ["<details>\n<!--", "<details><!--", "<details>\n  <!--", "<details>\n<!-- 注 -->\n<!--"])
+def test_recorded_body_does_not_replace_the_table_in_a_comment_after_a_tag(opening):
+    from ndf.domains.loop.acceptance_decide import recorded_body
+
+    commented = f"## 受け入れ条件\n\n- [ ] 甲\n\n{opening}\n{_TABLE}| 1 | マージ前 | 例 |\n-->\n</details>\n"
+    got = recorded_body(commented, {1: "新しい"}, [])
+    assert got.startswith(commented.rstrip("\n"))
+    assert got.count("新しい") == 1
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        " <!--\n| 2 | マージ前 | 記入例 |\n-->\n",
+        " <!-- メモ\n| 2 | マージ前 | 記入例 |\n-->\n",
+        "\n<!--\n| 2 | マージ前 | 記入例 |\n-->\n",
+        " <!-- 注 --> <!--\n| 2 | マージ前 | 記入例 |\n-->\n",
+    ],
+)
+def test_recorded_body_keeps_the_comment_that_follows_the_table(tail):
+    from ndf.domains.loop.acceptance_decide import read_checks, recorded_body
+
+    body = f"## 受け入れ条件\n\n- [ ] 甲\n\n{_TABLE}| 1 | マージ前 | 古い |{tail}"
+    got = recorded_body(body, {1: "新しい"}, [])
+    comment = tail[tail.rindex("<!--") :]
+    assert got.endswith("\n" + comment)
+    assert "古い" not in got
+    assert list(read_checks(got)) == [1]
+    assert recorded_body(got, {1: "新しい"}, []) == got

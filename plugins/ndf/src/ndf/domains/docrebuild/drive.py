@@ -20,7 +20,7 @@ from typing import Any, Optional
 
 from ndf import cli, contracts, identity
 from ndf.adapters import git
-from ndf.contracts import result
+from ndf.contracts import result, worker_paths
 from ndf.core import issue_docs, start_point
 from ndf.domains.docrebuild import gate_decide
 from ndf.domains.docrebuild import select_decide as sd
@@ -35,6 +35,8 @@ WORK_KIND = TOOL
 RESULT_SCHEMA = contracts.schema_path("io/document-rebuild.result")
 PROMPT_TEMPLATE = "contracts/worker/document-rebuild.md"
 SKILL = "skills/document-rebuild/SKILL.md"
+# 要求仕様のコピーを置く、保存先の下のディレクトリ
+REQUIREMENTS_COPIES = "requirement-copies"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
@@ -168,6 +170,36 @@ def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]
         if found:
             out[t.path] = found
     return out
+
+
+def copy_requirements(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> dict[str, list[str]]:
+    """組になる要求仕様を保存先へ写し、設計書ごとのコピーの絶対パスを返す。
+
+    worker は作業場所のパスを開き直さず、検査した記述子から読んだ内容のコピーだけを読む。安全に読めない・写せない要求仕様が
+    あれば `Precondition`。
+    """
+    found = sorted({rel for rels in requirements.values() for rel in rels})
+    copies = {rel: str(_copy_requirement(cwd, rel, state_dir)) for rel in found}
+    return {design: [copies[rel] for rel in rels] for design, rels in requirements.items()}
+
+
+def _copy_requirement(cwd: Path, rel: str, state_dir: Path) -> Path:
+    """`rel` をリンクをたどらずに開いてオーナーと権限を確かめ、読んだ内容を所有者だけの保存先へ置く。"""
+    source = Path(rel)
+    try:
+        with worker_paths.open_resolved(cwd) as top, worker_paths.open_subdir(top, str(source.parent)) as wd:
+            worker_paths.check_unshared(wd, source.name)
+            worker_paths.check_owned(wd, [source.name])
+            text = worker_paths.read_file(wd, source.name)
+        if text is None:
+            raise Precondition(f"要求仕様書 {rel} が無くなった")
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with worker_paths.open_or_create(state_dir / REQUIREMENTS_COPIES) as out:
+            worker_paths.check_unshared(out)
+            worker_paths.write_file(out, source.name, text, private=True)
+            return out.path / source.name
+    except (OSError, worker_paths.EntryError) as exc:
+        raise Precondition(f"要求仕様書 {rel} を安全に読んで保存先へ写せない: {exc}") from None
 
 
 def regular_file(cwd: Path, rel: str) -> bool:
@@ -527,7 +559,8 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
         if not chosen.targets:
             summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
             return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
-        prompt = prompt_text(chosen.targets, requirements_of(args.cwd, chosen.targets), _root() / SKILL)
+        requirements = copy_requirements(args.cwd, requirements_of(args.cwd, chosen.targets), args.state_dir)
+        prompt = prompt_text(chosen.targets, requirements, _root() / SKILL)
         out, result_file = run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
         attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
         log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})

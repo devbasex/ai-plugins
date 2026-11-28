@@ -103,8 +103,8 @@ def test_the_comment_mark_in_the_text_does_not_hide_the_following_criteria() -> 
 
 
 def test_criteria_keep_the_comment_mark_written_as_code() -> None:
-    got = rd.criteria_of(_doc_text(criteria="- [ ] `<!-- 印 -->` を残す\n  ```\n  <!-- 例 -->\n  ```\n"))
-    assert [c.text for c in got] == ["`<!-- 印 -->` を残す\n```\n<!-- 例 -->\n```"]
+    got = rd.criteria_of(_doc_text(criteria="- [ ] `<!-- 注 -->` を残す\n  ```\n  <!-- 例 -->\n  ```\n"))
+    assert [c.text for c in got] == ["`<!-- 注 -->` を残す\n```\n<!-- 例 -->\n```"]
 
 
 @pytest.mark.parametrize(
