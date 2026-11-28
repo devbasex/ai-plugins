@@ -20,7 +20,8 @@ from ndf.contracts import result
 from ndf.core import durable, route
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import definition, invoke, issue_values, plan_runs, units_flow, units_invoke
+from ndf.core.plan.review_units_decide import unit_key
+from ndf.progress import definition, invoke, issue_values, plan_runs, units_flow, units_invoke, units_queue
 from ndf.progress.plan_runs import StageResult, StageRun
 
 BRANCH = "sprint/s1"
@@ -50,8 +51,14 @@ def _git(repo: Path, *args: str) -> str:
 
 
 class _Hub:
+    states: dict = {}  # PR の番号 → `pulls` が返す PR（テストが差し替える）
+
     def __init__(self, repo, api):
         self.repo = repo
+
+    def pulls(self, numbers, spare=(), *, rest_fallback=True):
+        assert rest_fallback is False, "キューの状態は REST へ読み替えない"
+        return {n: self.states.get(n) for n in numbers}
 
     def nodes(self, numbers, node, fields, batch="github.graphql-batch"):
         return {n: {"body": BODIES[n]} for n in numbers}
@@ -82,6 +89,9 @@ class World:
         self.merged: dict[str, github_pulls.MergedPull] = {}
         self.lookups: list[list[str]] = []
         self.answer_sha = True
+        self.now = 1000.0
+        self.slept: list[float] = []
+        self.on_sleep = None  # 眠りの間に GitHub で起きること
 
     def stage_run(self) -> StageRun:
         stage = definition.load_definition("standard").stage("実装")
@@ -89,7 +99,14 @@ class World:
         return invoke.stage_run(stage, stage.steps[0], invoke.resolve_inputs(stage, context))
 
     def ports(self) -> units_invoke.Ports:
-        return units_invoke.Ports(self.call_plan, self.command)
+        return units_invoke.Ports(self.call_plan, self.command, clock=lambda: self.now, sleep=self.sleep)
+
+    def sleep(self, seconds: float) -> None:
+        """本物の時間を待たず、偽の時計を進める。"""
+        self.slept.append(seconds)
+        self.now += seconds
+        if self.on_sleep is not None:
+            self.on_sleep()
 
     def call_plan(self, run: StageRun, round_dir: Path) -> StageResult:
         self.runs.append((run, round_dir))
@@ -172,12 +189,17 @@ def _unit(name: str, issue: int):
 def world(tmp_path, monkeypatch, request) -> World:
     """`World`。間接の引数（`indirect=True`）で `tmp_path` の下の場所の名前を渡せば、そこに作る（空白を含む場所を試す）。"""
     w = World(tmp_path / request.param if hasattr(request, "param") else tmp_path)
+    monkeypatch.setattr(_Hub, "states", {})
     monkeypatch.setattr(git.Git, "remote_repo", lambda self, remote=None: "o/r")
     monkeypatch.setattr(github, "GitHub", _Hub)
     monkeypatch.setattr(github, "client", lambda *a, **k: None)
     monkeypatch.setattr(github_pulls, "merged_pulls", w.lookup)
     monkeypatch.setattr(issue_values, "issue_text", lambda location, n, repo=None: (f"#{n} の題", f"#{n} の本文"))
     return w
+
+
+def _pull(number: int, *, queued: bool = False, merged: bool = False, state: str = "open", merge_sha: str = "") -> github_pulls.Pull:
+    return github_pulls.Pull(number, "closed" if merged else state, merged, "h", "b", BRANCH, "", "clean", "a", "OWNER", merge_sha, queued)
 
 
 def _stopped_at(step: str, kind: str = "check_failed") -> dict:
@@ -264,13 +286,13 @@ def test_a_failing_unit_stops_the_stage_before_the_later_units_and_names_the_uni
 
 
 def test_a_unit_that_cannot_be_merged_stops_and_keeps_the_kind_of_the_merge(world):
-    world.merge = [result.stopped("ci", "ci_pending", "マージキューで待つ", retry_after=30)]
+    world.merge = [result.stopped("ci", "refused", "断った", retry_after=30)]
 
     got = world.run()
 
-    assert got.status == "stopped" and got.cause["kind"] == "ci_pending" and got.cause["retry_after"] == 30
+    assert got.status == "stopped" and got.cause["kind"] == "refused" and got.cause["retry_after"] == 30
     assert "単位 読み手" in got.cause["detail"] and "PR #101 をマージできない" in got.cause["detail"]
-    assert json.loads((world.impl_runs()[0][1] / units_flow.MERGE_FILE).read_text()) == {"kind": "ci_pending"}
+    assert json.loads((world.impl_runs()[0][1] / units_flow.MERGE_FILE).read_text()) == {"kind": "refused"}
     assert len(world.impl_runs()) == 1
 
 
@@ -426,10 +448,15 @@ def test_a_rerun_skips_merged_units_and_reviews_the_stopped_unit_again_from_push
     assert again.overrides["branch"] == names["書き手"] and round_dir.name == "2" and again.start == "push"
 
 
+def _merges(world: World, branch: str) -> list[list[str]]:
+    return [c for c in world.commands if c[:2] == ["ci", "merge"] and _flags(c)["--branch"] == branch]
+
+
 def test_a_rerun_after_a_merge_wait_only_merges_again(world):
-    world.merge = [result.stopped("ci", "ci_pending", "マージキューで待つ")]
+    world.merge = [result.stopped("ci", "infra_wait", "GitHub を待つ", retry_after=60)]
     assert world.run().status == "stopped"
     world.runs.clear()
+    _Hub.states[101] = _pull(101)
 
     got = world.run()
 
@@ -453,7 +480,9 @@ def test_a_rerun_after_the_queue_merged_the_last_unit_moves_the_sprint_worktree_
         return original(argv, cwd, env)
 
     world.command = queue_waits_on_the_last
-    assert world.run().status == "stopped"
+    _Hub.states[103] = _pull(103, queued=True)
+    got = world.run()
+    assert got.status == "stopped" and got.cause["kind"] == "ci_pending", got.report
     # 止まった後に、マージキューが最後の単位の PR をマージした
     world.land(pending["cwd"], names["issue-4"], 103)
     world.runs.clear()
@@ -478,6 +507,139 @@ def test_a_rerun_from_another_branch_stops_before_any_unit(world):
 
     assert raised.value.kind == "precondition" and "other" in raised.value.detail
     assert world.runs == []
+
+
+# --- マージキューの待ち（#3702 の決定 9） -----------------------------------------------------------
+
+
+def _queue_first_merge(world: World) -> None:
+    world.merge = [result.stopped("ci", "ci_pending", "マージキューへ入れた")]
+    _Hub.states[101] = _pull(101, queued=True)
+
+
+def _queue_merges_the_first(world: World) -> None:
+    """キューが読み手の PR をマージする。"""
+    if _Hub.states[101].merged:
+        return
+    worktree = Path(world.impl_runs()[0][0].inputs["worktree"])
+    landed = world.land(worktree, world.unit_names()["読み手"], 101)
+    _Hub.states[101] = _pull(101, merged=True, merge_sha=landed.merge_sha)
+
+
+def test_a_unit_waiting_in_the_queue_is_read_until_merged_and_then_the_later_unit_starts(world):
+    _queue_first_merge(world)
+    world.on_sleep = lambda: _queue_merges_the_first(world)
+
+    got = world.run()
+
+    assert got.status == "ok", got.report
+    assert len(world.slept) == 1 and len(_merges(world, world.unit_names()["読み手"])) == 1
+    second = Path(world.impl_runs()[1][0].inputs["worktree"])
+    assert _git(second, "merge-base", "--is-ancestor", world.merged[world.unit_names()["読み手"]].merge_sha, "HEAD") == ""
+    assert [i["status"] for i in got.report["items"]] == ["merged"] * 3
+
+
+def test_a_rerun_of_a_unit_in_the_queue_waits_without_sending_the_merge_again(world):
+    _queue_first_merge(world)
+    first = world.run()
+    assert first.status == "stopped" and first.cause["kind"] == "ci_pending", first.report
+    queued_at = json.loads((units_queue.queue_file(world.work / "units" / world.unit_names()["読み手"])).read_text())["queued_at"]
+    assert world.now - queued_at >= 3600
+    world.slept.clear()
+
+    again = world.run()
+
+    # 上限は最初にキューの待ちになった時刻から数えるので、1 回読むだけで待たない
+    assert again.status == "stopped" and again.cause["kind"] == "ci_pending" and world.slept == []
+    assert len(_merges(world, world.unit_names()["読み手"])) == 1
+
+
+def test_a_pull_dropped_from_the_queue_is_sent_again_only_once_across_reruns(world):
+    names = world.unit_names()
+    world.merge = [result.stopped("ci", "ci_pending", "マージキューへ入れた"), result.stopped("ci", "ci_pending", "入れ直した")]
+    _Hub.states[101] = _pull(101)
+
+    got = world.run()
+
+    assert got.status == "stopped" and got.cause["kind"] == "precondition" and "キューから外れた" in got.cause["detail"]
+    assert len(_merges(world, names["読み手"])) == 2
+
+    again = world.run()
+
+    assert again.status == "stopped" and again.cause["kind"] == "precondition"
+    assert len(_merges(world, names["読み手"])) == 2
+
+
+def test_a_merged_commit_the_fetch_does_not_show_yet_is_taken_in_later_and_keeps_its_first_time(world, tmp_path):
+    # GitHub の側にだけあるマージのコミット（手元はまだ取得できない）
+    other = tmp_path / "github"
+    names = world.unit_names()
+    original = world.command
+    hidden: dict = {}
+
+    def merge_not_visible(argv, cwd, env):
+        if "ci" in argv and "worktree" not in argv and names["読み手"] in argv and not hidden:
+            # GitHub はマージを返すが、取得先にはまだ見えない
+            subprocess.run(["git", "clone", "-q", "-b", BRANCH, str(world.remote), str(other)], check=True)
+            _git(other, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "queue")
+            hidden["sha"] = _git(other, "rev-parse", "HEAD")
+            row = {"kind": "pr", "number": 101, "merge_sha": hidden["sha"]}
+            out = result.result("ci", result.OK, "マージした", items=[row])
+            return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+        return original(argv, cwd, env)
+
+    world.command = merge_not_visible
+
+    got = world.run()
+
+    ingest = world.work / "units" / units_invoke.INGEST_FILE
+    assert got.status == "stopped" and got.cause["kind"] == "ci_pending", got.report
+    assert len(world.impl_runs()) == 1 and all(r.name != "pr" for r, _ in world.runs)
+    held = json.loads(ingest.read_text())
+    assert [v["sha"] for v in held.values()] == [hidden["sha"]]
+
+    world.slept.clear()
+    world.merged[names["読み手"]] = github_pulls.MergedPull(101, hidden["sha"])
+    still = world.run()
+
+    # 打ち直しても最初に分かった時刻から数える
+    assert still.status == "stopped" and still.cause["kind"] == "ci_pending" and world.slept == []
+    assert json.loads(ingest.read_text()) == held
+    assert len(world.impl_runs()) == 1
+
+    _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    done = world.run()
+
+    assert done.status == "ok", done.report
+    assert json.loads(ingest.read_text()) == {}
+
+
+def test_a_merge_commit_outside_the_sprint_branch_does_not_move_the_sprint_worktree(world):
+    ctx = _ctx(world)
+    head = _git(world.sprint, "rev-parse", "HEAD")
+    _git(world.sprint, "switch", "-q", "-c", "other")
+    _git(world.sprint, "commit", "-q", "--allow-empty", "-m", "別のブランチ")
+    outside = _git(world.sprint, "rev-parse", "HEAD")
+    _git(world.sprint, "switch", "-q", BRANCH)
+
+    taken = units_invoke.advance(ctx, {"A": github_pulls.MergedPull(101, outside)})
+
+    assert taken == frozenset() and _git(world.sprint, "rev-parse", "HEAD") == head
+
+
+def test_a_merged_unit_the_sprint_head_already_contains_is_not_taken_in_again(world, monkeypatch):
+    assert world.run().status == "ok"
+    monkeypatch.setattr(units_invoke, "advance", lambda ctx, pulls: pytest.fail("反映済みの単位は渡さない"))
+    # 反映待ちで止まった後に、利用者がスプリントブランチを進めた形
+    ingest = world.work / "units" / units_invoke.INGEST_FILE
+    branch = world.unit_names()["読み手"]
+    held = {unit_key(3, "読み手"): {"sha": world.merged[branch].merge_sha, "merged_at": 0}}
+    ingest.write_text(json.dumps(held), encoding="utf-8")
+
+    again = world.run()
+
+    assert again.status == "ok", again.report
+    assert json.loads(ingest.read_text()) == {}
 
 
 # --- 単位の作業場所 ---------------------------------------------------------------------------------

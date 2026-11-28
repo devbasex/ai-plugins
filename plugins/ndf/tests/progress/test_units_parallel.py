@@ -18,7 +18,7 @@ import pytest
 from ndf.adapters import git, github, github_pulls
 from ndf.contracts import named_cap, result
 from ndf.core.plan.review_units_decide import Unit, unit_key
-from ndf.progress import invoke, issue_values, units_flow, units_invoke
+from ndf.progress import invoke, issue_values, units_flow, units_invoke, units_queue
 from ndf.progress.plan_runs import StageResult, UnitsStopped
 
 
@@ -46,6 +46,7 @@ class FakePool:
         self.running: dict[Future, object] = {}
         self.widest = 0
         self.limit = 0
+        self.now = 0.0
 
     def pool(self, max_workers: int):
         self.limit = max_workers
@@ -75,9 +76,13 @@ class FakePool:
     def pick(self) -> list[Future]:
         return [list(self.running)[-1]]
 
-    def wait(self, waiting, return_when):
+    def wait(self, waiting, timeout=None, return_when=None):
         assert waiting, "待つ相手が無いのに待った"
         done = set(self.pick())
+        if not done:
+            # 何も終わらずに時間が切れた
+            assert timeout is not None, "待ちの時刻が無いのに、何も終わらなかった"
+            self.now += timeout
         for future in done:
             self.finish(future)
             del self.running[future]
@@ -195,12 +200,12 @@ def test_plans_that_finish_together_are_merged_one_by_one_in_the_merge_order():
     assert fake.names("merge") == ["A", "B"]
 
 
-def test_a_free_slot_is_filled_after_each_merge_of_plans_that_finish_together():
-    fake = Fake([_unit("A"), _unit("B"), _unit("C", "A")], ["A", "B"])
+def test_a_free_slot_is_filled_after_each_merge_and_the_merges_are_taken_in_together():
+    fake = Fake([_unit("A"), _unit("B"), _unit("C"), _unit("D", "A")], ["A", "B"])
 
-    fake.flow()
+    fake.flow(limit=2)
 
-    assert fake.at("merge", "A") < fake.at("start", "C") < fake.at("merge", "B")
+    assert fake.at("merge", "A") < fake.at("start", "C") < fake.at("merge", "B") < fake.at("start", "D")
 
 
 def test_an_outdated_unit_is_started_again_and_merged():
@@ -330,6 +335,341 @@ def test_the_kind_of_the_stopped_stage(kinds, expected):
     got = units_flow.primary(failures)
 
     assert got.kind == expected
+
+
+# --- マージキューと反映の待ち ---------------------------------------------------------------
+
+QUEUED, OPEN, CLOSED = units_queue.State("queued"), units_queue.State("open"), units_queue.State("closed")
+MERGED, UNKNOWN = units_queue.State("merged", "sha"), units_queue.State("unknown")
+
+
+class Waiting(Fake):
+    """キューの待ちを持つ偽。`queue` の単位は最初のマージが `Queued` になる。`states` は単位の名前 → 読むたびに返す状態
+    （尽きれば最後の値）、`visible` は単位の名前 → 反映できるようになる時刻。打ち直し（`resend`）は `resends` の値（"merged" か "queued"）。"""
+
+    def __init__(self, tmp_path, units, *finish, queue=(), states=None, visible=None, resends=(), budget=3600.0, **kw) -> None:
+        super().__init__(units, *finish, **kw)
+        self.tmp = tmp_path
+        self.queue = set(queue)
+        self.states = {k: list(v) for k, v in (states or {}).items()}
+        self.visible = visible or {}
+        self.resends = list(resends)
+        self.budget = budget
+        self.reads: list[tuple[float, list[str]]] = []
+        self.advances: list[tuple[float, list[str]]] = []
+        self.slept: list[float] = []
+
+    def number(self, name: str) -> int:
+        return [u.name for u in self.units].index(name) + 1
+
+    def name(self, number: int) -> str:
+        return self.units[number - 1].name
+
+    def ticket(self, name: str) -> units_queue.Ticket:
+        def resend():
+            self.log.append(("resend", name))
+            if self.resends.pop(0) == "queued":
+                raise self.queued(name)
+            return {"name": name, "status": "merged"}, github_pulls.MergedPull(self.number(name), name)
+
+        return units_queue.Ticket(self.number(name), self.tmp / name / "queue.json", resend)
+
+    def queued(self, name: str) -> units_flow.Queued:
+        exc = units_flow.Queued("ci_pending", f"{name} はキュー")
+        exc.ticket = self.ticket(name)
+        return exc
+
+    def start(self, unit: Unit) -> units_flow.Started:
+        started = super().start(unit)
+
+        def land(got):
+            if unit.name in self.queue:
+                self.queue.discard(unit.name)
+                raise self.queued(unit.name)
+            return started.land(got)
+
+        return units_flow.Started(started.call, land)
+
+    def read(self, numbers):
+        names = [self.name(n) for n in numbers]
+        self.reads.append((self.now, names))
+        return {self.number(n): self.states[n].pop(0) if len(self.states[n]) > 1 else self.states[n][0] for n in names}
+
+    def advance(self, pulls, overdue):
+        """`advances` には反映先を決める単位だけを残す。"""
+        names = {k: next(u.name for u in self.units if units_flow.key_of(u) == k) for k in (*pulls, *overdue)}
+        self.advances.append((self.now, [names[k] for k in pulls]))
+        return {k for k, n in names.items() if self.now >= self.visible.get(n, 0)}
+
+    def sleep(self, seconds: float) -> None:
+        self.slept.append(seconds)
+        self.now += seconds
+
+    def watching(self) -> units_queue.Watching:
+        return units_queue.Watching(self.read, self.advance, self.tmp / "ingest.json", self.budget, lambda: self.now, self.sleep)
+
+    def flow(self, *, limit: int = 6, merged=(), chained: bool = False, landed=()) -> units_flow.Flowed:
+        def failed(unit, exc):
+            self.log.append(("fail", unit.name))
+            return exc if isinstance(exc, UnitsStopped) else UnitsStopped("precondition", str(exc))
+
+        order = units_flow.Order(self.units, frozenset(unit_key(3, m) for m in merged), chained=chained)
+        ops = units_flow.Ops(self.start, failed, lambda got: got == "usage_limit", self.watching())
+        outside = {unit_key(3, n): github_pulls.MergedPull(self.number(n), n) for n in landed}
+        return units_flow.flow(order, ops, limit, self.workers(), outside)
+
+
+def test_a_unit_merged_by_the_queue_starts_its_dependents_while_an_unrelated_unit_runs(tmp_path):
+    # X は 2 回の時間切れの間も実行中のまま
+    fake = Waiting(tmp_path, [_unit("A"), _unit("X"), _unit("B", "A")], ["A"], [], [], ["B"], queue=["A"], states={"A": [QUEUED, MERGED]})
+
+    got = fake.flow()
+
+    assert fake.at("start", "B") < fake.at("merge", "X")
+    assert [names for _, names in fake.reads] == [["A"], ["A"]]
+    assert [t for t, _ in fake.reads] == [10, 20]
+    assert not got.failures and len(got.items) == 3
+    assert fake.slept == []
+
+
+def test_plans_that_finish_within_the_interval_do_not_add_queue_reads(tmp_path):
+    fake = Waiting(
+        tmp_path, [_unit("A"), _unit("X"), _unit("Y"), _unit("Z")], ["A"], ["X"], ["Y"], ["Z"], queue=["A"], states={"A": [MERGED]}
+    )
+
+    got = fake.flow()
+
+    assert not got.failures and len(fake.reads) == 1 and fake.slept == [10]
+
+
+def test_only_waiting_pulls_left_sleeps_to_the_next_read_once(tmp_path):
+    fake = Waiting(tmp_path, [_unit("A")], queue=["A"], states={"A": [QUEUED, QUEUED, QUEUED, MERGED]})
+
+    got = fake.flow()
+
+    # 1 回の眠りで次の時刻まで待ち、状態が変わらない間は間隔を延ばす
+    assert fake.slept == [10, 10, 15, 22.5] and len(fake.reads) == 4 and len(got.items) == 1
+
+
+def test_merges_found_by_one_read_are_taken_in_by_one_call(tmp_path):
+    fake = Waiting(tmp_path, [_unit("A"), _unit("B")], queue=["A", "B"], states={"A": [MERGED], "B": [MERGED]})
+
+    got = fake.flow()
+
+    assert len(fake.reads) == 1 and [sorted(n) for _, n in fake.advances] == [["A", "B"]]
+    assert len(got.items) == 2
+
+
+def test_a_merge_not_visible_yet_is_taken_in_at_the_next_time_before_the_dependents_start(tmp_path):
+    fake = Waiting(tmp_path, [_unit("A"), _unit("B", "A")], visible={"A": 5})
+
+    got = fake.flow()
+
+    assert [t for t, _ in fake.advances][:2] == [0, 10] and fake.slept[0] == 10
+    assert fake.reads == [] and fake.names("start") == ["A", "B"] and not got.failures
+    assert json.loads((tmp_path / "ingest.json").read_text()) == {}
+
+
+def test_a_unit_merged_before_the_run_holds_its_dependents_until_it_is_taken_in(tmp_path):
+    fake = Waiting(tmp_path, [_unit("A"), _unit("B", "A"), _unit("C")], visible={"A": 5})
+
+    got = fake.flow(landed=["A"])
+
+    assert fake.names("start") == ["C", "B"] and fake.names("merge") == ["C", "B"]
+    assert [t for t, names in fake.advances if "A" in names] == [0, 10]
+    assert not got.failures and not got.waiting
+
+
+def test_a_take_in_that_goes_over_the_limit_during_the_read_is_not_tried_again(tmp_path):
+    (tmp_path / "ingest.json").write_text(json.dumps({unit_key(3, "A"): {"sha": "A", "merged_at": -3585}}), encoding="utf-8")
+    fake = Waiting(tmp_path, [_unit("A"), _unit("B")], queue=["B"], states={"B": [MERGED]}, visible={"A": 10**9})
+    read = fake.read
+
+    def slow_read(numbers):
+        fake.now += 10
+        return read(numbers)
+
+    fake.read = slow_read
+
+    got = fake.flow(landed=["A"])
+
+    assert [t for t, names in fake.advances if "A" in names] == [0]
+    assert [(u.name, e.kind) for u, e in got.failures] == [("A", "ci_pending")]
+
+
+def test_an_overdue_merge_taken_in_with_a_new_merge_is_no_longer_a_failure(tmp_path):
+    (tmp_path / "ingest.json").write_text(json.dumps({unit_key(3, "A"): {"sha": "A", "merged_at": -3585}}), encoding="utf-8")
+    units = [_unit("A"), _unit("B"), _unit("C", "A")]
+    fake = Waiting(tmp_path, units, queue=["B"], states={"B": [MERGED]}, visible={"A": 15})
+    read = fake.read
+
+    def slow_read(numbers):
+        fake.now += 10
+        return read(numbers)
+
+    fake.read = slow_read
+
+    got = fake.flow(landed=["A"])
+
+    assert not got.failures and not got.waiting
+    # 上限を超えた A は、反映先を決める呼び出しに渡さない
+    assert [t for t, names in fake.advances if "A" in names] == [0]
+    assert fake.names("start") == ["B", "C"]
+    assert json.loads((tmp_path / "ingest.json").read_text()) == {}
+
+
+def test_the_wait_for_a_take_in_is_counted_from_the_recorded_time(tmp_path):
+    (tmp_path / "ingest.json").write_text(json.dumps({unit_key(3, "A"): {"sha": "A", "merged_at": -3590}}), encoding="utf-8")
+    units = [_unit("A"), _unit("w4", issue=4, whole=True)]
+    fake = Waiting(tmp_path, units, visible={"A": 10**9})
+
+    got = fake.flow(landed=["A"])
+
+    assert fake.slept == [10] and [(u.name, e.kind) for u, e in got.failures] == [("A", "ci_pending")]
+    # 反映できていないマージがある間は、補った単位を起動しない
+    assert fake.names("start") == [] and [u.name for u, _ in got.waiting] == ["w4"]
+
+
+@pytest.mark.parametrize(
+    ("read_state", "kind"),
+    [(QUEUED, "ci_pending"), (UNKNOWN, "ci_pending"), (units_queue.State("unknown", retry_after=10_000), "infra_wait")],
+)
+def test_a_pull_over_the_wait_limit_fails_while_other_units_run_and_holds_the_supplemented_units(tmp_path, read_state, kind):
+    units = [_unit("A"), _unit("X"), _unit("w4", issue=4, whole=True)]
+    # X は A の上限（25 秒）を過ぎるまで終わらない
+    fake = Waiting(tmp_path, units, ["A"], [], [], ["X"], queue=["A"], states={"A": [read_state]}, budget=25)
+
+    got = fake.flow()
+
+    # 上限の時刻には読まずに外す
+    assert [t for t, _ in fake.reads] == [10, 20]
+    assert [(u.name, e.kind) for u, e in got.failures] == [("A", kind)]
+    assert fake.names("start") == ["A", "X"] and [u.name for u, _ in got.waiting] == ["w4"]
+    assert not [e for e in fake.log if e[0] == "resend"]
+
+
+def test_a_wait_over_the_limit_is_neither_read_nor_sent_when_the_read_time_has_also_passed(tmp_path):
+    fake = Waiting(tmp_path, [_unit("A")], queue=["A"], states={"A": [OPEN]}, budget=25)
+    fake.sleep = lambda seconds: setattr(fake, "now", fake.now + seconds + 100)
+
+    got = fake.flow()
+
+    assert fake.reads == [] and fake.names("resend") == []
+    assert [(u.name, e.kind) for u, e in got.failures] == [("A", "ci_pending")]
+
+
+def test_a_pull_dropped_from_the_queue_is_sent_once_and_a_second_drop_holds_the_supplemented_units(tmp_path):
+    units = [_unit("A"), _unit("w4", issue=4, whole=True)]
+    fake = Waiting(tmp_path, units, queue=["A"], states={"A": [OPEN]}, resends=["queued"])
+
+    got = fake.flow()
+
+    assert fake.names("resend") == ["A"] and json.loads((tmp_path / "A" / "queue.json").read_text())["resent"] is True
+    assert [(u.name, e.kind) for u, e in got.failures] == [("A", "precondition")]
+    assert fake.names("start") == ["A"] and [u.name for u, _ in got.waiting] == ["w4"]
+
+
+@pytest.mark.parametrize("state", [CLOSED, OPEN])
+def test_a_closed_pull_or_a_drop_after_an_earlier_resend_releases_the_supplemented_units(tmp_path, state):
+    (tmp_path / "A").mkdir()
+    (tmp_path / "A" / "queue.json").write_text(json.dumps({"pr": 1, "resent": True, "queued_at": 0}), encoding="utf-8")
+    units = [_unit("A"), _unit("w4", issue=4, whole=True)]
+    fake = Waiting(tmp_path, units, queue=["A"], states={"A": [state]})
+
+    got = fake.flow()
+
+    assert [(u.name, e.kind) for u, e in got.failures] == [("A", "precondition")]
+    assert fake.names("resend") == [] and fake.names("start") == ["A", "w4"]
+
+
+def test_a_resent_unit_refused_as_behind_is_started_again_within_the_limit(tmp_path):
+    units = [_unit("A"), _unit("X"), _unit("Y")]
+    # A の打ち直しが古い HEAD で断られたとき、同時に流せる 1 本は X が使っている
+    fake = Waiting(tmp_path, units, ["A"], [], ["X"], ["A"], ["Y"], queue=["A"], states={"A": [OPEN]})
+    ticket = fake.ticket
+
+    def outdated_ticket(name):
+        def resend():
+            raise units_flow.Outdated("not_ci", f"{name} が古い")
+
+        return ticket(name)._replace(resend=resend)
+
+    fake.ticket = outdated_ticket
+
+    got = fake.flow(limit=1)
+
+    assert fake.widest == 1 and fake.names("start").count("A") == 2
+    assert not got.failures and len(got.items) == 3
+
+
+def test_a_resent_merge_only_unit_refused_as_behind_stays_outdated(tmp_path):
+    (tmp_path / "queue.json").write_text(json.dumps({"pr": 1, "resent": False, "queued_at": 0}), encoding="utf-8")
+
+    def resend():
+        raise units_flow.Outdated("not_ci", "古い")
+
+    ticket = units_queue.Ticket(1, tmp_path / "queue.json", resend)
+
+    with pytest.raises(units_flow.Outdated):
+        units_flow.remerge(_unit("A"), ticket, lambda numbers: {1: OPEN}, lambda: 0)
+
+
+def test_the_reset_time_of_the_first_read_of_a_rerun_is_kept_for_an_expired_wait(tmp_path):
+    (tmp_path / "queue.json").write_text(json.dumps({"pr": 1, "resent": False, "queued_at": 0}), encoding="utf-8")
+    ticket = units_queue.Ticket(1, tmp_path / "queue.json", lambda: pytest.fail("打ち直さない"))
+    limited = units_queue.State("unknown", retry_after=600)
+    with pytest.raises(units_flow.Queued) as raised:
+        units_flow.remerge(_unit("A"), ticket, lambda numbers: {1: limited}, lambda: 4000)
+    board = units_queue.Board(units_queue.Watching(budget=3600, clock=lambda: 4000))
+
+    assert not board.add_queued("A", raised.value.ticket)
+    assert board.resets_after_deadline("A") == 600
+
+
+def test_the_queue_state_is_read_without_the_rest_fallback():
+    def pull(**kw):
+        base = dict(number=1, state="open", merged=False, head_sha="h", head_ref="b", base_ref="s", body="", merge_state="clean",
+                    author="a", association="OWNER")  # fmt: skip
+        return github_pulls.Pull(**{**base, **kw})
+
+    class Hub:
+        def pulls(self, numbers, spare=(), *, rest_fallback=True):
+            assert rest_fallback is False
+            other = pull(merged=True, state="closed", merge_sha="o", base_ref="other")
+            return {
+                1: pull(merged=True, state="closed", merge_sha="m"),
+                2: pull(queued=True),
+                3: pull(),
+                4: pull(state="closed"),
+                5: None,
+                6: other,
+            }
+
+    class Limited:
+        def pulls(self, numbers, spare=(), *, rest_fallback=True):
+            raise github.GitHubError("上限", status=403, retry_after=60, quota="graphql")
+
+    got = units_queue.read(Hub(), [1, 2, 3, 4, 5, 6], "s")
+
+    assert [got[n].kind for n in range(1, 7)] == ["merged", "queued", "open", "closed", "unknown", "elsewhere"]
+    assert got[1].merge_sha == "m"
+    assert units_queue.read(Limited(), [1], "s") == {1: units_queue.State("unknown", retry_after=60)}
+
+
+@pytest.mark.parametrize(
+    ("kind", "resent", "expected"),
+    [
+        ("merged", False, "done"),
+        ("queued", True, "wait"),
+        ("unknown", False, "wait"),
+        ("open", False, "resend"),
+        ("open", True, "fail"),
+        ("closed", False, "fail"),
+        ("elsewhere", False, "fail"),
+    ],
+)
+def test_the_next_step_for_the_state(kind, resent, expected):
+    assert units_queue.action(units_queue.State(kind), resent) == expected
 
 
 # --- run_stage を通す ---------------------------------------------------------------------------
