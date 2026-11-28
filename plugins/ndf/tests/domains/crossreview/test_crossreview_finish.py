@@ -249,6 +249,7 @@ def _in_process_run(
     *extra: str,
     head: str | None = "a" * 40,
     read: str | None = "o/r#9",
+    saved: str | None = "saved/repo",
 ) -> tuple[int, dict, list]:
     """駆動と PR への記録を差し替えて `run` を打つ（git も相手役も起動しない）。HUB に渡った引数も返す。"""
     state = tmp_path / "state"
@@ -261,7 +262,7 @@ def _in_process_run(
         reader(7)
         return drive.Outcome(review, state / "summary.json", (), (), head, reviewed_pr=read)
 
-    monkeypatch.setattr(cli, "_ready", lambda args: (cfg, "saved/repo"))
+    monkeypatch.setattr(cli, "_ready", lambda args: (cfg, saved))
     monkeypatch.setattr(cli.drive, "drive", fake_drive)
     monkeypatch.setattr(cli, "_report", lambda *a: ([], []))
     monkeypatch.setattr(cli, "HUB", lambda *a: made.append(a) or cli.Hub(None, None, lambda pr: None))
@@ -270,10 +271,15 @@ def _in_process_run(
     return code, got, made
 
 
-def test_run_takes_the_given_repository_over_the_saved_state(
+def test_issue_3780_run_stops_before_the_review_when_the_repository_differs_from_the_saved_state(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`--repo` は保存済みの状態より優先して HUB と子の `gh` へ渡り、読んだ PR は駆動の結果の値で書く。"""
+    code, got, made = _in_process_run(monkeypatch, capsys, tmp_path, "--repo", "o/r")
+    assert got["cause"]["kind"] == "precondition" and "--state-dir" in got["summary"] and not made
+
+
+def test_run_takes_the_given_repository(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--repo` は HUB と子の `gh` へ渡り（状態の対象は大文字小文字を区別せずに照らす）、読んだ PR は駆動の結果の値で書く。"""
     monkeypatch.setenv("GH_REPO", "before/repo")
     pr_out = tmp_path / "reviewed-pr"
     head_out = tmp_path / "reviewed-head"
@@ -288,9 +294,10 @@ def test_run_takes_the_given_repository_over_the_saved_state(
         str(pr_out),
         "--reviewed-out",
         str(head_out),
+        saved="O/R",
     )
     assert (code, got["cause"]["kind"]) == (6, "incomplete") and got["gaps"][0]["kind"] == fin.GAP_HELD
-    assert made == [("o/r", "saved/repo", tmp_path)] and os.environ["GH_REPO"] == "o/r"
+    assert made == [("o/r", "O/R", tmp_path)] and os.environ["GH_REPO"] == "o/r"
     assert pr_out.read_text(encoding="utf-8") == "o/r#9\n" and head_out.read_text(encoding="utf-8") == "a" * 40 + "\n"
 
 
@@ -332,6 +339,7 @@ def test_run_stops_when_the_reviewed_pr_cannot_be_written(
         str(tmp_path / "no-such-dir" / "reviewed-pr"),
         "--reviewed-out",
         str(tmp_path / "head"),
+        saved=None,
     )
     assert got["cause"]["kind"] == "precondition"
 
@@ -385,11 +393,12 @@ def test_the_pull_request_read_before_a_resend_is_still_the_reviewed_one(read: s
 
 
 def test_a_round_of_another_pull_request_is_not_reused() -> None:
-    """読んだ PR の確認を求める起動は、同じ PR を読んだラウンドだけを使う。"""
+    """読んだ PR の確認を求める起動は、同じ PR を読んだラウンドだけを使う。リポジトリ名の大文字小文字は区別しない。"""
     state = {store.ROUNDS: [{"head": "h1", scope_decide.PR: "o/r#9"}]}
     for pr, want in (("o/r#9", "h1"), ("o/r#10", None), (None, "h1")):
         assert scope_decide.read_by_all_head(state, scope_decide.Basis(pr=pr)) == want
     assert scope_decide.read_by_all_head({store.ROUNDS: [{"head": "h1"}]}, scope_decide.Basis(pr="o/r#9")) is None
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(pr="O/R#9")) == "h1"
 
 
 def test_without_the_request_the_push_targets_are_not_read() -> None:
@@ -411,11 +420,13 @@ def test_an_unconfirmed_pull_request_stops_before_the_reviewers(
     monkeypatch.setattr(carry, "reader", lambda cfg, reader_for, warnings: None)
     monkeypatch.setattr(carry, "read_prior", lambda prs, warnings: carry.Prior(pr=pr))
     cfg = SimpleNamespace(check_pr=True, branch="feat/x")
-    run = SimpleNamespace(cfg=cfg, synced_head="h0", sent="h0", read_pr=None, warnings=[])
+    run = SimpleNamespace(cfg=cfg, data={}, synced_head="h0", sent="h0", read_pr=None, warnings=[])
     with pytest.raises(drive.DriveStopped, match=reason) as stopped:
         drive._drive_rounds(run, lambda spec: pytest.fail("相手役を起動した"), None)
     assert stopped.value.kind == "precondition"
     run.cfg.check_pr = False
+    assert reviewed_pr.why_unread(run, pr) is not None  # 状態に対象のリポジトリが無いので、確認が要る
+    run.data = {store.REPO_KEY: "o/r"}
     assert reviewed_pr.why_unread(run, pr) is None
 
 
@@ -428,3 +439,22 @@ def test_the_port_reports_the_pull_request_read_with_the_threads() -> None:
     assert port.read_pr() is None
     port.open_threads()
     assert port.read_pr() == threads.ReadPr("o/r#9", "feat/x", "h0", "fork/r")
+
+
+def test_the_pull_request_stays_identified_when_a_later_thread_page_fails() -> None:
+    """一覧の続きを読めなくても、最初の応答で分かった PR は返し、一覧の失敗は注意にする。"""
+    page = {"pageInfo": {"hasNextPage": True, "endCursor": "c1"}, "nodes": []}
+    pull = {"baseRefName": "main", "headRefName": "feat/x", "headRefOid": "h0", "reviewThreads": page}
+    pull["headRepository"] = {"nameWithOwner": "o/r"}
+
+    def repository(query: str, variables: dict) -> dict:
+        if "c1" in variables.values():
+            raise RuntimeError("続きを読めない")
+        return {"pullRequest": pull}
+
+    port = threads.GitHubPort(SimpleNamespace(repo="o/r", repository=repository), None, 9, RuntimeError)
+    port.comments = lambda: []
+    warnings: list[str] = []
+    prior = carry.read_prior(port, warnings)
+    assert prior.pr == threads.ReadPr("o/r#9", "feat/x", "h0", "o/r") and prior.threads == []
+    assert len(warnings) == 1 and "続きを読めない" in warnings[0]

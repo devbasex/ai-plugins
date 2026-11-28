@@ -595,9 +595,13 @@ def _merge_base(run: _Run, head: str) -> str:
 def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。"""
     unit = scope_decide.unit_id(run.cfg.unit)
-    # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
-    pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
-    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
+    # 確認できた識別子はいつも照らす。確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
+    pr = None if run.read_pr is None else run.read_pr.ident
+    base, focus = _merge_base(run, head), run.cfg.settings.focus
+    number, rewound = run.ref.current_pr, run.ref.current_pr != run.ref.origin_pr
+    return scope_decide.Basis(
+        base, tuple(run.seats), focus, run.mvv, stand_in, unit, pr, number, pr_optional=not run.cfg.check_pr, rewound=rewound
+    )
 
 
 def _confirm_heavy(
@@ -707,6 +711,7 @@ def _round_record(run: _Run, round_no: int, prep: reviewing.Prepared) -> dict[st
     record = {
         "round": round_no,
         "head": prep.head,
+        scope_decide.PR_NUMBER: run.ref.current_pr,
         scope_decide.BASE: prep.base,
         scope_decide.REVIEWERS: list(run.seats),
         scope_decide.FOCUS: list(run.cfg.settings.focus),
@@ -815,8 +820,9 @@ def _reusable(run: _Run) -> bool:
     merge-base の SHA と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も決めていない足すべき内容も無い）。
     比較基点が違えば PR の全差分が変わっている（PR 3944 の r2-1）。読んでいない相手役がいれば全差分から読ませる（r2-2）。
     そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。単位の指示の中身が違えば、今の範囲で
-    まだ読んでいないので回し直す（#4369）。読んだ PR の確認を求める起動は、そのラウンドが読んだ PR が違えば回し直す（#4369）。MVV が違えば、今の MVV に反しないかを
-    まだ確かめていないので回し直す（#4076）。"""
+    まだ読んでいないので回し直す（#4369）。PR を巻き直した後（#3780）と、そのラウンドが読んだ PR が違うとき（#4369。識別子の記録が無い
+    ラウンドは、読んだ PR の確認を求める起動だけが違うとみなす）は回し直す。MVV が違えば、今の MVV に反しないかをまだ
+    確かめていないので回し直す（#4076）。"""
     if store.last_round(run.data).get("verdict") != fin.CONVERGED:
         return False
     head = run.g.rev_parse("HEAD")
@@ -857,11 +863,18 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.Reader
     prs = carry.reader(cfg, reader_for, run.warnings)
     prior = carry.read_prior(prs, run.warnings)
     run.read_pr = reviewed_pr.seen(run, prior.pr)
+    # 保存済みのラウンドがどのリポジトリの PR のものか確かめられないので、後で読んだ PR へ結び直さない（#3780）
+    if store.repo_of(run.data) is None and store.list_of(run.data, store.ROUNDS):
+        raise DriveStopped("precondition", store.target_unknown(cfg.state_dir))
     reason = reviewed_pr.why_unread(run, prior.pr)
     if reason is not None:
         # 読めなかった原因は注意にある。結果へ載る文なので秘密を伏せる
-        detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}", *run.warnings]
+        detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}。直したら同じコマンドを打ち直す", *run.warnings]
         raise DriveStopped("precondition", "\n".join(str(line) for line in run_log.redact(detail)))
+    if store.repo_of(run.data) is None and run.read_pr is not None:
+        # 公開と起票先の確認に使う。head を確かめて読んだ PR のリポジトリだけを書く（#3780）
+        run.data[store.REPO_KEY] = run.read_pr.ident.partition("#")[0]
+        _save(run)
     if carry.carry(run, prior):
         _save(run)
     if carry.restate(run):

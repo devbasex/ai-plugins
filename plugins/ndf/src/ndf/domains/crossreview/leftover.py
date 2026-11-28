@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -15,19 +17,30 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Protocol
 
+from ndf.adapters import git
 from ndf.adapters.github import BOT_SUFFIX, Viewer
 from ndf.adapters.github_pulls import PER_PAGE, Authored, account_id_of
 from ndf.contracts import limits
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import leftover_decide, settings, store, threads
-from ndf.domains.crossreview.leftover_decide import PARKED, Filed, Listed
+from ndf.domains.crossreview import leftover_decide, report_decide, settings, store, threads
+from ndf.domains.crossreview.leftover_decide import CARRIED_URLS, PARKED, Filed, Listed
 
 # 状態ファイルのキー: 起票に使ったアカウント ID・起票の記録のコメントの番号・一覧が上限を超えたときの上限の値
 ACCOUNT_IDS = "issue_account_ids"
 RECORD_ID = "issue_record_id"
 LIST_FULL = "issue_list_full"
+# 起票の記録へ書けなかった URL（識別値 → URL）。次の公開が書き直す
+UNRECORDED = "issue_unrecorded"
+# 起票を見送った理由の状態のキー。見送りの理由はここにだけ持ち、行の `issue_error`（起票の失敗）と分ける。
+# 起票先を GitHub にしない設定で見送ったときは値が null（キーが無い状態と分ける）
+SKIPPED = "issue_skipped"
 # 起票先を GitHub にする `.ndf/project.json` の `issues.primary` の値
 GITHUB = "github"
+# `issues.primary` が未設定（読めない・`unknown` を含む）のときの注意
+UNDECLARED = (
+    f"直さずに残した指摘を起票していない（起票するには {settings.settings_path(Path(), 'project').as_posix()} の "
+    f"issues.primary を {GITHUB} に設定する）"
+)
 # 起票の記録の URL が指す Issue を、GraphQL でまとめて読むときの欄
 ISSUE_FIELDS = "url body createdAt authorAssociation author { __typename login ... on User { databaseId } ... on Bot { databaseId } }"
 
@@ -95,12 +108,50 @@ def primary_of(main: Optional[Path]) -> tuple[Optional[str], Optional[str]]:
         value = issues.get("primary") if isinstance(issues, Mapping) else None
     if isinstance(value, str) and value and value != "unknown":
         return value, None
-    where = settings.settings_path(Path(), "project").as_posix()
-    return None, f"直さずに残した指摘を起票していない（起票するには {where} の issues.primary を {GITHUB} に設定する）"
+    return None, UNDECLARED
 
 
-def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """起票の候補の行（直さずに残した未解決の指摘のうち、起票する種類を持ち、まだ起票していないもの）。"""
+def unconfirmed_target(main: Path, state_repo: Optional[str], make: Callable[[Path], git.Git] = git.Git) -> Optional[str]:
+    """起票先が `main` の設定のリポジトリだと確かめられないときの注意（確かめられれば None）。起票先は状態ファイルの対象の
+    リポジトリ（`state_repo`）だけで決め、無ければ確かめられない。`--repo` との食い違いは、呼び手が公開の前に断る。"""
+    skipped = "直さずに残した指摘を起票していない"
+    if not state_repo:
+        return f"{skipped}（状態ファイルに対象のリポジトリが無く、元の PR のリポジトリを確かめられない）"
+    try:
+        # 主 worktree は分かっているので、リモート名を決めるための `git worktree list` を起動し直さない
+        own = make(main).remote_repo(git.remote_of(main))
+    except (git.GitError, OSError) as exc:
+        return f"{skipped}（メインディレクトリのリポジトリを確かめられない: {exc}）"
+    if own.casefold() != state_repo.casefold():
+        return f"{skipped}（起票先 {state_repo} とメインディレクトリのリポジトリ {own} が違う）"
+    return None
+
+
+def _carried_urls(data: Mapping[str, Any]) -> list[str]:
+    """状態に引き継いだ起票の URL。"""
+    return [url for url in store.list_of(data, CARRIED_URLS) if isinstance(url, str)]
+
+
+def _checked_value(text: str, urls: Sequence[str]) -> str:
+    """照らした指摘の本文と引き継いだ URL の組の値（どちらかが変われば違う値になる）。"""
+    joined = "\n".join([leftover_decide.normalized(text), *sorted(urls)])
+    return hashlib.sha256(joined.encode()).hexdigest()[:12]
+
+
+def unrecorded_urls(data: Mapping[str, Any]) -> dict[str, str]:
+    """起票の記録へ書けていない URL（識別値 → URL）。"""
+    held = data.get(UNRECORDED)
+    return {str(i): url for i, url in held.items() if isinstance(url, str)} if isinstance(held, Mapping) else {}
+
+
+def candidates(data: Mapping[str, Any], *, manual: bool = False) -> list[dict[str, Any]]:
+    """起票の候補の行（直さずに残した未解決の指摘のうち、まだ起票しておらず、起票する種類か引き継いだ起票の URL を持つもの）。
+
+    状態に引き継いだ URL（`CARRIED_URLS`）があれば、どの指摘の Issue かは読むまで分からないので、残した指摘をすべて突き合わせの
+    候補にする。起票する種類を持たない行は突き合わせるだけで、起票はしない（`_Filing.sort`）。同じ指摘と URL の組で照らして Issue が
+    無かった行（`Filed.CHECKED`）は、候補にしない。Issue の本文や作者の権限はこの組に入らないので、利用者が打った公開
+    （`manual`）は照らし直す。"""
+    pool = _carried_urls(data)
     return [
         row
         for row in store.list_of(data, store.FINDINGS)
@@ -109,8 +160,22 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         and row.get("outcome") == fin.UNRESOLVED
         and not row.get(Filed.URL)
         and isinstance(row.get("text"), str)
-        and leftover_decide.files_issue(row)
+        and (
+            leftover_decide.files_issue(row)
+            or row.get(Filed.PRIOR)
+            or (pool and (manual or row.get(Filed.CHECKED) != _checked_value(row["text"], pool)))
+        )
     ]
+
+
+def defer(data: dict[str, Any], rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
+    """起票を見送った理由を状態に残し、候補の行の前の起票の失敗を消す。`reason` が None（起票先を GitHub にしないと
+    設定している）でもキーは null で残し、設定を変えた後の打ち直しが起票できるようにする。理由が変われば公開済みの記録は古いので、打ち直しが公開し直すようにする。"""
+    if data.get(SKIPPED) != reason:
+        data.pop(report_decide.PUBLISHED_KEY, None)
+    data[SKIPPED] = reason
+    for row in rows:
+        row.pop(Filed.ERROR, None)
 
 
 def _str_of(row: Mapping[str, Any], key: str) -> str:
@@ -152,6 +217,7 @@ class _Filing:
     texts: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     urls: list[str] = field(default_factory=list)
     me: int = 0  # 実行しているアカウントの ID
+    unsure_post: bool = False  # 記録の新規の POST が、作られたかどうか分からないまま失敗した
 
     def account_ids(self) -> list[int]:
         return [x for x in store.list_of(self.data, ACCOUNT_IDS) if type(x) is int]
@@ -163,6 +229,8 @@ class _Filing:
         for row in self.rows[ident]:
             row[Filed.URL] = url
             row.pop(Filed.ERROR, None)
+            row.pop(Filed.PRIOR, None)
+            row.pop(Filed.CHECKED, None)
 
     def read(self) -> None:
         """起票の記録を読む。`at` の無い項目（記録を書いた後に中断した）には、コメントの更新時刻を当てる。"""
@@ -177,6 +245,21 @@ class _Filing:
         self.entries = leftover_decide.record_entries(found.body, self.port.issues_url())
         for entry in self.entries.values():
             entry.setdefault("at", found.updated_at)
+        # 書き込みが届いて応答だけ失われた URL は、書き直さない
+        self.hold(
+            {
+                i: url
+                for i, url in unrecorded_urls(self.data).items()
+                if not ((held := self.url_of(i)) and held.casefold() == url.casefold())
+            }
+        )
+
+    def hold(self, pending: dict[str, str]) -> None:
+        """起票の記録へ書けていない URL を状態に残す（無ければ消す）。"""
+        if pending:
+            self.data[UNRECORDED] = pending
+        else:
+            self.data.pop(UNRECORDED, None)
 
     def _trusts(self, author: str, author_id: int, association: str) -> bool:
         return leftover_decide.trusted(author_id, self.me, self.account_ids()) or self.port.trusts(author, association)
@@ -267,35 +350,57 @@ class _Filing:
         entry = self.entries[ident] if ident in self.entries else {}
         return str(entry["url"]) if "url" in entry else None
 
-    def known(self) -> None:
-        """起票の記録に URL がある識別値は、その URL が信用する作者のこの指摘の Issue なら、起票せず行に書く。違えば記録の URL を
-        捨て、作成の結果が分からない識別値として確かめる。読めなければ起票も採用もしない。Issue はまとめて 1 回で読む。"""
-        urls = {ident: url for ident in self.rows if (url := self.url_of(ident))}
-        if not urls:
-            return
-        try:
-            read = self.port.issues(list(urls.values()))
-            usable = {
-                ident
-                for ident, url in urls.items()
-                if (issue := read[url])
-                and leftover_decide.names_finding(issue, ident)
+    def _named(
+        self, ident: str, urls: Sequence[Optional[str]], read: Mapping[str, Optional[Listed]], prs_of: Callable[[str], Sequence[int]]
+    ) -> Optional[str]:
+        """`urls` のうち、指す Issue が信用する作者のこの指摘の Issue である最初の URL。"""
+        text = self.rows[ident][0]["text"]
+        for url in urls:
+            issue = read[url] if url else None
+            if (
+                issue
+                and leftover_decide.names_finding(issue, ident, text, prs_of)
                 and self._trusts(issue.author, issue.author_id, issue.association)
-            }
+            ):
+                return url
+        return None
+
+    def known(self) -> bool:
+        """起票の記録・行の引き継ぎ（`prior_issue`）・状態の引き継ぎ（`CARRIED_URLS`）の URL が信用する作者のこの指摘の Issue なら、
+        起票せず行に書く。起票の記録と行の URL が違えば捨て、起票の記録か作る候補として扱う。読めなければ起票も採用もしない。
+        Issue はまとめて読む（`GitHub.nodes`）。起票の記録に無かった URL を使えば真を返し、呼び手が記録へ書く。"""
+        recorded = {ident: url for ident in self.rows if (url := self.url_of(ident))}
+        carried = {ident: str(row[Filed.PRIOR]) for ident, rows in self.rows.items() for row in rows if row.get(Filed.PRIOR)}
+        urls = carried | recorded
+        pool = _carried_urls(self.data)
+        wanted = list(dict.fromkeys([*urls.values(), *pool]))
+        if not wanted:
+            return False
+        # 引き継いだ Issue の本文の解析は、候補の数によらず本文ごとに 1 回にする
+        prs_of = functools.cache(leftover_decide.issue_prs)
+        try:
+            read = self.port.issues(wanted)
+            usable = {ident: url for ident in self.rows if (url := self._named(ident, [urls.get(ident), *pool], read, prs_of))}
         except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
-            for ident in urls:
+            # 状態の引き継ぎの URL は、どの候補の Issue かが読むまで分からないので、全部の候補を保留する
+            for ident in self.rows if pool else urls:
                 self.fail(ident, _reason(exc))
-            return
-        for ident, url in urls.items():
+            return False
+        for ident, rows in self.rows.items():
+            for row in rows:
+                row.pop(Filed.PRIOR, None)
             if ident in usable:
-                self.done(ident, url)
-            else:
+                self.entries.setdefault(ident, {})["url"] = usable[ident]
+                self.done(ident, usable[ident])
+            elif ident in recorded:
                 del self.entries[ident]["url"]
+        return any(recorded.get(ident) != url for ident, url in usable.items())
 
     def sort(self, manual: bool) -> tuple[list[str], bool]:
         """URL の記録の無い候補を確かめ、作る識別値と、記録に無かった URL を見つけたかを返す。作成を試みた記録のある識別値は、
-        扱う Issue が無いと確かめられたときだけ作る。"""
-        pending = [i for i in self.rows if not self.url_of(i)]
+        扱う Issue が無いと確かめられたときだけ作る。引き継いだ URL を確かめられなかった識別値と、起票する種類を持たない
+        識別値は作らない。"""
+        pending = [i for i in self.rows if not self.url_of(i) and i not in self.errors]
         unknown = [i for i in pending if i in self.entries]
         if pending:
             self.redact(pending)
@@ -307,7 +412,8 @@ class _Filing:
             self.done(ident, url)
         if len(found) + len(absent) == len(unknown):
             self.data.pop(LIST_FULL, None)
-        return [i for i in pending if i not in self.entries or i in absent], bool(found)
+        fresh = [i for i in pending if i not in self.entries or i in absent]
+        return [i for i in fresh if any(map(leftover_decide.files_issue, self.rows[i]))], bool(found)
 
     def write(self) -> str:
         """起票の記録を書き、GitHub が記録した更新時刻を返す。"""
@@ -324,13 +430,18 @@ class _Filing:
         書けなければ None（作らない）。"""
         self.data[ACCOUNT_IDS] = list(dict.fromkeys([*self.account_ids(), self.me]))
         self.save()
+        before = {ident: self.entries[ident] for ident in idents if ident in self.entries}
         for ident in idents:
             self.entries[ident] = {}
         try:
             at = self.write()
         except Exception as exc:  # noqa: BLE001 ネットワーク: 記録を書けないまま作ると、打ち直しで 2 件になる
+            self.unsure_post = self.record_id is None and not _refused(exc)
             for ident in idents:
                 self.fail(ident, f"起票の記録を書けない: {_reason(exc)}")
+                # 作っていない識別値は、結果の書き込みに試みた記録として残さない
+                del self.entries[ident]
+            self.entries.update(before)
             return None
         self.save()
         return at
@@ -356,33 +467,62 @@ class _Filing:
         except Exception as exc:  # noqa: BLE001 ネットワーク: 記録を読めなければ、どの候補も起票しない
             for ident in self.rows:
                 self.fail(ident, f"起票の記録を読めない: {_reason(exc)}")
-            return self._finish()
-        self.known()
+            notes = self._finish()
+            return notes if self.rows else [f"起票の記録に結果を書けなかった: 起票の記録を読めない: {_reason(exc)}"]
+        if not self.rows:
+            return self._close(False)
+        adopted = self.known()
         try:
             fresh, found = self.sort(manual)
         except Exception as exc:  # noqa: BLE001 ネットワーク: 伏せ字か作者の権限の確かめに失敗すれば起票しない
             for ident in self.rows:
                 if not self.url_of(ident):
                     self.fail(ident, _reason(exc))
-            return self._finish()
+            return self._close(adopted)
         at = self.announce(fresh) if fresh else None
         if at is not None:
             self.create(fresh, at)
-        # 結果の書き込み（作ったとき、または作るものが無く、検索と一覧で見つけた URL を記録へ足すとき）
-        if at is not None or (found and not fresh):
+        # 結果の書き込み（作ったとき、または引き継ぎ・検索・一覧で見つけた URL を記録へ足すとき。作る前の書き込みに失敗しても、
+        # 見つけた URL は書くか、書けなければ状態に残す）。引き継いだ URL も書くのは、巻き直し後の PR の別の保存先が、
+        # この指摘の出ない記録のコメントの後でも引けるようにするためである
+        return self._close(at is not None or bool(found or adopted))
+
+    def _close(self, record: bool) -> list[str]:
+        """`record` か、前に書けなかった URL があれば、起票の記録へ結果を書き、注意を返す。書けなければ URL を状態に残す
+        （行は起票済みで候補から外れるので、次の公開はこれを見て書き直す）。記録の新規の POST の結果が分からないときは、もう一度
+        POST すると記録が 2 つになりうるので書かず、URL を状態に残して、記録を読み直す次の公開に任せる。"""
+        pending = unrecorded_urls(self.data)
+        for ident, url in pending.items():
+            self.entries.setdefault(ident, {}).setdefault("url", url)
+        if (record or pending) and self.unsure_post:
+            self.hold({i: url for i in [*pending, *self.rows] if (url := self.url_of(i))})
+        elif record or pending:
             try:
                 self.write()
-            except Exception as exc:  # noqa: BLE001 ネットワーク: 次の公開が、記録の識別値を検索と一覧で確かめる
+            except Exception as exc:  # noqa: BLE001 ネットワーク: 次の公開が書き直す
+                self.hold({i: url for i in [*pending, *self.rows] if (url := self.url_of(i))})
                 return [*self._finish(), f"起票の記録に結果を書けなかった: {_reason(exc)}"]
+            self.hold({})
         return self._finish()
 
     def _finish(self) -> list[str]:
-        """失敗を行に書いて保存し、理由ごとにまとめた注意を返す。"""
+        """失敗を行に書いて保存し、理由ごとにまとめた注意を返す。失敗の無い行は前の失敗を消し、起票しない行で Issue が
+        無かったものには、照らした組を残す。"""
         reasons: dict[str, list[str]] = {}
         for ident, reason in self.errors.items():
             for row in self.rows[ident]:
                 row[Filed.ERROR] = reason
+                # 照らし直しに失敗した行は、次の公開でも候補にする
+                row.pop(Filed.CHECKED, None)
                 reasons.setdefault(reason, []).append(str(row.get("id")))
+        pool = _carried_urls(self.data)
+        for ident, rows in self.rows.items():
+            if ident in self.errors:
+                continue
+            for row in rows:
+                row.pop(Filed.ERROR, None)
+                if pool and not row.get(Filed.URL) and not leftover_decide.files_issue(row):
+                    row[Filed.CHECKED] = _checked_value(row["text"], pool)
         self.save()
         return [f"指摘 {'・'.join(ids)} を起票できなかった: {reason}" for reason, ids in reasons.items()]
 
@@ -392,18 +532,17 @@ def file_issues(
     ref: store.StateRef,
     port: Port,
     save: Callable[[], None],
-    primary: Optional[str],
     *,
     manual: bool = False,
 ) -> list[str]:
-    """起票の候補を起票し、行の `issue`・`issue_error` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて
-    注意を返す。`primary` が `github` でないか候補が無ければ、GitHub を呼ばない。`manual` は利用者が打った公開である。
+    """起票の候補を起票し、行の `issue`・`issue_error`・`prior_issue` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full`・
+    `issue_unrecorded` を書いて注意を返す。候補も記録へ書けていない URL も無ければ GitHub を呼ばない。呼び手は起票先が `github` のときだけ呼ぶ。`manual` は利用者が打った公開である。
 
     呼び手は、今の PR の番号と元の PR の番号の公開のロック（同じ番号なら 1 回）を持つ。"""
     rows: dict[str, list[dict[str, Any]]] = {}
-    for row in candidates(data):
+    for row in candidates(data, manual=manual):
         rows.setdefault(leftover_decide.identity(ref.origin_pr, row["text"]), []).append(row)
-    if primary != GITHUB or not rows:
+    if not rows and not unrecorded_urls(data):
         return []
     return _Filing(data, ref, port, save, rows).run(manual)
 

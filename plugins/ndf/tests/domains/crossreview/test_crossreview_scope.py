@@ -31,6 +31,40 @@ def _with_merge_base(data, sha: str):
     return data
 
 
+def test_issue_3780_1_a_round_before_the_pr_was_remade_is_not_an_origin() -> None:
+    """巻き直しは状態の今の番号で見分けるので、PR を読めなくても前の PR のラウンドを使わない。"""
+    record = {"round": 1, "head": "h1", scope_decide.PR_NUMBER: 7}
+    state = {"pr": 7, "current_pr": 9, "rounds": [record]}
+    now = scope_decide.Basis(number=scope_decide.current_number(state))
+    assert scope_decide.origin_record(state, now) is None and scope_decide.read_by_all_head(state, now) is None
+    del state["current_pr"]
+    same = scope_decide.Basis(number=scope_decide.current_number(state))
+    assert scope_decide.origin_record(state, same) == record
+
+
+@pytest.mark.parametrize(
+    ("recorded", "used"),
+    [({scope_decide.PR: "o/r#7"}, False), ({scope_decide.PR: "o/r#9"}, True), ({}, False)],
+    ids=["before", "after", "unknown"],
+)
+def test_issue_3780_1_a_legacy_round_of_a_remade_pr_is_judged_by_the_pr_it_read(recorded: dict, used: bool) -> None:
+    record = {"round": 1, "head": "h1", **recorded}
+    state = {"pr": 7, "current_pr": 9, "rounds": [record]}
+    now = scope_decide.Basis(number=scope_decide.current_number(state), rewound=scope_decide.is_rewound(state))
+    assert (scope_decide.origin_record(state, now) is not None) is used
+
+
+@pytest.mark.parametrize(
+    ("recorded", "optional", "used"),
+    [({scope_decide.PR: "fork/r#7"}, True, False), ({}, True, True), ({}, False, False)],
+    ids=["other-repo", "unrecorded", "unrecorded-checked"],
+)
+def test_issue_3780_1_confirmed_pr_identities_are_always_compared(recorded: dict, optional: bool, used: bool) -> None:
+    state = {"rounds": [{"round": 1, "head": "h1", **recorded}]}
+    now = scope_decide.Basis(pr="o/r#7", pr_optional=optional)
+    assert (scope_decide.read_by_all_head(state, now) is not None) is used
+
+
 def test_sections_skip_headings_inside_code_blocks() -> None:
     text = "# 題\n\n```\n# コメント\n```\n## セクション A\n"
     assert scope_decide.sections_of("d.md", text) == ["d.md#題", "d.md#セクション A"]

@@ -133,9 +133,20 @@ def record_current(ref: StateRef, current_pr: int) -> StateRef:
 
 def state_repo(ref: StateRef) -> Optional[str]:
     """状態ファイルが持つ対象のリポジトリ。状態ファイルが無ければ None。"""
-    if not ref.path.is_file():
-        return None
-    value = read_object(ref.path).get(REPO_KEY)
+    return repo_of(read_object(ref.path)) if ref.path.is_file() else None
+
+
+def target_unknown(state_dir: Path) -> str:
+    """状態に対象のリポジトリ（`target_repo`）が無くて止めるときの理由と案内。"""
+    return (
+        f"状態の保存先 {state_dir} に対象のリポジトリ target_repo が無く、どの PR のレビューか確かめられない。"
+        "今の保存先は残したまま、別の --state-dir を指定する"
+    )
+
+
+def repo_of(data: Mapping[str, Any]) -> Optional[str]:
+    """状態が持つ対象のリポジトリ。無いか、空でない文字列でなければ None（未確認）。"""
+    value = data.get(REPO_KEY)
     return value if isinstance(value, str) and value else None
 
 

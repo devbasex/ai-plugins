@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, NamedTuple, Optional
 
@@ -21,6 +21,12 @@ from ndf.domains.records import mvv_decide
 
 # 直さずに残す指摘の行の欄。修正担当へ渡さず、次のラウンドを始める理由にも数えない
 PARKED = "parked"
+# 残すと決めたときに照らした出し直しに、行があったかの記録（結果の `decisions` の理由に使う）。行の `line` は初出時の位置が残る
+# ことがあるので、理由の元にしない
+PARKED_ON_LINE = "parked_on_line"
+# 状態ファイルのキー。前の実行の記録のコメントから引き継いだ、直さずに残した指摘の起票の URL の並び。記録の本文は伏せてあり、
+# 伏せる値は実行する環境で変わるので、本文でなく Issue の目印で指摘と照らす
+CARRIED_URLS = "issue_carried_urls"
 # 指摘の行番号が、その位置の基準のコミットの PR の差分に載らないことの記録。行番号は起票の場所に使うので行に残し、投稿の位置
 # （`location`）だけをファイルにする
 OFF_DIFF = "off_diff"
@@ -33,6 +39,8 @@ _ENTRIES_MARK = f"<!-- {_ENTRY}:cross-review-leftover-entries "
 # 起票の記録に書く識別値（`identity`）と時刻（GitHub の ISO 8601）の形
 _IDENT = re.compile(r"[0-9a-f]{12}")
 _AT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})")
+# 記録のコメントに載せ、読み戻す起票の URL の形（認証情報・クエリ・断片を持たない）
+_ISSUE_URL = re.compile(r"https://github\.com/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/[1-9][0-9]*")
 # 本文の先頭の `<名前>:<行>`
 _LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
 
@@ -133,6 +141,10 @@ class Filed(StrEnum):
 
     URL = "issue"
     ERROR = "issue_error"
+    # 別の保存先から引き継いだ、まだ指す Issue を確かめていない URL
+    PRIOR = "prior_issue"
+    # 起票しない行を引き継いだ URL と照らし、その指摘の Issue が無かったときの、指摘と URL の組の値
+    CHECKED = "issue_checked"
 
 
 class Listed(NamedTuple):
@@ -145,6 +157,15 @@ class Listed(NamedTuple):
     created_at: str
     is_pull: bool
     author_id: int = 0
+
+
+def issue_url(value: object, repo: Optional[str] = None) -> Optional[str]:
+    """`value` が正規の形の Issue の URL ならその値、違えば None。`repo`（`<所有者>/<リポジトリ>`）を渡せば、そのリポジトリの
+    Issue だけを通す。記録のコメントの一覧は伏せ字を当てずに URL を載せるので、書く側と読む側の両方がこれを通す。"""
+    found = _ISSUE_URL.fullmatch(value) if isinstance(value, str) else None
+    if found is None or (repo and found.group("repo").casefold() != repo.casefold()):
+        return None
+    return found.group(0)
 
 
 def files_issue(row: Mapping[str, Any]) -> bool:
@@ -219,9 +240,29 @@ def matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool:
     return re.search(rf"/pull/{int(origin_pr)}(?!\d)", _prose(listed.body)) is not None
 
 
-def names_finding(listed: Listed, ident: str) -> bool:
-    """起票の記録にある URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。"""
-    return not listed.is_pull and issue_mark(ident) in listed.body
+def issue_prs(body: str) -> tuple[int, ...]:
+    """引用とコードブロックを除いた本文にある PR の URL の番号。"""
+    return tuple(dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", _prose(body))))
+
+
+def _has_mark(body: str, ident: str) -> bool:
+    """引用とコードブロックの外に、目印だけの行があるか。目印の文字列を含まない本文は解析しない。"""
+    mark = issue_mark(ident)
+    return mark in body and any(line.strip() == mark for line in _lines_of(_prose(body)))
+
+
+def names_finding(listed: Listed, ident: str, text: str, prs_of: Callable[[str], Sequence[int]] = issue_prs) -> bool:
+    """起票の記録か引き継ぎの URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。
+    引用かコードブロックに転載した目印は数えない。
+
+    目印は、今の識別値 `ident` か、本文の PR の URL の番号（起票時の元の PR）と指摘の本文 `text` の識別値を受ける。PR を
+    巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。
+    本文の PR の番号の抽出（`prs_of`）は `ident` の目印が無いときだけする。"""
+    if listed.is_pull:
+        return False
+    if _has_mark(listed.body, ident):
+        return True
+    return any(_has_mark(listed.body, identity(pr, text)) for pr in prs_of(listed.body))
 
 
 def _issue_number(url: str, issues_url: str) -> Optional[int]:
@@ -271,3 +312,55 @@ def record_entries(body: str, issues_url: str) -> dict[str, dict[str, Any]]:
     if not isinstance(raw, dict):
         return {}
     return {ident: _entry(stored, issues_url) for ident, stored in raw.items() if isinstance(stored, dict)}
+
+
+# --- 結果への載せ方（#3780） -------------------------------------------------------------
+
+
+def _left(row: Mapping[str, Any]) -> bool:
+    """直さずに残して未解決の指摘か。"""
+    return bool(row.get(PARKED)) and row.get("outcome") == mvv_decide.REVIEW_UNRESOLVED
+
+
+def result_fields(row: Mapping[str, Any], comment_url: Optional[str]) -> dict[str, str]:
+    """結果の `items` に足す残し方（`disposition` と `url`。残していない指摘は空）。起票できていなければ記録のコメント
+    `comment_url` を指し、それも書けていなければ `url` を足さない。"""
+    if not _left(row):
+        return {}
+    if url := row.get(Filed.URL):
+        return {"disposition": "issue", "url": url}
+    return {"disposition": "comment", **({"url": comment_url} if comment_url else {})}
+
+
+def summary_line(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    """要約に足す残した指摘の数（無ければ None）。"""
+    left = [r for r in rows if _left(r)]
+    if not left:
+        return None
+    return f"残した指摘 {len(left)}（起票 {sum(1 for r in left if r.get(Filed.URL))}）"
+
+
+def decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> list[dict[str, str]]:
+    """プロジェクト MVV に反する残した指摘を、承認する人が確かめる判断にする。"""
+    out = []
+    for row in rows:
+        item = row.get(mvv_decide.REVIEW_ITEM)
+        if not _left(row) or not item:
+            continue
+        where = result_fields(row, comment_url)
+        on_line = row.get(PARKED_ON_LINE)
+        if on_line is None:
+            # 照らした位置の記録が無い行は、行とファイルのどちらで確かめたかを言わない
+            why = "2 ラウンド目以降の線引きで残した major（照らした位置の記録が無い）"
+        elif on_line:
+            why = "2 ラウンド目以降の、変えていない行への major"
+        else:
+            # 照らした出し直しに行が無いので、指したファイルが変わっていないことだけを確かめた（`proceeds`）
+            why = "2 ラウンド目以降の、行を特定していない major（指したファイルは変えていない）"
+        out.append(
+            {
+                "decision": f"指摘 {row.get('id')} は {item} に反するが、直さずに残した",
+                "basis": f"{why}（{where['url'] if 'url' in where else '記録のコメントを書けていない'}）",
+            }
+        )
+    return out

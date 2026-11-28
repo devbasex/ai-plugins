@@ -93,7 +93,8 @@ def _implementation(
     g: git.Git, data: Mapping[str, Any], seats: tuple[str, ...], current: changes.Range
 ) -> tuple[scope_decide.Scope, list[str]]:
     """実装の PR の範囲と注意（`run` と同じ `round_scope.read_since`。#3780）。"""
-    since = round_scope.read_since(g, data, scope_decide.Basis(reviewers=seats), current)
+    number, rewound = scope_decide.current_number(data), scope_decide.is_rewound(data)
+    since = round_scope.read_since(g, data, scope_decide.Basis(reviewers=seats, number=number, rewound=rewound), current)
     if since is not None and not since.comparable:
         return scope_decide.Scope(scope_decide.FULL, None, ()), [round_scope.UNCOMPARABLE]
     prev = None if since is None else since.previous.head
@@ -122,7 +123,9 @@ def decide(
         return _implementation(g, data, resolved.seats.names, changes.Range(merge_base, "HEAD"))
     now, unsure = _local_mvv(wt, based.mvv_ref)
     unit = scope_decide.unit_id(resolved.unit)
-    basis = scope_decide.Basis(merge_base, resolved.seats.names, resolved.settings.focus, now, unit=unit)
+    number = scope_decide.current_number(data)
+    seats, focus, rewound = resolved.seats.names, resolved.settings.focus, scope_decide.is_rewound(data)
+    basis = scope_decide.Basis(merge_base, seats, focus, now, unit=unit, number=number, rewound=rewound)
     prev, reviewed = scope_decide.read_by_all_head(data, basis), scope_decide.reviewed_of(data, basis.mvv)
     found = scope_decide.review_scope(True, len(rounds) + 1, prev, sections, reviewed)
     got = round_scope.descended(g, found, "HEAD")

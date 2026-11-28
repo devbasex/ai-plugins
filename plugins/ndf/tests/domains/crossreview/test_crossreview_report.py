@@ -4,23 +4,42 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Iterator
+import types
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, Optional
 
 import pytest
 
-from ndf.adapters import publish
+from ndf.adapters import git, publish
 from ndf.adapters.github import GitHubError, Viewer
 from ndf.contracts import result
+from ndf.core.converge import location
 from ndf.domains.crossreview import finish_decide as fin
-from ndf.domains.crossreview import journal, report_decide, store, threads, verify_decide
+from ndf.domains.crossreview import journal, leftover, leftover_decide, report_decide, store, threads, verify_decide
 from ndf.domains.records.mvv import Snapshot
 
+from ._repos import BRANCH, Repos, run_cli, sh
 from .conftest import FakePort
+from .test_crossreview_leftover import _rounds, _said
+from .test_crossreview_leftover_issues import FakeGitHub
 from .test_crossreview_run import PR, Fake, _run
 
 HEAD1, HEAD2, FIX1 = "a" * 40, "b" * 40, "c" * 40
+
+
+def _left_state() -> dict:
+    """直さずに残した指摘が 2 件（起票する種類を持つものと持たないもの）の状態ファイル。"""
+    row = {"by": "codex", "round": 2, "outcome": fin.UNRESOLVED, "severity": "major", "path": "a.py", "line": 5, "parked": True}
+    return {
+        "pr": 7,
+        "target_repo": "o/r",
+        "rounds": [{"round": 2, "head": HEAD2, "verdict": fin.CONVERGED}],
+        "findings": [
+            {**row, "id": "r2-1", "text": "古い行で値を落とす", "check": {"tracks": ["delivered"]}, "mvv": "Value 6"},
+            {**row, "id": "r2-2", "text": "古い行の書き方"},
+        ],
+    }
 
 
 def _state() -> dict:
@@ -188,14 +207,146 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
 
     from ndf.domains.crossreview import cli
 
-    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort(), lambda pr: FakePort()))
+    monkeypatch.setattr(cli, "HUB", lambda *a: cli.Hub(refuse, lambda pr: FakePort(), lambda pr: FakePort(), repo="o/r"))
     fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert (code, got["status"]) == (0, "ok")
     assert any("記録を書けなかった" in w and "ndf cross-review report" in w for w in got["warnings"])
 
 
-def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, hub) -> None:
+@pytest.mark.parametrize(
+    ("state_repo", "own", "refused"),
+    [
+        pytest.param("o/r", "O/R", False, id="same"),
+        pytest.param(None, "o/r", True, id="no-target"),
+        pytest.param("o/r", "me/other", True, id="other-main"),
+        pytest.param("o/r", None, True, id="main-unreadable"),
+    ],
+)
+def test_issue_3780_2_filing_needs_the_settings_of_the_target_repository(
+    state_repo: Optional[str], own: Optional[str], refused: bool
+) -> None:
+    def remote_repo(remote: str) -> str:
+        if own is None:
+            raise git.GitError("リモートが無い")
+        return own
+
+    note = leftover.unconfirmed_target(Path("main"), state_repo, lambda p: types.SimpleNamespace(remote_repo=remote_repo))
+    assert (note is not None) is refused
+
+
+@pytest.mark.parametrize(
+    ("state", "target", "repo_arg"),
+    [
+        pytest.param(_left_state, "acme/repo", "acme/other", id="differs"),
+        pytest.param(_left_state, None, "o/r", id="unconfirmed"),
+        pytest.param(_state, None, "o/r", id="unconfirmed-without-candidates"),
+    ],
+)
+def test_issue_3780_2_report_writes_nothing_without_a_matching_target(
+    tmp_path: Path, capsys, hub, state: Callable[[], dict], target: Optional[str], repo_arg: str
+) -> None:
+    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**state(), "target_repo": target})
+    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7", "--repo", repo_arg)
+    assert (code != 0, got["cause"]["kind"]) == (True, "precondition") and "記録を公開していない" in got["cause"]["detail"]
+    assert (hub.made, hub.comments, hub.port.opened, hub.port.resolved) == (0, [], [], [])
+
+
+@pytest.mark.parametrize("changed", [{"target_repo": "acme/other"}, {"current_pr": 9}])
+def test_report_writes_nothing_when_the_state_read_in_the_lock_differs_from_the_connection(
+    tmp_path: Path, capsys, monkeypatch, hub, changed: dict
+) -> None:
+    from ndf.domains.crossreview import cli
+
+    path, state = tmp_path / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"}
+    store.write_object(path, state)
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        store.write_object(path, {**state, **changed})
+        yield
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7")
+    assert code != 0 and "接続先" in got["cause"]["detail"]
+    assert (hub.comments, hub.port.opened, hub.port.resolved) == ([], [], [])
+
+
+def test_issue_3780_2_report_writes_nothing_when_the_state_read_in_the_lock_lost_the_target(
+    tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    from ndf.domains.crossreview import cli
+
+    path, changed = tmp_path / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": None}
+    store.write_object(path, _left_state())
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        store.write_object(path, changed)
+        yield
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7")
+    assert code != 0 and "target_repo" in got["cause"]["detail"]
+    assert (hub.comments, hub.port.opened, hub.port.resolved) == ([], [], [])
+    assert store.read_object(path) == changed
+
+
+def test_issue_3780_2_run_saves_the_repository_of_the_confirmed_pr(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    _run(capsys, monkeypatch, fake, wt)
+    assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
+
+
+@pytest.mark.parametrize("unconfirmed", [None, ""])
+def test_issue_3780_2_run_fills_an_unconfirmed_repository(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, hub, unconfirmed: Optional[str]
+) -> None:
+    read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    store.write_object(fake.state_dir / store.STATE_NAME.format(pr=PR), {"pr": PR, "target_repo": unconfirmed})
+    _run(capsys, monkeypatch, fake, wt)
+    assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_issue_3780_2_run_does_not_bind_saved_rounds_to_the_read_repository(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, hub, readable: bool
+) -> None:
+    """対象のリポジトリの無い保存済みのラウンドは、同じブランチと head でも別のリポジトリのものかもしれないので、PR を読めるかに
+    関係なく、結び直さずに止める。保存先は残し、別の保存先を案内する。"""
+    read = threads.ReadPr(f"other/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "other/r")
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read if readable else None)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    ref = store.state_pr(fake.state_dir, PR)
+    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "head": read.head}]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert code != 0 and got["cause"]["kind"] == "precondition"
+    assert "target_repo" in got["cause"]["detail"] and "別の --state-dir" in got["cause"]["detail"]
+    assert store.state_repo(ref) is None and not fake.calls and hub.comments == [] and ref.path.is_file()
+
+
+def test_issue_3780_2_run_resumes_with_the_same_command_after_the_pr_was_not_read(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    """対象の無い状態で PR を読めなければ、相手役を起動せず、何も公開せずに止める。読めるようになれば同じ保存先で始まる。"""
+    read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
+    monkeypatch.setattr(hub.port, "read_pr", lambda: None)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert code != 0 and got["cause"]["kind"] == "precondition"
+    assert not fake.calls and (hub.comments, hub.port.opened) == ([], [])
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    code, _ = _run(capsys, monkeypatch, fake, wt)
+    assert code == 0 and fake.calls and store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
+
+
+def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    # 起票の候補が無ければ、主 worktree を調べない
+    monkeypatch.setattr(location, "main_worktree", lambda g: pytest.fail("主 worktree を調べた"))
     state_dir = tmp_path / "st"
     store.write_object(state_dir / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"})
     from ndf.domains.crossreview import cli
@@ -534,3 +685,229 @@ def test_issue_4363_a_lowered_finding_shows_the_raised_severity_and_only_the_fix
     assert "| minor（確認の前は major） |" in body
     assert "| 判定役の確認で成り立たないと分かった |" in body
     assert private not in body
+
+
+# --- 直さずに残した指摘（#3780） ---------------------------------------------------------------
+
+
+def test_issue_3780_2_the_table_and_the_list_show_how_a_finding_was_left() -> None:
+    data = _left_state()
+    url = "https://github.com/o/r/issues/100"
+    data["findings"][0]["issue"] = url
+    body = report_decide.comment(7, data, fin.CONVERGED)
+    rows = {line.split("|")[1].strip(): line for line in body.splitlines() if line.startswith("| r2-")}
+    # 公開先の Issue は、伏せ字が所有者名を置き換えても開ける `#番号` で出す
+    assert "#100" in rows["r2-1"] and url not in rows["r2-1"] and "記録のみ" in rows["r2-2"]
+    assert "Value 6" in rows["r2-1"] and "MVV" not in rows["r2-2"]
+    assert "未解決 0" in body
+    listed = {i["id"]: (i.get("parked"), i.get("issue")) for i in report_decide.open_items(body)}
+    assert listed == {"r2-1": (True, url), "r2-2": (True, None)}
+
+
+def _filing(monkeypatch, hub, repos: Repos, primary: Optional[str] = "github") -> FakeGitHub:
+    """起票先を偽の GitHub にし、打った場所をメインディレクトリ（リモートは状態ファイルの対象）にする。"""
+    sh(repos.main, "remote", "set-url", "origin", "https://github.com/o/r.git")
+    github = FakeGitHub()
+    port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+    hub.leftovers = lambda pr: port
+    if primary is not None:
+        (repos.main / ".ndf").mkdir(exist_ok=True)
+        (repos.main / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": primary}}), encoding="utf-8")
+    monkeypatch.chdir(repos.main)
+    return github
+
+
+def _report_of(state_dir: Path, capsys, pr: int = 7) -> dict:
+    code, got = run_cli(capsys, "report", "--state-dir", str(state_dir), "--pr", str(pr))
+    assert result.errors(got, code) == [] and code == 0, got
+    return got
+
+
+def test_issue_3780_2_report_files_once_after_a_failed_creation(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    github = _filing(monkeypatch, hub, repos)
+    state_dir = tmp_path / "st"
+    path = state_dir / store.STATE_NAME.format(pr=7)
+    store.write_object(path, _left_state())
+    github.fail[("POST", "repos/o/r/issues")] = 422
+    got = _report_of(state_dir, capsys)
+    assert any("r2-1" in w for w in got["warnings"]) and store.read_object(path)["findings"][0]["issue_error"]
+    assert "記録のみ" in hub.comments[-1][2]
+    for _ in range(2):
+        _report_of(state_dir, capsys)
+    assert len(github.issues) == 1 and f"起票: #{github.issues[0]['number']}）" in hub.comments[-1][2]
+    assert store.read_object(path)["findings"][0]["issue"] == github.issues[0]["html_url"]
+
+
+@pytest.mark.parametrize(
+    ("primary", "noted"), [pytest.param("markdown", False, id="not-github"), pytest.param(None, True, id="not-declared")]
+)
+def test_issue_3780_2_nothing_is_filed_unless_the_primary_is_github(
+    repos: Repos, tmp_path: Path, capsys, monkeypatch, hub, primary: Optional[str], noted: bool
+) -> None:
+    github = _filing(monkeypatch, hub, repos, primary)
+    state_dir = tmp_path / "st"
+    path = state_dir / store.STATE_NAME.format(pr=7)
+    store.write_object(path, _left_state())
+    got = _report_of(state_dir, capsys)
+    assert github.calls == [] and any("issues.primary" in w for w in got.get("warnings", ())) is noted
+    # 未設定の見送りは理由を、GitHub にしない設定の見送りは null を状態にだけ残す
+    state = store.read_object(path)
+    assert (state["issue_skipped"] is not None) is noted and "issue_error" not in state["findings"][0]
+
+
+def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_skipped(tmp_path: Path, monkeypatch, hub) -> None:
+    from ndf.domains.crossreview import cli
+
+    github = FakeGitHub()
+    port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+    hub.leftovers, hub.clean = lambda pr: port, list
+    checked: list[str] = []
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: checked.append("target"))
+    state_dir = tmp_path / "st"
+    store.write_object(state_dir / store.STATE_NAME.format(pr=7), _left_state())
+    cfg = types.SimpleNamespace(state_dir=state_dir, pr=7, main=tmp_path)
+    got = types.SimpleNamespace(review=types.SimpleNamespace(findings=[], final=fin.CONVERGED), warnings=[], reused=True)
+
+    def rerun() -> list[str]:
+        return cli._report(cfg, got, lambda: cli.HUB(None, "o/r", tmp_path))[1]
+
+    rerun()
+    warnings = rerun()
+    assert len(hub.comments) == 1 and any("issues.primary" in w for w in warnings) and checked == []
+    # 設定を直せば公開し直して起票する。作成に失敗した後の打ち直しは、公開の中で 1 回だけ確認する
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
+    github.fail[("POST", "repos/o/r/issues")] = 422
+    rerun()
+    # 未設定から github への変更は確認せずに公開し直し、リモートの確認は起票の前の 1 回だけ
+    assert checked == ["target"]
+    checked.clear()
+    rerun()
+    assert checked == ["target"] and len(hub.comments) == 3 and len(github.issues) == 1
+
+
+@pytest.mark.parametrize("before", ["markdown", "remote-differs"])
+def test_issue_3780_a_rerun_files_after_the_skip_is_resolved(tmp_path: Path, monkeypatch, hub, before: str) -> None:
+    from ndf.domains.crossreview import cli
+
+    github = FakeGitHub()
+    port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+    hub.leftovers, hub.clean = lambda pr: port, list
+    note: list[Optional[str]] = ["リモートが違う" if before == "remote-differs" else None]
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: note[0])
+    state_dir = tmp_path / "st"
+    store.write_object(state_dir / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": "o/r"})
+    cfg = types.SimpleNamespace(state_dir=state_dir, pr=7, main=tmp_path)
+    got = types.SimpleNamespace(review=types.SimpleNamespace(findings=[], final=fin.CONVERGED), warnings=[], reused=True)
+    (tmp_path / ".ndf").mkdir()
+    settings_file = tmp_path / ".ndf" / "project.json"
+    settings_file.write_text(json.dumps({"issues": {"primary": "markdown" if before == "markdown" else "github"}}), encoding="utf-8")
+
+    def rerun() -> None:
+        cli._report(cfg, got, lambda: cli.HUB(None, "o/r", tmp_path))
+
+    rerun()
+    rerun()
+    assert len(hub.comments) == 1 and github.issues == []
+    note[0] = None
+    settings_file.write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
+    rerun()
+    assert len(hub.comments) == 2 and len(github.issues) == 1
+
+
+def test_filing_skipped_after_a_rewind_takes_no_lock_of_the_origin_pr(tmp_path: Path, monkeypatch, hub) -> None:
+    from ndf.domains.crossreview import cli
+
+    hub.leftovers, hub.clean = lambda pr: pytest.fail("起票の口を作った"), list
+    locked: list[int] = []
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        locked.append(pr)
+        yield
+
+    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**_left_state(), "current_pr": 9})
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    monkeypatch.setattr(cli, "_main_of_cwd", lambda: tmp_path)
+    assert cli.main(["report", "--state-dir", str(tmp_path), "--pr", "9"]) == 0
+    assert locked == [9] and len(hub.comments) == 1
+
+
+def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    github = _filing(monkeypatch, hub, repos)
+    locked: list[int] = []
+
+    @contextlib.contextmanager
+    def lock(pr: int) -> Iterator[None]:
+        locked.append(pr)
+        yield
+
+    from ndf.domains.crossreview import cli
+
+    monkeypatch.setattr(cli, "HUB", lambda *a: hub.make(*a)._replace(publishing=lock))
+    state_dir = tmp_path / "st"
+    store.write_object(state_dir / store.STATE_NAME.format(pr=7), {**_left_state(), "current_pr": 9})
+    _report_of(state_dir, capsys, 9)
+    assert locked == [9, 7] and len(github.issues) == 1
+
+
+def test_issue_3780_2_results_carry_how_each_finding_was_left() -> None:
+    from ndf.domains.crossreview import cli
+
+    data, url = _left_state(), "https://github.com/o/r/issues/100"
+    data["findings"][0]["issue"] = url
+    record = "https://github.com/o/r/pull/7#issuecomment-1"
+    items = [{"kind": "finding", "id": f["id"], "outcome": f["outcome"]} for f in data["findings"]]
+    items.append({"kind": "comment", "number": 7, "url": record})
+    verdict = cli._with_leftovers(fin.Verdict(fin.OK, None, "要約", (), (), ()), items, data)
+    assert [(i.get("disposition"), i.get("url")) for i in items[:2]] == [("issue", url), ("comment", record)]
+    assert result.errors(result.result("cross-review", result.OK, verdict.summary, items), 0) == []
+    assert "残した指摘 2（起票 1）" in verdict.summary
+    [decision] = verdict.decisions
+    assert all(part in decision["decision"] + decision["basis"] for part in ("r2-1", "Value 6", url))
+    # 照らした位置の記録が無い行は、行で確かめたと言わない
+    assert "照らした位置の記録が無い" in decision["basis"] and "変えていない行" not in decision["basis"]
+    data["findings"][0]["parked_on_line"] = True
+    [decision] = leftover_decide.decisions(data["findings"], record)
+    assert "変えていない行" in decision["basis"]
+    # 理由は行に残った初出時の位置でなく、残すと決めたときに照らした位置から出す
+    data["findings"][0]["parked_on_line"] = False
+    [decision] = leftover_decide.decisions(data["findings"], record)
+    assert "行を特定していない" in decision["basis"] and "変えていない行" not in decision["basis"]
+
+
+def test_issue_3780_2_run_results_point_a_left_finding_at_the_record(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+    fake, got, state = _rounds(tmp_path, capsys, monkeypatch, wt, [_said("古い行の指摘")])
+    [left] = [f["id"] for f in state["findings"] if f.get("parked")]
+    found = {i["id"]: i for i in got["items"] if i["kind"] == "finding"}
+    assert (found[left]["disposition"], found[left]["url"]) == ("comment", state[report_decide.COMMENT_KEY])
+    assert "残した指摘 1（起票 0）" in got["summary"]
+    # 起票に失敗した指摘があれば、前回と同じ状態でも記録を書き直す
+    path = store.state_pr(fake.state_dir, PR).path
+    row = next(f for f in state["findings"] if f["id"] == left)
+    row |= {"check": {"tracks": ["delivered"]}, "issue_error": "書けなかった"}
+    state["target_repo"] = "o/r"
+    state[report_decide.PUBLISHED_KEY] = report_decide.published_state(PR, state, fin.CONVERGED)
+    store.write_object(path, state)
+    written = len(hub.comments)
+    code, again = _run(capsys, monkeypatch, Fake(fake.state_dir, {"codex": [], "kiro": []}), wt)
+    assert code == 0 and len(hub.comments) == written + 1, again
+    # 起票の記録へ書けていない URL があれば、行に失敗が無くても公開し直す
+    state = store.read_object(path)
+    for row in state["findings"]:
+        row.pop("issue_error", None)
+        row.pop("check", None)
+    state.pop("issue_skipped", None)
+    state["issue_unrecorded"] = {"0123456789ab": "https://github.com/o/r/issues/100"}
+    state[report_decide.PUBLISHED_KEY] = report_decide.published_state(PR, state, fin.CONVERGED)
+    store.write_object(path, state)
+    written = len(hub.comments)
+    code, again = _run(capsys, monkeypatch, Fake(fake.state_dir, {"codex": [], "kiro": []}), wt)
+    assert code == 0 and len(hub.comments) == written + 1, again
+
+
+def test_issue_3780_2_published_state_changes_with_a_carried_url_only() -> None:
+    state = {"pr": PR, "target_repo": "o/r", "rounds": [], "findings": []}
+    before = report_decide.published_state(PR, state, fin.CONVERGED)
+    state["issue_carried_urls"] = ["https://github.com/o/r/issues/5"]
+    assert report_decide.published_state(PR, state, fin.CONVERGED) != before

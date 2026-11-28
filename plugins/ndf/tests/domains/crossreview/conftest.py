@@ -149,6 +149,8 @@ class FakeHub:
         self.port = FakePort()
         self.slug = ""
         self.made = 0
+        # 起票の口を作る関数（None なら起票しない。テストは偽の GitHub の起票の口に差し替える。#3780）
+        self.leftovers: Any = None
         self.clean: Any = cli._redacted
 
     def make(self, repo_arg, state_repo, cwd):
@@ -162,7 +164,9 @@ class FakeHub:
             self.comments.append((slug, pr, body, previous))
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
-        return cli.Hub(comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext())
+        return cli.Hub(
+            comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext(), self.leftovers, slug
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -172,4 +176,21 @@ def hub(monkeypatch: pytest.MonkeyPatch) -> FakeHub:
 
     fake = FakeHub()
     monkeypatch.setattr(cli, "HUB", fake.make)
+    _seed_target(monkeypatch, fake)
     return fake
+
+
+def _seed_target(monkeypatch: pytest.MonkeyPatch, fake: FakeHub) -> None:
+    """ラウンドの無い状態に対象のリポジトリを書く（本番では head を確かめて PR を読めた run が書き、対象の無い状態は
+    公開も再開もしない。#3780）。`read_pr` を差し替えたテストでは書かず、駆動の判定だけで決める。"""
+    from ndf.domains.crossreview import drive, store
+
+    start = drive._start
+
+    def seeded(*args: Any) -> Any:
+        run = start(*args)
+        if "read_pr" not in vars(fake.port) and not store.repo_of(run.data) and not store.list_of(run.data, store.ROUNDS):
+            run.data[store.REPO_KEY] = "o/r"
+        return run
+
+    monkeypatch.setattr(drive, "_start", seeded)

@@ -53,7 +53,7 @@ plugins/ndf/
 | --- | --- | --- | --- | --- | --- |
 | `plugins/ndf/src/ndf/domains/crossreview/local_scope.py` | 新設 | `review-scope` の範囲を手元の git と状態の記録から決める | `scope_decide`・`round_scope`・`changes` | モジュール、`ScopeSettings`（Protocol）、`_LocalBase` | 変更（移動）: `decide`（今の `_local_scope`）・`_local_base`・`_local_mvv`・`_local_sections` |
 | `plugins/ndf/src/ndf/domains/crossreview/leftover_decide.py` | 新設 | 指摘が進むか、残すなら起票か記録かを決め、起票の文を組む | `criteria_decide` | モジュール、`Touched`・`Listed` | 新設: `normalized`・`proceeds`・`finding_kinds`・`files_issue`・`identity`・`issue_parts`・`trusted`・`matches_finding`・`record_entries`・`record_body`・`result_fields`・`summary_line`・`decisions` |
-| `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`file_issues` |
+| `plugins/ndf/src/ndf/domains/crossreview/leftover.py` | 新設 | 残す指摘を起票し、URL を行に書く | `leftover_decide`・`store`・`threads`・`settings`・`publish`・`github` | `Port`（Protocol）、`GitHubIssues` | 新設: `primary_of`・`unconfirmed_target`・`file_issues` |
 | `plugins/ndf/src/ndf/domains/crossreview/scope_decide.py` | 変更 | 起点の条件と、収束を使い回す条件を分ける | `store` | モジュール | 新設: `origin_record` |
 | `plugins/ndf/src/ndf/domains/crossreview/round_scope.py` | 変更 | 起点と線引きの起点を git で確かめる | `scope_decide`・`changes` | モジュール | 新設: `read_origin`・`line_origin` |
 | `plugins/ndf/src/ndf/domains/crossreview/changes.py` | 変更 | 新しく PR の変更になったファイル・渡す差分・変えた行を読む | `git`・`leftover_decide` | モジュール、`Range` | 新設: `new_in_pr`・`since_diff`・`touched_since` |
@@ -121,13 +121,13 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と読んだ PR だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
+| `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と PR（巻き直しは `Basis.number`・`Basis.rewound` と記録の `pr_number`（無ければ `pr` の番号）、読んだ PR の識別子は `Basis.pr`・`Basis.pr_optional`）だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
 | `read_origin` | `round_scope.py` | 新設 | `read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
 | `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
 
 `line_origin` の引数 `confirmed` には、差分の起点の head のうち、今回の `head` の祖先であることを今回の起動で確認済みのものを渡す。線引きの起点の head が `confirmed` と一致するときは、祖先関係を再確認しない。一致しないときと、`confirmed` が None のときは確認する。以前のラウンドで確認した結果は使わない。履歴が書き換えられると、そのコミットが今の `head` の祖先でなくなることがあるためである。`line_origin` は `confirmed` をそのまま `read_origin` の `confirmed` に渡す。
 
-`line_origin` が探すのは、そのラウンドを担当した相手役が全員結果を返した（`incomplete_reviewers` で終わっていない）最後のラウンドである。そのラウンドを読んだ顔ぶれが今回の相手役と同じか、読んだ PR が今回と同じかは問わない。`origin_record` に条件の無い `Basis()` を渡すと、この 2 つの照合をしない。
+`line_origin` が探すのは、そのラウンドを担当した相手役が全員結果を返した（`incomplete_reviewers` で終わっていない）最後のラウンドである。そのラウンドを読んだ顔ぶれが今回の相手役と同じか、読んだ PR が今回と同じか、その後に巻き直したかは問わない。`origin_record` に条件の無い `Basis()` を渡すと、これらの照合をしない。
 
 `line_origin` を `read_origin` と分けるのは、設計の決定 2 が「範囲が全差分に戻ったラウンドでも、前に全員が読んだ head があれば線引きする」と定めるためである。読んでいない相手役がいて全差分になったラウンドでも、線引きの起点は残る。
 
@@ -320,12 +320,12 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `issue_mark` | `leftover_decide.py` | 新設 | `issue_mark(ident: str) -> str` | Issue の本文の最後に置く目印の行を返す。`Publisher.create_issue` が検査した本文の後に足す |
 | `trusted` | `leftover_decide.py` | 新設 | `trusted(author_id: int, me: int, account_ids: Collection[int]) -> bool` | 起票の記録と Issue の作者が、実行のアカウントか `issue_account_ids` のアカウントか（アカウント ID で照らす）。ほかの作者は `Port.trusts` で確かめる |
 | `matches_finding` | `leftover_decide.py` | 新設 | `matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool` | 検索か一覧で読んだ Issue がこの指摘を扱うものか（設計の「起票の形」の条件） |
-| `names_finding` | `leftover_decide.py` | 新設 | `names_finding(listed: Listed, ident: str) -> bool` | 起票の記録にある URL の Issue がこの指摘のものか（Pull Request でなく、本文に目印がある） |
+| `names_finding` | `leftover_decide.py` | 新設 | `names_finding(listed: Listed, ident: str, text: str, prs_of: Callable[[str], Sequence[int]] = issue_prs) -> bool` | 起票の記録か引き継ぎの URL の Issue がこの指摘のものか（Pull Request でなく、本文の引用とコードブロックの外に目印だけの行がある。目印は今の識別値か、本文の PR の URL の番号と `text` の識別値。今の識別値の目印が無いときだけ `prs_of` で本文の PR の番号を抽出し、呼び手は抽出の結果を本文ごとに使い回す） |
 | `record_entries` | `leftover_decide.py` | 新設 | `record_entries(body: str, issues_url: str) -> dict[str, dict[str, Any]]` | 起票の記録の本文から、識別値ごとの `at` と `url`（どちらも無いことがある）を読む。`url` は `issues_url` と番号から組む |
 | `record_body` | `leftover_decide.py` | 新設 | `record_body(entries: Mapping[str, Mapping[str, Any]], issues_url: str) -> str` | 起票の記録の本文を組む。本文はマーカー `<!-- ndf:cross-review-leftover-record -->` で始める。固定の文とキーに、形を確かめた識別値（12 桁の 16 進数）・時刻（ISO 8601）・Issue の番号だけを足し、形の違う値は書かない。`issues_url` で始まる `url` は番号にして書き、ほかの URL は書かない。本文は伏せ字に通さない。手元のアカウント名が `number` や番号と同じ数字だと、キーや値が置き換わって読み戻せなくなるためである |
 | `result_fields` | `leftover_decide.py` | 新設 | `result_fields(row: Mapping[str, Any], comment_url: Optional[str]) -> dict[str, str]` | 結果の `items` に足す `disposition` と `url`（残さない行は空） |
 | `summary_line` | `leftover_decide.py` | 新設 | `summary_line(rows: Sequence[Mapping[str, Any]]) -> Optional[str]` | 「残した指摘 N（起票 M）」。残した指摘が無ければ None |
-| `decisions` | `leftover_decide.py` | 新設 | `decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> list[dict[str, str]]` | MVV に反する残した指摘を、番号・MVV の項目・URL の判断にする |
+| `decisions` | `leftover_decide.py` | 新設 | `decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> list[dict[str, str]]` | MVV に反する残した指摘を、番号・MVV の項目・URL の判断にする。理由（変えていない行か、行を特定していないか）は行の `parked_on_line` から選ぶ |
 
 - `issue_parts`
   - 事前条件: `text`・`impact`・`place` は、**全文に伏せ字（秘密を伏せる処理）を当てた後の値**である。関数は切り出すだけで伏せない
@@ -360,7 +360,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `TITLE_CHARS` | 定数 | `leftover_decide.py` | 80（題にする本文の先頭の字数） |
 | `Listed(url, body, author, association, created_at, is_pull, author_id)` | 型 | `leftover_decide.py` | 無し |
 | `kinds.filed` | 定数 | `contracts/data/review-criteria.json` | 上の 6 つ |
-| `PARKED = "parked"`・`Filed.URL = "issue"`・`Filed.ERROR = "issue_error"`（`Filed` は StrEnum） | 行のキー | `leftover_decide.py` | 無し |
+| `PARKED = "parked"`・`PARKED_ON_LINE = "parked_on_line"`・`Filed.URL = "issue"`・`Filed.ERROR = "issue_error"`・`Filed.CHECKED = "issue_checked"`（`Filed` は StrEnum） | 行のキー | `leftover_decide.py` | 無し |
 | `PLACED_ROUND = "placed_round"` | 行のキー | `journal.py` | 無し（無ければ `round`） |
 | `OFF_DIFF = "off_diff"` | 行のキー | `leftover_decide.py` | 無し（投稿の位置に行を使う） |
 
@@ -396,7 +396,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `primary_of` | `leftover.py` | 新設 | `primary_of(main: Optional[Path]) -> tuple[Optional[str], Optional[str]]` | メインディレクトリの `.ndf/project.json` の `issues.primary` と、注意（未設定のとき） |
-| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], primary: Optional[str], *, manual: bool = False) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
+| `file_issues` | `leftover.py` | 新設 | `file_issues(data: dict[str, Any], ref: store.StateRef, port: Port, save: Callable[[], None], *, manual: bool = False) -> list[str]` | 起票の候補を設計の「起票の形」の順で扱い、行の `issue`・`issue_error`・`issue_checked` と状態の `issue_account_ids`・`issue_record_id`・`issue_list_full` を書いて注意を返す |
 
 `Port`（テストは偽物）は次のメソッドを持ち、`GitHubIssues` が GitHub の API で実装する。記録の URL が指す Issue のまとめ読みは GraphQL、ほかは REST である。
 
@@ -416,7 +416,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 - `file_issues`
   - 事前条件: 呼び手は、記録の公開のロック（`write_gate.pr_lock` の今の PR 番号）に加えて、元の PR 番号のロックを持つ。2 つの番号が同じなら 1 回だけ取る（同じ番号を 2 回取ると、2 回目が待ち切れで失敗する）。順は今の番号が先である
-  - 事後条件: 起票の候補の行は `issue` か `issue_error` を持つ。Issue を作る前に `issue_account_ids` と起票の記録を保存している
+  - 事後条件: 起票の候補の行は `issue` か `issue_error` を持つ（照合だけの候補で、その指摘の Issue が無い行は、どちらも持たず `issue_checked` を持つ）。Issue を作る前に `issue_account_ids` と起票の記録を保存している
   - 副作用: 元の PR の起票の記録のコメントと、Issue を GitHub に書く。状態ファイルを `save` で書く
 
 ### 異常系の処理
@@ -434,11 +434,11 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 `file_issues` は、設計の「起票の形」の順で進む。指摘の行に `issue` があるものは起票しない。起票の記録は元の PR の専用のコメントで、本文に識別値ごとの `at`（試みた時刻）と `number`（Issue の番号）を持つ。読むときに番号から対象リポジトリの Issue の URL を組み立てる。以下の手順の `url` は、この組み立てた URL である。コメントの番号は状態ファイルの `issue_record_id` に置く。1 回の公開で記録を書くのは、作成の前の 1 回と結果の 1 回である。
 
 1. 記録を読む（本文とコメントの更新時刻）。`at` の無い識別値には、読んだ更新時刻を `at` として当てる
-2. `url` のある識別値は、指す Issue をまとめて読み、作者を信用できるかを確かめる。Issue の取得か作者の権限の照会に失敗した場合（`GitHubError` が返る通信の失敗・5xx・利用上限など）は、URL のある識別値をどれも起票せず、URL を記録に残したまま `issue_error` に理由を書いて保留する（順 3 の検索にも起票にも進まない）。権限の照会の応答が利用上限によらない 403・404 の場合は、失敗に数えない。`GitHub.permission` がこの応答を権限なし（`none`）として返すので、その作者は信用しない。どちらも失敗しなかった場合、URL が同じリポジトリの Issue を指し、作者を信用でき、本文に識別値の目印があれば、起票せずその URL を使う。目印の位置と元の PR の URL は問わない。満たさなければ `url` を捨て、順 3 で確かめる
-3. `url` の無い識別値（作成の結果が分からないもの）は、識別値で検索し、無ければ作成時刻が `at` 以後の Issue の一覧を読む
-4. 1 回目の書き込み: 記録に無い識別値と、順 3 でどちらにも無いと確認できた識別値を、`at` と `url` の無い項目として書く。試みた時刻はこの書き込みの応答の更新時刻なので、この本文には入れられない。書けなければ作らない
+2. 起票の記録の `url`、行の `prior_issue`、状態の `issue_carried_urls` が指す Issue をまとめて読み、作者を信用できるかを確かめる。Issue の取得か作者の権限の照会に失敗した場合（`GitHubError` が返る通信の失敗・5xx・利用上限など）は、URL を残したまま `issue_error` に理由を書いて保留し、保留した候補は順 3 の検索にも起票にも進まない。保留するのは、設計の「起票の形」のとおり、`issue_carried_urls` があれば全部の候補、無ければ `url` か `prior_issue` のある候補である。権限の照会の応答が利用上限によらない 403・404 の場合は、失敗に数えない。`GitHub.permission` がこの応答を権限なし（`none`）として返すので、その作者は信用しない。失敗しなかった場合、URL が同じリポジトリの Issue を指し、作者を信用でき、本文の引用とコードブロックの外にこの指摘の目印だけの行があれば、起票せずその URL を使う。目印は、設計の「起票の形」の順（今の識別値、次に Issue の本文の PR の番号から作り直した識別値）で照合する。本文の PR の番号の抽出は、1 回の公開で Issue の本文ごとに 1 回にする。満たさなければ `url` と `prior_issue` を捨て、順 3 で確かめる
+3. 起票の記録にあって使える URL の無い識別値（作成の結果が分からないもの。順 2 で `url` を捨てた識別値を含む）は、識別値で検索し、無ければ作成時刻が `at` 以後の Issue の一覧を読む
+4. 1 回目の書き込み: 起票の対象の種類を持つ候補のうち、記録に無い識別値と、順 3 でどちらにも無いと確認できた識別値を、`at` と `url` の無い項目として書く。試みた時刻はこの書き込みの応答の更新時刻なので、この本文には入れられない。書けなければ作らない
 5. 順 4 で書いた識別値の Issue を作る
-6. 2 回目の書き込み: 作れた識別値は `number` と `at` を、結果が分からない識別値は `at` を書き、GitHub がはっきり拒んだ（4xx）識別値は消す。作れた URL は指摘の行にも書く
+6. 2 回目の書き込み: 作れた識別値は `number` と `at` を、結果が分からない識別値は `at` を書き、GitHub がはっきり拒んだ（4xx）識別値は消す。作れた URL は指摘の行にも書く。作る識別値が無くても、順 2・3 で記録に無かった URL を見つけた場合は、その `number` を書く。この書き込みに失敗した場合は URL を状態の `issue_unrecorded` に残し、次の公開は起票の候補が無くても順 1 で記録を読んで書き直す
 
 `url` も `at` も無い項目が次の起動に残るのは、順 4 の後、順 6 の前に中断したか、順 6 の書き込みに失敗した場合である。このときコメントの更新時刻は順 4 の応答の値のままなので、順 1 がそれを試みた時刻にする。記録を書く処理は書く前に必ず読んで `at` を当てるので、後の書き込みで時刻が動いても、先の項目の時刻は失われない。人がコメントを編集して更新時刻が後ろへ動いた場合の扱いは、設計書が定めていない。
 
@@ -480,12 +480,12 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `passed` | `journal.py` | 新設 | `passed(self, fid: str, touched: leftover_decide.Touched, *, unconfirmed: bool = False) -> list[dict[str, Any]]` | このラウンドの出し直しの位置のうち、修正へ進むものを返す（`sort` と `_wants_tracks` が使う） |
 | `unpark` | `journal.py` | 新設 | `unpark(self, touched: leftover_decide.Touched) -> None` | 線引きをしないラウンドで、出し直された指摘の `parked` を外して位置を置き換え、投稿できる行かを確かめる |
 | `enter` | `journal.py` | 変更 | シグネチャは変えない | このラウンドで出た指摘の番号を `self.raised_ids` に残し、`self.returned`（直した後に戻った指摘の番号）を呼び出しごとに空にする |
-| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文から URL への対応 `self.filed` に残す。`issue` を持つほかの項目は指摘の行へ移す |
+| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文と URL の組の並び `self.filed` に残す。引き継ぎの処理（`carry.py`）はその URL すべてを状態の `issue_carried_urls` に残し、`file_issues` が Issue の目印で指摘と照らす。`issue` を持つほかの項目は指摘の行へ移す |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 直した（`fixed`）指摘が戻ったときに、番号を `self.returned` に足す |
 | `handable` | `journal.py` | 変更 | シグネチャは変えない | `parked` の指摘を返さない |
 | `_classify` | `journal.py` | 変更 | シグネチャは変えない | 必ず人の承認が要る操作と分かった指摘の `parked` を外す |
 | `findings` | `journal.py` | 変更 | シグネチャは変えない | `Finding.parked` を渡す |
-| `_recorded_one` | `prior_decide.py` | 変更 | シグネチャは変えない | `Carried` に `parked: bool` と `issue: Optional[str]` を読む |
+| `_recorded_one` | `prior_decide.py` | 変更 | シグネチャは変えない | `Carried` に `parked: bool` と `issue: Optional[str]` を読む。`parked` と `issue` だけの項目は、本文の無い残した指摘にして URL を引き継ぐ |
 
 `sort` が分け直すのは、このラウンドで出た指摘（`raised_ids`）のうち、新しく出たか戻った指摘と、`parked` を持つ指摘だけである。新しく出たか戻った指摘は、判定役へ渡す候補の `fresh` ではなく、絞る前の一覧を使う。内容の違う重い報告が重なって判定役へ渡さない新しい指摘も、線引きするためである。前から未解決で `parked` の無い指摘は、出し直されても分け直さない（I2: 一度修正へ進むと決めた指摘は、直すか見送るまで進む）。
 
@@ -606,8 +606,8 @@ PR の差分に載らない行がレビュー投稿にまとめる指摘に混�
 | `_finding_gaps` | `finish_decide.py` | 変更 | シグネチャは変えない | `parked` の指摘を欠け（MVV の欠けを含む）にしない |
 | `_counts` | `finish_decide.py` | 変更 | シグネチャは変えない | `parked` の指摘を未解決の数に入れない |
 | `as_findings` | `finish_decide.py` | 変更 | シグネチャは変えない | 要約の指摘の `parked` を読む |
-| `_finding_rows` | `report_decide.py` | 変更 | シグネチャは変えない | `parked` の行の終わり方に「直さずに残した（起票: <URL>）」か「直さずに残した（記録のみ）」を出す |
-| `open_block` | `report_decide.py` | 変更 | シグネチャは変えない | 一覧の項目に `parked` と `issue` を足す |
+| `_finding_rows` | `report_decide.py` | 変更 | 引数 `repo: Optional[str] = None` を足す | `parked` の行の終わり方に「直さずに残した（起票: #<番号>）」か「直さずに残した（記録のみ）」を出す。`repo` の Issue でない URL は URL のまま出す |
+| `open_block` | `report_decide.py` | 変更 | シグネチャは変えない | 一覧の項目に `parked` と `issue` を足す。状態の `issue_carried_urls` のうちどの項目にも無い URL は、`parked` と `issue` だけの項目にする |
 | `_trusted` | `threads.py` | 変更 | シグネチャは変えない | 書き手の login を `GitHub.viewer` の login と比べる。起票と同じ読み取り結果を使う |
 | `_wanted` | `threads.py` | 変更 | シグネチャは変えない | スレッドの無い `parked` の指摘にスレッドを作らない |
 | `_placed_head` | `threads.py` | 新設 | `_placed_head(rounds, finding) -> Optional[str]` | スレッドを付けるコミットを、`placed_round`（無ければ `round`）のラウンドの head にする |

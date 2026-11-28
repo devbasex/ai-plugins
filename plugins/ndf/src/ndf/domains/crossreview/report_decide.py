@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import identity
-from ndf.domains.crossreview import criteria_decide, scope_decide, store
+from ndf.domains.crossreview import criteria_decide, leftover_decide, scope_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv_decide
 
@@ -160,6 +160,9 @@ def published_state(pr: int, data: Mapping[str, Any], final: Optional[str], noti
         "findings": store.list_of(data, store.FINDINGS),
         "threads": data.get(THREADS),
     }
+    # 引き継いだ URL だけの項目が増えても本文は変わる（#3780）。無ければキーを足さない
+    if loose := _loose_urls(data):
+        shown["carried"] = loose
     # 注意が無ければキーを足さず、注意を比べないバージョンの要約と同じ値にする
     if notices:
         shown["notices"] = list(notices)
@@ -219,7 +222,21 @@ def _light(f: Mapping[str, Any]) -> bool:
     return not criteria_decide.blocking(criteria_decide.severity_of(f.get("severity")))
 
 
-def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
+def _own_issue(value: object, repo: Optional[str]) -> Optional[str]:
+    """記録のコメントに載せてよい起票の URL（対象のリポジトリ `repo` の Issue だと確かめられる値だけ。`repo` が無ければ載せない）。"""
+    return leftover_decide.issue_url(value, repo) if repo else None
+
+
+def _left_label(f: Mapping[str, Any], repo: Optional[str]) -> str:
+    """直さずに残した指摘の終わり方（起票の URL か、記録のみ）。プロジェクト MVV に反する指摘は、その項目を添える。"""
+    url = _own_issue(f.get(leftover_decide.Filed.URL), repo)
+    # `#番号` で出す。完全な URL は、所有者名が手元のアカウント名と同じだと伏せ字で開けなくなる
+    label = f"直さずに残した（起票: #{url.rsplit('/', 1)[-1]}）" if url else "直さずに残した（記録のみ）"
+    item = f.get(MVV)
+    return f"{label}・MVV の {item} に反する" if item else label
+
+
+def _finding_rows(findings: Sequence[Mapping[str, Any]], repo: Optional[str] = None) -> list[str]:
     """指摘の表。判定役の確認で下げた指摘は、元の重要度と定型の理由を出す（`check` の自由記述は写さない。#4363）。"""
     rows = ["| 番号 | 担当 | 重要度 | 場所 | 指摘 | 終わり方 | 見送った理由 |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for f in findings:
@@ -227,6 +244,8 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
         if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
             shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
+        elif outcome == fin.UNRESOLVED and f.get(leftover_decide.PARKED):
+            shown = _left_label(f, repo)
         severity, reason = _cell(criteria_decide.severity_of(f.get("severity"))), f.get("reason")
         check = f.get(criteria_decide.CHECK)
         if isinstance(check, Mapping) and check.get(criteria_decide.LOWERED):
@@ -246,7 +265,11 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
     findings = [f for f in store.list_of(data, store.FINDINGS) if isinstance(f, Mapping)]
     waiting = sum(1 for f in findings if f.get("outcome") == fin.UNRESOLVED and f.get(fin.REDLINE))
     rest = [f for f in findings if f.get("outcome") != fin.UNRESOLVED or not f.get(fin.REDLINE)]
-    counts = {key: sum(1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not _light(f))) for key in OUTCOME_LABEL}
+    counts = {
+        key: sum(1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not (_light(f) or f.get(leftover_decide.PARKED))))
+        for key in OUTCOME_LABEL
+    }
+    parked = sum(1 for f in rest if f.get("outcome") == fin.UNRESOLVED and f.get(leftover_decide.PARKED) and not _light(f))
     light = sum(1 for f in rest if f.get("outcome") == fin.UNRESOLVED and _light(f))
     label = FINAL_LABEL[final] if final in FINAL_LABEL else "途中（終わり方の記録が無い）"
     lines = [
@@ -255,6 +278,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
         "",
         f"終わり方: {label}。ラウンド {len(rounds)}・指摘 {len(findings)}"
         f"（直した {counts[fin.FIXED]}・見送った {counts[fin.SKIPPED]}・未解決 {counts[fin.UNRESOLVED]}"
+        + (f"・直さずに残した {parked}" if parked else "")
         + (f"・軽い {light}" if light else "")
         + (f"・人の承認を待つ {waiting}" if waiting else "")
         + "）",
@@ -265,7 +289,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
         "",
         "### 指摘",
         "",
-        *(_finding_rows(findings) if findings else ["指摘は無い。"]),
+        *(_finding_rows(findings, store.repo_of(data)) if findings else ["指摘は無い。"]),
     ]
     if warnings:
         lines += ["", "### 注意", "", *(f"- {_cell(w)}" for w in warnings)]
@@ -283,28 +307,56 @@ def _open_value(value: Any) -> str:
     return encoded.replace("--", "-\\u002d")
 
 
+def _open_item(f: Mapping[str, Any], mark: Any, repo: Optional[str]) -> dict[str, Any]:
+    """`open_block` の一覧の、指摘 1 件の項目。`mark` はその指摘のスレッドの記録、`repo` は対象のリポジトリ。"""
+    thread = mark.get("comment") if isinstance(mark, Mapping) else None
+    keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
+    # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
+    if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
+        keep[criteria_decide.PROTECT] = list(kinds)
+    # 直さずに残した指摘と起票の URL（次の実行は残した指摘を引き継がず、URL だけを戻す。#3780）
+    if f.get(leftover_decide.PARKED):
+        keep[leftover_decide.PARKED] = True
+    # 確かめる前の URL は別の欄で残し、別の保存先でも確かめられるようにする。対象のリポジトリの Issue の URL だけを書く
+    for key in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR):
+        if url := _own_issue(f.get(key), repo):
+            keep[key] = url
+    return {**keep, "thread": thread if type(thread) is int else None}
+
+
+def _listed_findings(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """記録のコメントの末尾の一覧に載せる指摘の行。"""
+    return [
+        f
+        for f in store.list_of(data, store.FINDINGS)
+        if isinstance(f, Mapping)
+        and f.get("outcome") == fin.UNRESOLVED
+        and not (_light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF)
+    ]
+
+
+def _loose_urls(data: Mapping[str, Any]) -> list[str]:
+    """引き継いだ起票の URL のうち、末尾の一覧の指摘の項目に無く、URL だけの項目で載せるもの。"""
+    repo = store.repo_of(data)
+    keys = (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)
+    held = {_own_issue(f.get(k), repo) for f in _listed_findings(data) for k in keys}
+    carried = (_own_issue(u, repo) for u in store.list_of(data, leftover_decide.CARRIED_URLS))
+    return [url for url in carried if url and url not in held]
+
+
 def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
     HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
     1 回で受けて同じ順に返す）へ値ごとに通し（保護の種類は許可した値だけなので通さない）、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
-    （PR 3944 の r6-4）。"""
+    （PR 3944 の r6-4）。引き継いだ起票の URL のうち指摘の項目に無いものは、URL だけの項目で足す（その指摘が出ない実行を
+    挟んでも、次の保存先へ渡す。#3780）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
-    items = []
-    for f in store.list_of(data, store.FINDINGS):
-        if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED:
-            continue
-        if _light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF:
-            continue
-        mark = done.get(f.get("id"))
-        thread = mark.get("comment") if isinstance(mark, Mapping) else None
-        keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
-        # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
-        if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
-            keep[criteria_decide.PROTECT] = list(kinds)
-        items.append({**keep, "thread": thread if type(thread) is int else None})
+    repo = store.repo_of(data)
+    items = [_open_item(f, done.get(f.get("id")), repo) for f in _listed_findings(data)]
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):
         item[k] = cleaned
+    items += [{leftover_decide.PARKED: True, leftover_decide.Filed.URL: url} for url in _loose_urls(data)]
     payload = "[" + ", ".join("{" + ", ".join(f"{_open_value(k)}: {_open_value(v)}" for k, v in item.items()) + "}" for item in items) + "]"
     return f"{OPEN_MARK}{payload} -->"
 

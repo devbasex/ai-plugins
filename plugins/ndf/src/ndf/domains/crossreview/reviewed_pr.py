@@ -50,9 +50,10 @@ def seen(run: Run, pr: Optional[threads.ReadPr]) -> Optional[threads.ReadPr]:
 
 
 def why_unread(run: Run, pr: Optional[threads.ReadPr]) -> Optional[str]:
-    """読んだ PR の確認を求める起動で、読んだ `pr` を使えない理由（確認を求めないか、使えれば None）。呼び手は相手役を起動する
-    前に止める（記録を出せないレビューに token と時間を使わない）。"""
-    if not run.cfg.check_pr or run.read_pr is not None:
+    """読んだ PR の確認が要る起動で、読んだ `pr` を使えない理由（確認が要らないか、使えれば None）。確認が要るのは、読んだ PR の
+    記録を求める起動と、状態に対象のリポジトリがまだ無い起動である（対象の無いラウンドは公開も再開もできない。#3780）。呼び手は
+    相手役を起動する前に止める（記録を出せないレビューに token と時間を使わない）。"""
+    if run.read_pr is not None or (not run.cfg.check_pr and store.repo_of(run.data) is not None):
         return None
     if pr is None:
         return "PR のスレッドと head を読めない"

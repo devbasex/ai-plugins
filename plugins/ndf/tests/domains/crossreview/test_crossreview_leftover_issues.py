@@ -11,7 +11,7 @@ import pytest
 from ndf.adapters import publish
 from ndf.adapters.github import PUBLIC, GitHub, GitHubError, Viewer
 from ndf.adapters.github_pulls import PER_PAGE
-from ndf.domains.crossreview import leftover, leftover_decide, store
+from ndf.domains.crossreview import leftover, leftover_decide, report_decide, store
 from ndf.domains.crossreview.leftover_decide import Filed, Listed
 
 REPO = "o/r"
@@ -130,8 +130,8 @@ class Run:
         self.saved: list[str] = []
         self.port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
 
-    def go(self, primary: str | None = "github", **options: Any) -> list[str]:
-        return leftover.file_issues(self.data, self.ref, self.port, lambda: self.saved.append(json.dumps(self.data)), primary, **options)
+    def go(self, **options: Any) -> list[str]:
+        return leftover.file_issues(self.data, self.ref, self.port, lambda: self.saved.append(json.dumps(self.data)), **options)
 
     @property
     def row(self) -> dict[str, Any]:
@@ -183,6 +183,15 @@ def test_issue_3780_matches_finding_needs_the_mark_and_the_url_outside_quotes() 
     for other in (quoted, body + "後ろの文\n", f"```\n{body}\n```\n{mark}\n"):
         assert not leftover_decide.matches_finding(_listed(other), "abc", 7)
     assert not leftover_decide.matches_finding(_listed(body, is_pull=True), "abc", 7)
+
+
+@pytest.mark.parametrize(
+    ("wrap", "wanted"),
+    [("{}\n\n書き足し", True), ("> {}", False), ("```\n{}\n```", False), ("`{}`", False)],
+)
+def test_issue_3780_names_finding_ignores_a_quoted_mark(wrap: str, wanted: bool) -> None:
+    body = wrap.format(leftover_decide.issue_mark("abc"))
+    assert leftover_decide.names_finding(_listed(body), "abc", "本文") is wanted
 
 
 @pytest.mark.parametrize(
@@ -239,11 +248,19 @@ def test_issue_3780_2_files_once_and_writes_the_url_to_the_row() -> None:
     assert again.go() == [] and again.row[Filed.URL] == url and github.created() == 1
 
 
+@pytest.mark.parametrize(("reason", "kept"), [pytest.param("前の理由", True, id="same"), pytest.param(None, False, id="changed")])
+def test_defer_keeps_the_skip_reason_only_in_the_state(reason: str | None, kept: bool) -> None:
+    row = _row(issue_error="前の失敗")
+    data = {leftover.SKIPPED: "前の理由", report_decide.PUBLISHED_KEY: "公開済み"}
+    leftover.defer(data, [row], reason)
+    assert data[leftover.SKIPPED] == reason and Filed.ERROR not in row
+    assert (report_decide.PUBLISHED_KEY in data) is kept
+
+
 def test_only_candidates_call_github() -> None:
     github = FakeGitHub()
     others = (_row(parked=False), _row(protect=["authz"]), _row(outcome="fixed"), _row(issue="u"))
     assert Run(github, *others).go() == []
-    assert Run(github).go("markdown") == [] and Run(github).go(None) == []
     assert github.calls == [] and github.viewed == 0
 
 
@@ -436,6 +453,129 @@ def test_a_match_on_a_read_page_is_used_when_the_list_is_over_the_limit(monkeypa
     again = Run(github)
     assert again.go() == [] and again.row[Filed.URL] == github.issues[0]["html_url"]
     assert github.created() == 1 and "issue_list_full" not in again.data
+
+
+def test_issue_3780_a_carried_url_is_used_only_after_the_issue_is_read() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    github.records.clear()
+    # 起票する種類を今回の指摘が持たなくても、引き継いだ URL は確かめる
+    again = Run(github, _row(protect=[], prior_issue=url))
+    assert again.go() == [] and again.row[Filed.URL] == url and Filed.PRIOR not in again.row
+    assert github.created() == 1
+
+
+def test_issue_3780_a_carried_url_of_the_pr_before_a_rewind_is_used_from_another_state() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    # 巻き直した後の PR 9 を別の保存先で始めると、元の番号が 9 になる
+    again = Run(github, _row(prior_issue=url))
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    assert again.go() == [] and again.row[Filed.URL] == url
+    assert github.created() == 1
+    # 見つけた URL は巻き直し後の PR の起票の記録に残り、引き継ぎの無い次の保存先も引ける
+    later = Run(github)
+    later.ref = again.ref
+    assert later.go() == [] and later.row[Filed.URL] == url
+    assert github.created() == 1
+
+
+def test_issue_3780_a_record_that_was_not_written_is_written_by_the_next_run() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    again = Run(github, _row(prior_issue=url))
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    github.fail[("POST", "issues/9/comments")] = 502
+    assert again.go() and again.row[Filed.URL] == url and again.data[leftover.UNRECORDED]
+    assert again.go() == [] and leftover.UNRECORDED not in again.data
+    later = Run(github)
+    later.ref = again.ref
+    assert later.go() == [] and later.row[Filed.URL] == url and github.created() == 1
+
+
+@pytest.mark.parametrize("status", [pytest.param(422, id="refused"), pytest.param(502, id="unknown")])
+def test_issue_3780_a_url_found_beside_a_failed_announcement_is_recorded(status: int) -> None:
+    """拒まれた記録の POST は同じ公開で書き直す。結果の分からない POST は繰り返さず、次の公開が書く。"""
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    again = Run(github, _row(prior_issue=url), _row("r2-2", text="別の指摘"))
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    github.fail[("POST", "issues/9/comments")] = status
+    assert again.go() and again.row[Filed.URL] == url and github.created() == 1
+    if status == 502:
+        assert github.count("POST", "issues/9/comments") == 1 and again.data[leftover.UNRECORDED]
+        github.fail[("POST", f"repos/{REPO}/issues")] = 422
+        again.go()
+    entries = leftover_decide.record_entries(github.records[-1]["body"], ISSUES)
+    assert entries == {leftover_decide.identity(9, again.row["text"]): {"url": url}}
+
+
+def test_issue_3780_a_url_already_in_the_record_is_not_written_again() -> None:
+    github = FakeGitHub()
+    run = Run(github)
+    run.go()
+    run.data[leftover.UNRECORDED] = {leftover_decide.identity(7, run.row["text"]): run.row[Filed.URL]}
+    writes = github.count("PATCH", "comments/500") + github.count("POST", "issues/7/comments")
+    assert run.go() == [] and leftover.UNRECORDED not in run.data
+    assert github.count("PATCH", "comments/500") + github.count("POST", "issues/7/comments") == writes
+
+
+def test_issue_3780_the_body_of_a_carried_issue_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    parsed: list[str] = []
+    real = leftover_decide.issue_prs
+    monkeypatch.setattr(leftover_decide, "issue_prs", lambda body: parsed.append(body) or real(body))
+    again = Run(github, _row(text="別の指摘"), _row("r2-2", text="さらに別の指摘"))
+    again.data[leftover.CARRIED_URLS] = [url]
+    again.go()
+    assert len(parsed) == 1
+
+
+def test_issue_3780_a_carried_url_is_found_by_the_issue_mark_without_the_text_of_the_record() -> None:
+    """記録の本文は伏せてあり行の URL を引けないことがあるので、状態の引き継ぎの URL を Issue の目印で指摘と照らす。"""
+    github = FakeGitHub()
+    Run(github).go()
+    Run(github, _row(text="別の指摘")).go()
+    urls = [i["html_url"] for i in github.issues]
+    again = Run(github)
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    again.data[leftover.CARRIED_URLS] = list(reversed(urls))
+    assert again.go() == [] and again.row[Filed.URL] == urls[0]
+    assert github.created() == 2
+
+
+def test_issue_3780_a_finding_no_longer_filed_still_gets_its_carried_issue_back() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    again = Run(github, _row(protect=[]), _row("r2-2", text="別の指摘", protect=[], issue_error="前の読み取りの失敗"))
+    again.data[leftover.CARRIED_URLS] = [url]
+    assert again.go() == [] and again.row[Filed.URL] == url
+    other = again.data["findings"][1]
+    assert Filed.URL not in other and Filed.ERROR not in other and github.created() == 1
+    # 指摘と引き継いだ URL の組が同じ間は照らし直さず、URL が増えれば照らし直す
+    calls = len(github.calls)
+    assert leftover.candidates(again.data) == [] and again.go() == [] and len(github.calls) == calls
+    # 利用者が打った公開は照らし直し、書き足された目印の Issue を戻す
+    github.issues[0]["body"] += "\n" + leftover_decide.issue_mark(leftover_decide.identity(7, other["text"]))
+    assert leftover.candidates(again.data, manual=True) == [other]
+    again.data[leftover.CARRIED_URLS] = [url, f"{ISSUES}999"]
+    assert leftover.candidates(again.data) == [other]
+    assert again.go(manual=True) == [] and other[Filed.URL] == url and Filed.CHECKED not in other
+
+
+@pytest.mark.parametrize(("protect", "created"), [pytest.param(["user_data"], 1, id="filed-kind"), pytest.param([], 0, id="other-kind")])
+def test_issue_3780_a_carried_url_of_a_deleted_issue_is_dropped(protect: list, created: int) -> None:
+    github = FakeGitHub()
+    run = Run(github, _row(protect=protect, prior_issue=f"{ISSUES}999"))
+    assert run.go() == [] and github.created() == created and Filed.PRIOR not in run.row
+    assert run.row.get(Filed.URL) != f"{ISSUES}999"
 
 
 @pytest.mark.parametrize(

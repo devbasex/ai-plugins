@@ -333,9 +333,8 @@ def test_issue_2770_leftover_fix_result_is_taken_in_on_restart(wt: Path, tmp_pat
     ref = store.state_pr(state_dir, PR)
     finding = {"id": "r1-1", "key": "k", "text": "直す", "section": None, "round": 1, "outcome": fin.UNRESOLVED, "reason": None}
     head = sh(wt, "rev-parse", "HEAD").strip()
-    store.write_object(
-        ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}], "findings": [finding]}
-    )
+    rounds = [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}]
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": rounds, "findings": [finding]})
     store.fix_result_path(state_dir, ref).write_text(json.dumps({"pr": PR, "findings": [{"id": "r1-1", "outcome": fin.FIXED}]}))
     fake = Fake(state_dir, {"codex": [[], []], "kiro": [[], []]})
     code, got = _run(capsys, monkeypatch, fake, wt)
@@ -395,7 +394,8 @@ def test_issue_4109_resend_does_not_restore_a_finding_made_by_ndf(repos: Repos, 
     ref = store.state_pr(state_dir, PR)
     rows = [{"id": i, "text": f"{i} の本文", "round": 1, "outcome": fin.UNRESOLVED, "reason": None, "by": by} for i, by in MADE_BY]
     head = sh(wt, "rev-parse", "HEAD").strip()
-    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}], "findings": rows})
+    rounds = [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": head}]
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": rounds, "findings": rows})
     sha = commit(wt, "fix.txt", "直した", "直す")
     path = store.fix_result_path(state_dir, ref)
     found = [{"id": i, "outcome": fin.FIXED, "reason": f"{i} を直した"} for i, _ in MADE_BY]
@@ -432,7 +432,7 @@ def test_run_config_resolves_relative_paths_from_the_caller(tmp_path: Path, monk
 def test_issue_2770_changes_required_without_any_fix_stops(wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     state_dir = tmp_path / "st"
     ref = store.state_pr(state_dir, PR)
-    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
     fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
     assert got["cause"]["kind"] == "work_stopped" and fake.calls == []
@@ -497,13 +497,14 @@ def _findings(state: dict) -> list[dict]:
 
 def _rounds_without_heads(state: dict) -> list[dict]:
     """ラウンドの記録から、コミットの時刻で変わる SHA（head・commit・pushed）と、どのテストも同じ比較基点（base。merge-base の
-    SHA）と相手役の並び（reviewers）と重点（focus）と、MVV が無いときの MVV の記録（mvv）を外す。判定役の
+    SHA）と相手役の並び（reviewers）と重点（focus）と PR の番号（pr_number）と、MVV が無いときの MVV の記録（mvv）を外す。判定役の
     出力の名前（judge_output）は、起動ごとに変わる接尾辞だけを落とす。"""
     out = []
     for r in state["rounds"]:
         assert re.fullmatch(r"[0-9a-f]{40}", r["base"]) and r["reviewers"] == ["codex", "kiro"] and r["focus"] == []
         assert (r["mvv"], r["mvv_checked"]) == ({"id": "absent:::", "mvv_branch": "main"}, True)
-        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv", "mvv_checked")}
+        assert r["pr_number"] == PR
+        row = {k: v for k, v in r.items() if k not in ("head", "base", "reviewers", "focus", "mvv", "mvv_checked", "pr_number")}
         if "fix" in row:
             row["fix"] = {k: v for k, v in row["fix"].items() if k not in ("commit", "pushed")}
         if "judge_output" in row:
@@ -699,7 +700,7 @@ def test_run_leftover_fix_result_for_another_pr_is_invalid(wt: Path, tmp_path: P
     """PR #3466 の指摘: 前の起動が残した番号の合わない結果ファイルは、トレースバックでなく invalid の結果で止める。"""
     state_dir = tmp_path / "st"
     ref = store.state_pr(state_dir, PR)
-    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
+    store.write_object(ref.path, {"pr": PR, "target_repo": "o/r", "rounds": [{"round": 1, "verdict": drive.CHANGES_REQUIRED, "head": "x"}]})
     store.fix_result_path(state_dir, ref).write_text(json.dumps({"pr": 1, "findings": []}), encoding="utf-8")
     fake = Fake(state_dir, {"codex": [[]], "kiro": [[]]})
     code, got = _run(capsys, monkeypatch, fake, wt)
