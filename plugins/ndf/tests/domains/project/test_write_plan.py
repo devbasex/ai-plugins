@@ -9,7 +9,7 @@ from pathlib import Path
 import git_sandbox
 import pytest
 
-from ndf.domains.project import analysis_record, check, write
+from ndf.domains.project import analysis_record, check, cli, write
 from ndf.domains.project.items import value_digest
 from ndf.domains.records import files
 
@@ -158,3 +158,126 @@ def test_a_new_default_branch_without_measured_checks_keeps_the_previous_branche
     assert json.loads(next(f.new for f in planned.files if f.name == PROJECT))["ci"] == ci
     same = _plan(repo, existing=existing, measure=measure, record={**before, "branches": NO_REMOTE})
     assert json.loads(same.files[-1].new)["branches"] == NO_REMOTE  # 既定ブランチが同じなら今の構成を書く
+
+
+# --- 読み手の無い 6 項目（#4521）: 書かない・残っていれば古い・書き出しで取り除く。git は差し替え、起動しない ---
+
+UNREAD = ("languages", "services", "issues", "checks", "ndf_policies", "instructions")
+OLD_SIX = {
+    "languages": [{"name": "python", "frameworks": []}],
+    "services": {"container": False, "compose_files": [], "databases": []},
+    "issues": {"primary": "github", "others": []},
+    "checks": {"tools": []},
+    "ndf_policies": {"doc_lint": True, "reject_md_wording_tests": True},
+    "instructions": {"files": ["AGENTS.md"], "imports": [], "notes": []},
+}
+
+
+@pytest.fixture
+def no_git(tmp_path, monkeypatch) -> Path:
+    """Git に依存する入出力（作業場所の特定・入力の指紋・ブランチの構成・無視の確かめ）を差し替えた作業場所。"""
+    main = tmp_path / "repo"
+    main.mkdir()
+    monkeypatch.setattr(check, "repo_dirs", lambda root: check.RepoDirs(check.git.Git(main), main, main / ".git"))
+    monkeypatch.setattr(check, "inputs", lambda *_a, **_k: INPUTS)
+    monkeypatch.setattr(check, "branch_state", lambda *_a, **_k: NO_REMOTE)
+    monkeypatch.setattr(write, "check_ignored", lambda *_a: write.Ignored({}, None))
+    return main
+
+
+def _measured(value) -> dict:
+    return {"status": "measured", "value": value}
+
+
+def _apply(planned: write.Plan) -> None:
+    """計画のファイルを順に書く。"""
+    for f in planned.files:
+        f.path.parent.mkdir(parents=True, exist_ok=True)
+        f.path.write_text(f.new, encoding="utf-8")
+
+
+def _new(planned: write.Plan, name: str) -> dict:
+    """計画が最後に `name` へ書く中身。"""
+    return json.loads([f.new for f in planned.files if f.name == name][-1])
+
+
+def test_the_first_plan_has_none_of_the_unread_items(no_git):
+    items = {"ci": _measured({"required_checks": []}), **{k: _measured(v) for k, v in OLD_SIX.items()}}
+    doc = _new(_plan(no_git, measure={**MEASURE, "items": items}), PROJECT)
+    assert not set(UNREAD) & set(doc) and not set(UNREAD) & set(doc["analysis"]["written"])
+    assert not set(UNREAD) & set(write.ITEM_KEYS)
+
+
+def test_answers_to_dropped_items_are_ignored(no_git):
+    """旧版の測定の結果（issues・ndf_policies が質問）と旧版の回答を組み合わせても、書かずに「無視した回答」にする。"""
+    question = {"status": "question", "candidates": {}, "evidence": []}
+    measure = {**MEASURE, "items": {"issues": question, "ndf_policies": question, "test": question}}
+    answers = {k: {"value": OLD_SIX[k]} for k in ("issues", "ndf_policies")} | {"test": {"value": {"suites": []}}}
+    planned = _plan(no_git, measure=measure, answers=answers)
+    ignored = [r["key"] for r in planned.rows if r["kind"] == "ignored"]
+    assert ignored == ["issues", "ndf_policies"]
+    assert [r["kind"] for r in planned.rows if r["key"] == "test"] == ["written"]
+    assert not {"issues", "ndf_policies"} & set(_new(planned, PROJECT))
+
+
+@pytest.mark.parametrize("key", UNREAD)
+def test_settings_with_a_dropped_item_are_stale_not_broken(no_git, key):
+    _put(no_git, "project", json.dumps({"version": 1, key: OLD_SIX[key], "analysis": {"written": {}}}))
+    assert check.judge(no_git, False) == check.Judged(check.STALE, [f"旧い形の値が設定にある: {key}"])
+
+
+def test_plan_removes_the_dropped_items_even_when_edited_by_hand(no_git):
+    ci, hand_materials = {"required_checks": ["old"]}, {"deferred_milestones": ["人"]}
+    written = {k: value_digest(v) for k, v in OLD_SIX.items() if k != "checks"}  # checks は人が直した値（指紋が違う）
+    written |= {"checks": value_digest({"tools": [{"name": "ruff", "config": "x"}]}), "ci": value_digest(ci)}
+    existing = {"version": 1, "ci": ci, "materials": hand_materials, **OLD_SIX, "analysis": {"written": written}}
+    _put(no_git, "project", json.dumps(existing))
+    items = {"ci": _measured({"required_checks": ["lint"]}), "materials": _measured({"deferred_milestones": []})}
+    measure = {**MEASURE, "items": items}
+    planned = _plan(no_git, existing=existing, measure=measure)
+    doc = _new(planned, PROJECT)
+    kinds = {r["key"]: r["kind"] for r in planned.rows}
+    assert not set(UNREAD) & set(doc) and not set(UNREAD) & set(doc["analysis"]["written"])
+    assert doc["ci"] == {"required_checks": ["lint"]} and kinds["ci"] == "written"  # 解析が書いた値は新しい値へ
+    assert doc["materials"] == hand_materials and kinds["materials"] == "mismatch"  # 人の値は残る
+    _apply(planned)
+    assert _plan(no_git, existing=doc, measure=measure, record=_new(planned, RECORD)).files == []
+    assert check.judge(no_git, False).kind == check.FRESH
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_the_diff_names_the_dropped_items_without_their_values(no_git, capsys, dry_run):
+    assigned, paired = "password=" + "hunter2hunter2", "p4ssw0rd-of-the-pair"
+    existing = {"version": 1, "issues": {"primary": assigned}, "services": {"password": paired}}
+    digests = [value_digest(existing["issues"]), value_digest(existing["services"])]
+    existing["analysis"] = {"written": {"issues": digests[0], "services": digests[1]}}
+    _put(no_git, "project", json.dumps(existing))
+    report = cli._report_write(_plan(no_git, existing=existing), dry_run)
+    out = capsys.readouterr().out + json.dumps(report, ensure_ascii=False)  # 差分と結果 JSON の両方
+    assert assigned not in out and paired not in out
+    assert not any(d in out for d in digests)  # 指紋からも値を照らせない
+    assert '-  "issues": "（伏せた）"' in out and '-  "services": "（伏せた）"' in out
+
+
+def test_a_measure_of_an_older_analyzer_stays_stale(no_git):
+    older = check.ANALYZER - 1
+    measure = {**MEASURE, "analyzer": older, "items": {"ci": _measured({"required_checks": []})}}
+    doc, record = None, None
+    for _ in range(2):
+        planned = _plan(no_git, existing=doc, measure=measure, record=record)
+        _apply(planned)
+        if doc is None:
+            doc, record = _new(planned, PROJECT), _new(planned, RECORD)
+        assert record["analyzer"] == older
+        assert check.judge(no_git, False) == check.Judged(check.STALE, [f"解析器のバージョンが古い（{older} < {check.ANALYZER}）"], 1)
+    assert planned.files == []
+
+
+@pytest.mark.parametrize("analyzer", ["unexpected-analyzer-text", True, 4.5, 0, None])
+def test_a_broken_analyzer_stops_the_plan_without_showing_the_value(no_git, analyzer):
+    measure = {k: v for k, v in MEASURE.items() if k != "analyzer"}
+    if analyzer is not None:
+        measure["analyzer"] = analyzer
+    with pytest.raises(write.WriteError) as caught:  # `_plan` は無い analyzer を補うので、直接呼ぶ
+        write.plan(write.Inputs(no_git, no_git, None, measure, {}, None))
+    assert str(caught.value) == "測定の結果の analyzer は 1 以上の整数が必要（ndf project measure からやり直す）"
