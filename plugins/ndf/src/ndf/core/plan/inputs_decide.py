@@ -301,6 +301,14 @@ def body_lines(body: str) -> list[str]:
     return body.replace("\r\n", "\n").split("\n")
 
 
+def physical_lines(text: str) -> list[str]:
+    """`body_lines` の行のうち、最後の改行の後ろを行に数えないもの（閉じていないコードブロックの空行にしない）。"""
+    lines = body_lines(text)
+    if lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
     """囲みと HTML コメントの外で、行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
     found = _after_heading(lines, heading)
@@ -364,11 +372,14 @@ def _split_comments(lines: Sequence[str], tokens: Sequence[Token]) -> list[tuple
     return out
 
 
-def _analyze(lines: Sequence[str]) -> tuple[list[Token], list[tuple[str, bool, int]]]:
-    """`lines` のブロックのトークンと、`_split_comments` の結果（解析は 1 回）。"""
+def _analyze(lines: Sequence[str], *, terminated: bool = False) -> tuple[list[Token], list[tuple[str, bool, int]]]:
+    """`lines` のブロックのトークンと、`_split_comments` の結果（解析は 1 回）。
+
+    `terminated` が真なら最後の行も改行で終えて解析する（末尾の空行が、閉じていないコードブロックの本文に入る）。
+    """
     # 行の中に残った CR は改行と数えられるので、添字がずれないように空白にする
     work = [line.replace("\r", " ") for line in lines]
-    tokens = _block_tokens(work)
+    tokens = _block_tokens([*work, ""] if terminated else work)
     return tokens, _split_comments(work, tokens)
 
 
@@ -386,13 +397,12 @@ def uncommented(lines: Sequence[str]) -> list[tuple[str, bool]]:
     始まったコメントのものは閉じる行まで詰め（段落が続くまま）、ほかは空行に置き換える（コメントが区切っていた段落と
     コードをつなげない）。
     """
-    tokens, split = _analyze(lines)
+    tokens, split = _analyze(lines, terminated=True)
     paragraph_lines = _span(tokens, "inline")
     kept = [not head or bool(text.strip()) for text, head, _ in split]
     rows = [(i, text if kept[i] else "") for i, (text, _, start) in enumerate(split) if kept[i] or start not in paragraph_lines]
     texts = [text for _, text in rows]
-    # 末尾の空行は、行の終わりの改行を足して解析しないと、閉じていないコードブロックの本文に数えられない
-    if texts != list(lines) or texts[-1:] == [""]:
+    if texts != list(lines):
         tokens = _block_tokens([*texts, ""])
     code: dict[int, str] = {}
     for token in (t for t in tokens if t.type in ("fence", "code_block")):
@@ -423,14 +433,11 @@ def criteria(body: str) -> list[str]:
 def criteria_blocks(body: str) -> list[str]:
     """受け入れ条件のセクションのチェックボックスを、字下げした継続の行を含めて返す（上から。番号の数え方は `criteria` と同じ）。
 
-    先頭の行はチェックボックスの後ろの文、続く行は書かれたままで、改行でつなぐ。空行では終わらず、字下げの無い行で終わる。
+    先頭の行はチェックボックスの後ろの文、続く行は書かれたままで、どの行も改行で終える。空行では終わらず、字下げの無い行で終わる。
     字下げしたコードブロックの行も条件の続きに含める。コードブロックと HTML コメントの中の行は、条件の始まりにもセクションの終わりにもしない。
     空白と空行の整え方は、呼び手が決める。
     """
-    lines = body_lines(body)
-    # 本文の最後の改行の後ろは行でない（閉じていないコードブロックの空行に数えない）
-    if lines[-1] == "":
-        lines.pop()
+    lines = physical_lines(body)
     found = _after_heading(lines, HEADING)
     if found is None:
         return []
@@ -452,7 +459,7 @@ def criteria_blocks(body: str) -> list[str]:
             inside = i in commented or not line.strip() or line.startswith((" ", "\t"))
             if inside:
                 blocks[-1].append(line)
-    return ["\n".join(block) for block in blocks]
+    return ["".join(f"{line}\n" for line in block) for block in blocks]
 
 
 def section_lack(body: str) -> Optional[str]:

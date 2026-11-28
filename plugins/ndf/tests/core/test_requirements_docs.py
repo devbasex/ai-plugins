@@ -125,6 +125,21 @@ def test_criteria_keep_the_trailing_blank_lines_of_an_unclosed_fence() -> None:
     assert read("\n- [ ] 乙\n").text == read("\n").text == "甲\n```\nhello\n"
 
 
+@pytest.mark.parametrize("ending", ["\n", "\n\n"])
+def test_criterion_digest_matches_the_criteria_of_the_same_lines(ending: str) -> None:
+    block = f"- [ ] 甲\n  ```\n  hello{ending}"
+    assert rd.criterion_digest(block) == rd.criteria_of(f"## 受け入れ条件\n{block}")[0].digest
+
+
+def test_a_trailing_blank_line_does_not_parse_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed: list[str] = []
+    parse = inputs_decide._MARKDOWN.parse
+    monkeypatch.setattr(inputs_decide._MARKDOWN, "parse", lambda text: parsed.append(text) or parse(text))
+    rd.criteria_of("## 受け入れ条件\n- [ ] 甲\n\n- [ ] 乙\n\n")
+
+    assert len(parsed) == 3
+
+
 def test_a_fence_in_a_comment_does_not_hide_the_following_criteria() -> None:
     got = rd.criteria_of(_doc_text(criteria="- [ ] 甲\n\n<details><!--\n\n```\n-->\n</details>\n\n- [ ] 乙\n"))
     assert [c.text.split("\n", 1)[0] for c in got] == ["甲", "乙"]

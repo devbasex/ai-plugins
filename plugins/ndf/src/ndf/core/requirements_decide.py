@@ -74,7 +74,7 @@ def _sentence(text: str) -> str:
     HTML コメントを除き、各行の前後の空白と空行を落とし、先頭の番号を除く。コードブロックの中の行は、
     リストに属する字下げだけを除いて残す。
     """
-    first, *rest = text.split("\n")
+    first, *rest = inputs_decide.physical_lines(text) or [""]
     # 先頭の行は記号を除いてあるので、同じ字下げになるリスト項目の行にして、続きの行のコードブロックを読む
     marker = "- x "
     (head, _), *body = inputs_decide.uncommented([marker + first, *rest])
