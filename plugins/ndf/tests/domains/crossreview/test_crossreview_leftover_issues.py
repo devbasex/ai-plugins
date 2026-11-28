@@ -240,10 +240,10 @@ def test_issue_3780_2_files_once_and_writes_the_url_to_the_row() -> None:
 
 
 @pytest.mark.parametrize(("reason", "kept"), [pytest.param("前の理由", True, id="same"), pytest.param(None, False, id="changed")])
-def test_hold_keeps_the_skip_reason_only_in_the_state(reason: str | None, kept: bool) -> None:
+def test_defer_keeps_the_skip_reason_only_in_the_state(reason: str | None, kept: bool) -> None:
     row = _row(issue_error="前の失敗")
     data = {leftover.SKIPPED: "前の理由", report_decide.PUBLISHED_KEY: "公開済み"}
-    leftover.hold(data, [row], reason)
+    leftover.defer(data, [row], reason)
     assert data.get(leftover.SKIPPED) == reason and Filed.ERROR not in row
     assert (report_decide.PUBLISHED_KEY in data) is kept
 

@@ -201,31 +201,35 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
 
 
 @pytest.mark.parametrize(
-    ("repo_arg", "state_repo", "own", "refused"),
+    ("state_repo", "own", "refused"),
     [
-        pytest.param(None, "o/r", "O/R", False, id="same"),
-        pytest.param("o/r", "o/r", "o/r", False, id="arg-and-state-agree"),
-        pytest.param(None, None, "o/r", True, id="no-target"),
-        pytest.param(None, "o/r", "me/other", True, id="other-main"),
-        pytest.param(None, "o/r", None, True, id="main-unreadable"),
+        pytest.param("o/r", "O/R", False, id="same"),
+        pytest.param(None, "o/r", True, id="no-target"),
+        pytest.param("o/r", "me/other", True, id="other-main"),
+        pytest.param("o/r", None, True, id="main-unreadable"),
     ],
 )
 def test_issue_3780_2_filing_needs_the_settings_of_the_target_repository(
-    repo_arg: Optional[str], state_repo: Optional[str], own: Optional[str], refused: bool
+    state_repo: Optional[str], own: Optional[str], refused: bool
 ) -> None:
     def remote_repo() -> str:
         if own is None:
             raise git.GitError("リモートが無い")
         return own
 
-    note = leftover.unconfirmed_target(Path("main"), repo_arg, state_repo, lambda p: types.SimpleNamespace(remote_repo=remote_repo))
+    note = leftover.unconfirmed_target(Path("main"), state_repo, lambda p: types.SimpleNamespace(remote_repo=remote_repo))
     assert (note is not None) is refused
 
 
-def test_issue_3780_2_report_writes_nothing_when_the_repo_differs_from_the_state(tmp_path: Path, capsys, hub) -> None:
-    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**_state(), "target_repo": "acme/repo"})
-    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7", "--repo", "acme/other")
-    assert (code != 0, got["cause"]["kind"]) == (True, "precondition") and "acme/other" in got["cause"]["detail"]
+@pytest.mark.parametrize(
+    ("target", "repo_arg"), [pytest.param("acme/repo", "acme/other", id="differs"), pytest.param(None, "o/r", id="unconfirmed")]
+)
+def test_issue_3780_2_report_writes_nothing_without_a_matching_target(
+    tmp_path: Path, capsys, hub, target: Optional[str], repo_arg: str
+) -> None:
+    store.write_object(tmp_path / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": target})
+    code, got = run_cli(capsys, "report", "--state-dir", str(tmp_path), "--pr", "7", "--repo", repo_arg)
+    assert (code != 0, got["cause"]["kind"]) == (True, "precondition") and "記録を公開していない" in got["cause"]["detail"]
     assert (hub.made, hub.comments, hub.port.opened, hub.port.resolved) == (0, [], [], [])
 
 
@@ -680,7 +684,7 @@ def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_
     rerun()
     warnings = rerun()
     assert len(hub.comments) == 1 and any("issues.primary" in w for w in warnings) and checked == []
-    # 設定を直せば公開し直して起票する。作成に失敗した後の打ち直しは、公開の中で 1 回だけ照合する
+    # 設定を直せば公開し直して起票する。作成に失敗した後の打ち直しは、公開の中で 1 回だけ確認する
     (tmp_path / ".ndf").mkdir()
     (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
     github.fail[("POST", "repos/o/r/issues")] = 422
@@ -738,6 +742,7 @@ def test_issue_3780_2_run_results_point_a_left_finding_at_the_record(wt: Path, t
     path = store.state_pr(fake.state_dir, PR).path
     row = next(f for f in state["findings"] if f["id"] == left)
     row |= {"check": {"tracks": ["delivered"]}, "issue_error": "書けなかった"}
+    state["target_repo"] = "o/r"
     state[report_decide.PUBLISHED_KEY] = report_decide.published_state(PR, state, fin.CONVERGED)
     store.write_object(path, state)
     written = len(hub.comments)

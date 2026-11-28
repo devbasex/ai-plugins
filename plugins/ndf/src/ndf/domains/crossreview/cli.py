@@ -519,6 +519,12 @@ def _post_report(
         raise ReportFailed(
             f"PR #{ref.current_pr} の記録を公開していない（--repo の {filer.repo_arg} と状態ファイルの対象 {state_repo} が違う）"
         )
+    # 起票の候補があるのに元の PR のリポジトリを確かめられない状態は、`--repo` が何であっても何も書かない（#3780）
+    if not state_repo and leftover.candidates(store.read_state(ref)):
+        raise ReportFailed(
+            f"PR #{ref.current_pr} の記録を公開していない（起票の候補があるが、状態ファイルに対象のリポジトリ target_repo が無く、"
+            "元の PR のリポジトリを確かめられない）"
+        )
     try:
         hub = hub_of()
         # 同じ PR の公開のロックの中で状態ファイルを読み直す（後から取った公開は先の記録を見て二重に書かない。#4016）
@@ -529,12 +535,12 @@ def _post_report(
 
 
 def _filing_target(data: Mapping[str, Any], filer: Filer) -> tuple[Optional[str], Optional[str]]:
-    """起票先の宣言の値と、起票を見送る理由（見送らないか、GitHub にしないと宣言していれば None）。GitHub は呼ばない。"""
+    """起票先の設定の値と、起票を見送る理由（見送らないか、GitHub にしないと設定していれば None）。GitHub は呼ばない。"""
     main = filer.locate()
     primary, note = leftover.primary_of(main)
     if primary == leftover.GITHUB and main is not None:
         # 別のリポジトリの設定で起票を許可しない（許可する設定と起票先を同じリポジトリにする）
-        note = leftover.unconfirmed_target(main, filer.repo_arg, data.get(store.REPO_KEY))
+        note = leftover.unconfirmed_target(main, data.get(store.REPO_KEY))
     return primary, note
 
 
@@ -545,7 +551,7 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
         return []
     primary, note = _filing_target(data, filer)
     if primary != leftover.GITHUB or note is not None:
-        leftover.hold(data, rows, note)
+        leftover.defer(data, rows, note)
         # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
         store.write_object(ref.path, data)
         return [note] if note else []
@@ -731,7 +737,7 @@ def _report(
     skipped = None
     published = got.reused and isinstance(previous, str) and data.get(report_decide.PUBLISHED_KEY) == now
     # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由で見送るだけなら、
-    # 公開済みの記録を使う。起票先の照合は見送った後だけにする（ほかは公開の中で照合する。#3780）
+    # 公開済みの記録を使う。起票先の確認は見送った後だけにする（ほかは公開の中で確認する。#3780）
     if published and (rows := leftover.candidates(data)):
         skipped = data.get(leftover.SKIPPED)
         if skipped is None:

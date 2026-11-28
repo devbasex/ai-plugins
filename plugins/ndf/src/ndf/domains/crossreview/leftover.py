@@ -102,22 +102,18 @@ def primary_of(main: Optional[Path]) -> tuple[Optional[str], Optional[str]]:
     return None, f"直さずに残した指摘を起票していない（起票するには {where} の issues.primary を {GITHUB} に設定する）"
 
 
-def unconfirmed_target(
-    main: Path, repo_arg: Optional[str], state_repo: Optional[str], make: Callable[[Path], git.Git] = git.Git
-) -> Optional[str]:
-    """起票先が `main` の設定のリポジトリだと確かめられないときの注意（確かめられれば None）。起票先は `--repo`（`repo_arg`）、
-    無ければ状態ファイルの対象のリポジトリ（`state_repo`）で、どちらも無ければ元の PR のリポジトリを確かめられない。
-    両者の食い違いは、呼び手が公開の前に断る。"""
+def unconfirmed_target(main: Path, state_repo: Optional[str], make: Callable[[Path], git.Git] = git.Git) -> Optional[str]:
+    """起票先が `main` の設定のリポジトリだと確かめられないときの注意（確かめられれば None）。起票先は状態ファイルの対象の
+    リポジトリ（`state_repo`）だけで決め、無ければ確かめられない。`--repo` との食い違いは、呼び手が公開の前に断る。"""
     skipped = "直さずに残した指摘を起票していない"
-    target = repo_arg or state_repo
-    if not target:
-        return f"{skipped}（--repo も状態ファイルの対象も無く、元の PR のリポジトリを確かめられない）"
+    if not state_repo:
+        return f"{skipped}（状態ファイルに対象のリポジトリが無く、元の PR のリポジトリを確かめられない）"
     try:
         own = make(main).remote_repo()
     except (git.GitError, OSError) as exc:
         return f"{skipped}（メインディレクトリのリポジトリを確かめられない: {exc}）"
-    if own.casefold() != target.casefold():
-        return f"{skipped}（起票先 {target} とメインディレクトリのリポジトリ {own} が違う）"
+    if own.casefold() != state_repo.casefold():
+        return f"{skipped}（起票先 {state_repo} とメインディレクトリのリポジトリ {own} が違う）"
     return None
 
 
@@ -135,7 +131,7 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def hold(data: dict[str, Any], rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
+def defer(data: dict[str, Any], rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
     """起票を見送った理由を状態に残し、候補の行の前の起票の失敗を消す。`reason` が None（起票先を GitHub にしないと
     設定している）なら、前の理由を消す。理由が変われば公開済みの記録は古いので、打ち直しが公開し直すようにする。"""
     if data.get(SKIPPED) != reason:
