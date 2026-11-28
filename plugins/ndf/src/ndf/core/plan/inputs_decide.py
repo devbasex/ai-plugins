@@ -72,24 +72,40 @@ def _inline_marks(lines: Sequence[str] | Mapping[int, str], tokens: Iterable[Tok
             if token.type == "inline":
                 token.meta["marks"] = _token_marks(lines, token)
             else:
-                # 読み足したブロック（`tails` を持つ）はコメントの中から始まる
-                opening = "<!-- " if "tails" in token.meta else ""
-                token.meta["marks"] = set(), _attribute_marks(opening + token.content, token.map[0])
+                found = _literals(token.content, token.map[0], _tag_spans(token.content))
+                token.meta["marks"] = set(), {mark for mark, _, _ in found}
         comments |= token.meta["marks"][0]
         literals |= token.meta["marks"][1]
     return comments, literals
 
 
-def _attribute_marks(text: str, first: int) -> set[tuple[int, int]]:
-    """HTML の文 `text`（先頭の行の添字は `first`）の、タグの属性値の中の `<!--` の位置（`_inline_marks` と同じ形）。"""
-    inner = [
-        mark.start()
-        for tag in _COMMENT_OR_TAG.finditer(text)
-        if tag[1]
-        for mark in re.compile("<!--").finditer(text, tag.start(), tag.end())
-    ]
+def _tag_spans(text: str) -> list[tuple[int, int]]:
+    """HTML の文 `text` のタグの (開始, 終了)。この中の `<!--`（属性値の中）はコメントを開かない。"""
+    return [tag.span() for tag in _COMMENT_OR_TAG.finditer(text) if tag[1]]
+
+
+def _markdown_spans(text: str) -> list[tuple[int, int]]:
+    """Markdown の文 `text` の、中の `<!--` がコメントを開かない (開始, 終了)。
+
+    コード表記・タグ・エスケープを、同じインライン解析の結果から読む。
+    """
+    spans = [(a, b) for is_html, a, b in _comment_spans(text) if not (is_html and text.startswith("<!", a))]
+    escaped = (m.start() for m in re.finditer("<!--", text))
+    return spans + [(at, at + 4) for at in escaped if (at - len(text[:at].rstrip("\\"))) % 2]
+
+
+def _literals(text: str, first: int, spans: Iterable[tuple[int, int]]) -> list[tuple[tuple[int, int], int, int]]:
+    """`spans` の中の `<!--` を (位置, 範囲の最初の行, 範囲の最後の行) で返す。`text` の先頭の行の添字は `first`。
+
+    位置は `_inline_marks` と同じ形。
+    """
     ends = [m.start() for m in re.finditer("\n", text)] + [len(text)]
-    return {(first + k, ends[k] - at) for at in inner for k in (bisect_left(ends, at),)}
+    out = []
+    for begin, stop in spans:
+        for mark in re.compile("<!--").finditer(text, begin, stop):
+            k = bisect_left(ends, mark.start())
+            out.append(((first + k, ends[k] - mark.start()), first + bisect_left(ends, begin), first + bisect_left(ends, stop - 1)))
+    return out
 
 
 def _token_marks(lines: Sequence[str] | Mapping[int, str], token: Token) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
@@ -111,42 +127,26 @@ def _token_marks(lines: Sequence[str] | Mapping[int, str], token: Token) -> tupl
     return comments, literals
 
 
-def _literal_after(line: str, closed: int, at: int, tails: dict[str, list[tuple[bool, int, int]]]) -> bool:
-    """コメントを閉じた位置 `closed` より後ろの `<!--`（位置 `at`）が、エスケープかコード表記か。
-
-    閉じた位置より後ろの解析結果は `tails` に残し、同じ文は 1 回だけ解析する。
-    """
-    if (at - len(line[:at].rstrip("\\"))) % 2:
-        return True
-    tail = line[closed:]
-    if tail not in tails:
-        tails[tail] = _comment_spans(tail)
-    return any(not is_html and a <= at - closed < b for is_html, a, b in tails[tail])
-
-
 def _scan_line(
     i: int,
     line: str,
     inside: bool,
     in_html: bool,
     marks: tuple[set[tuple[int, int]], set[tuple[int, int]]],
-    tails: Optional[dict[str, list[tuple[bool, int, int]]]] = None,
 ) -> tuple[str, bool, bool]:
     """1 行の (HTML コメントを除いた文, 行の最初の文字がコメントの中か, 行の終わりがコメントの中か)。
 
     `<!--` がコメントを開くのは、行の最初の文字にあるか、HTML のブロックの中にあるか、インライン解析がコメントと読む
     ときだけで、ほかはただの文字とする。コード表記の中と、HTML のブロックのタグの属性値の中はコメントを開かない。
     `marks` は `_inline_marks` の結果。
-    `tails` は、開いたままのコメントのために `_holding_comment` が読み足した行だけに渡す（`_literal_after` の控え）。
-    その行は元の HTML のブロックの外なので、コメントを閉じた後ろは Markdown として読む。
     """
     comments, literals = marks
-    kept, pos, head, closed = "", 0, inside, None
+    kept, pos, head = "", 0, inside
     while pos < len(line):
         if inside:
             end = line.find("-->", pos)
             inside = end < 0
-            pos = closed = len(line) if inside else end + 3
+            pos = len(line) if inside else end + 3
             continue
         found = line.find("<!--", pos)
         if found < 0:
@@ -154,9 +154,7 @@ def _scan_line(
             break
         at_head = not (kept + line[pos:found]).strip()
         place = (i, len(line) - found)
-        # 読み足した行はインライン解析されないので、閉じた後ろのコード表記とエスケープはここで見る
-        literal = place in literals or (tails is not None and closed is not None and _literal_after(line, closed, found, tails))
-        if not literal and (at_head or in_html or place in comments):
+        if place not in literals and (at_head or in_html or place in comments):
             kept += line[pos:found]
             head = head or at_head
             # `<!-->` も閉じるように、開きの `<!` の直後から閉じを探す
@@ -168,10 +166,12 @@ def _scan_line(
 
 
 def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Callable[[StateBlock, int, int, bool], bool]:
-    """ブロックを開いたままのコメントで終えるとき、閉じる行までを 1 つの HTML のブロックとして読む規則。
+    """ブロックを開いたままのコメントかタグで終えるとき、閉じる行までを 1 つの HTML のブロックとして読む規則。
 
-    コメントの中の囲みの記号を、閉じた後の行まで続く囲みにしない。開いたままかは、`_split_comments` と同じく
-    `_scan_line` で決める。
+    コメントの中の囲みの記号を、閉じた後の行まで続く囲みにしない。属性値の中の行頭の `<!--` を、次のブロックの
+    コメントの開きにしない。開いたままかは、`_split_comments` と同じく `_scan_line` で決める。
+    コメントを閉じた後ろは、次の空行までをまとめて 1 回解析する。読み足した行は元のブロックの外なので Markdown と
+    して読み、元の HTML のブロックの中で閉じたときは HTML として読む。
     """
 
     def run(state: StateBlock, start: int, end: int, silent: bool) -> bool:
@@ -181,26 +181,51 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
             return True
         in_html = rule is html_block
         token = state.tokens[-1] if in_html else state.tokens[-2]
-        # 最後の `<!--` の後ろに `-->` があれば、開いたままにならない
-        if token.content.rfind("<!--") <= token.content.rfind("-->"):
+        if "<!--" not in token.content:
             return True
         rows = {n: state.src[state.bMarks[n] + state.tShift[n] : state.eMarks[n]] for n in range(*token.map)}
         marks = _inline_marks(rows, [token])
         inside = False
         for n, text in rows.items():
             inside = _scan_line(n, text, inside, in_html, marks)[2]
+
+        def full(n: int) -> str:
+            return state.src[state.bMarks[n] : state.eMarks[n]]
+
         first = line = state.line
-        tails: dict[str, list[tuple[bool, int, int]]] = {}
-        while inside and line < end:
-            text = state.src[state.bMarks[line] : state.eMarks[line]]
-            marks = set(), _attribute_marks("<!-- " + text, line)
-            inside = _scan_line(line, text, inside, True, marks, tails)[2]
+        literals: set[tuple[int, int]] = set()
+        # `parsed` は閉じた後ろを解析した最後の行、`reach` は行をまたぐタグかコード表記が届く最後の行
+        parsed = reach = first - 1
+
+        def read_after(at: int, tail: str, spans_of: Callable[[str], list[tuple[int, int]]]) -> None:
+            nonlocal parsed, reach
+            stop = at + 1
+            while stop < end and not state.isEmpty(stop):
+                stop += 1
+            text = "\n".join([tail, *map(full, range(at + 1, stop))])
+            parsed = stop - 1
+            if "<!--" not in text:
+                return
+            for mark, begin, last in sorted(_literals(text, at, spans_of(text)), key=lambda found: found[1]):
+                literals.add(mark)
+                if begin <= max(at, reach) < mark[0]:
+                    reach = last
+
+        if in_html and not inside:
+            tail = full(first - 1).rpartition("-->")[2]
+            if re.search("<[A-Za-z]", tail):
+                read_after(first - 1, tail, _tag_spans)
+        while line < end and (inside or line <= reach):
+            text = full(line)
+            if inside and line > parsed and "-->" in text:
+                read_after(line, text.partition("-->")[2], _markdown_spans)
+            inside = _scan_line(line, text, inside, True, (set(), literals))[2]
             line += 1
         if line > first:
             held = state.push("html_block", "", 0)
             held.map = [first, line]
             held.content = state.getLines(first, line, state.blkIndent, True)
-            held.meta["tails"] = tails
+            held.meta["marks"] = set(), {mark for mark in literals if first <= mark[0] < line}
             state.line = line
         return True
 
@@ -292,7 +317,6 @@ def _split_comments(lines: Sequence[str], tokens: Sequence[Token]) -> list[tuple
     """
     code = _span(tokens, "fence", "code_block")
     html = _span(tokens, "html_block")
-    held = {i: t.meta["tails"] for t in tokens if "tails" in t.meta for i in range(*t.map)}
     marks = _inline_marks(lines, tokens)
     out: list[tuple[str, bool, int]] = []
     inside, start = False, 0
@@ -302,7 +326,7 @@ def _split_comments(lines: Sequence[str], tokens: Sequence[Token]) -> list[tuple
             if i in code:
                 out.append((line, False, start))
                 continue
-        kept, head, inside = _scan_line(i, line, inside, i in html, marks, held.get(i))
+        kept, head, inside = _scan_line(i, line, inside, i in html, marks)
         out.append((kept, head, start))
     return out
 

@@ -174,6 +174,10 @@ def test_the_comment_mark_in_an_attribute_does_not_hide_the_following_criteria(v
         '<details>\n<span title="説明\n<!-- 補足">本文</span>\n</details>',
         '> <details>\n> <span title="説明\n> <!-- 補足">本文</span>',
         '<details><!--\n\n--> <span title="<!--">補足</span>',
+        '<details><!--\n\n--> `<!--` <span title="<!--">本文</span>',
+        '<details><!--\n\n--> \\<!-- <span title="<!--">本文</span>',
+        '<!-- メモ --> <span title="説明\n<!-- 補足">本文</span>',
+        '<details><!--\n\n--> <span title="説明\n<!-- 補足">本文</span>',
     ],
 )
 def test_the_comment_mark_in_a_multiline_attribute_does_not_hide_the_following_criteria(block: str) -> None:
