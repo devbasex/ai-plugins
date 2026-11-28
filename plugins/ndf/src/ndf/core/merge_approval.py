@@ -125,15 +125,13 @@ def same_writer(c: Authored, viewer: Viewer) -> bool:
     return viewer.account_id > 0 and c.author_id == viewer.account_id
 
 
-def merge_rows(hub: GitHub, number: int, viewer: Viewer, comments: Sequence[Authored] | None = None) -> list[MergeRow]:
+def merge_rows(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]:
     """PR のコメントから数える証跡を古い順に返す。書き手が `viewer`（`ndf ci merge` を打つ token の利用者）と同じ
     アカウントで、編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。
 
-    `comments`（読み終えた PR のコメントの一覧）を渡せば読み直さない。一覧の鮮度は呼び手が決める。
     `viewer` のアカウント ID が読めていない（0）なら、数えずに `TrailError`（理由は `NO_LOGIN`）。"""
     _require_login(viewer)
-    found = hub.comments(number) if comments is None else comments
-    return [row for c, row in _unedited_rows(found) if same_writer(c, viewer)]
+    return [row for c, row in _unedited_rows(hub.comments(number)) if same_writer(c, viewer)]
 
 
 def _require_login(viewer: Viewer) -> None:
@@ -174,8 +172,8 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     """対象ごとに、最新の証跡が `approvals` の承認なら担い手 `reopen` の却下の行を投稿し、PR をマージキューから外す。
 
     承認が無い・既に却下なら行は書かない。最新の承認が別のもの（残す工程や別のステートマシンの承認）なら、行を書かず
-    キューからも外さない。キューは行を書いた後に外し（キューへ入れた後に証跡を読み直す `ndf ci merge` と合わせて、
-    取り消した承認がキューに残らない）、行を書き終えた打ち直しでも外す。
+    キューからも外さない。キューは行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
+    打ち直しでも外す。
 
     別のアカウントが `approvals` を今も承認と数えるなら、token の利用者の分を書いてキューから外した後に `TrailError`
     （そのアカウントの `ndf ci merge` は通るため）。同じ識別子の承認を token の利用者が書いていても同じ。コメントの一覧は

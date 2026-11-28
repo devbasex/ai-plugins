@@ -33,23 +33,13 @@ from githubkit.exception import GraphQLFailed, PrimaryRateLimitExceeded, RateLim
 
 from ndf.adapters import cli_floor, git, github_limits, github_merge, write_gate
 from ndf.adapters.github_limits import GRAPHQL, REST, RetryWithin
-from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, QueueHolder, Verified
+from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome, Verified
 
 # 呼び手（`ndf.domains.release.land`）が github から読む、github_merge の名前
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
 
 # `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
-from ndf.adapters.github_pulls import (
-    PER_PAGE,
-    PULL_FIELDS,
-    Authored,
-    Pull,
-    account_id_of,
-    graphql_string,
-    queue_entry_of,
-    target_of,
-    text_of,
-)
+from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, target_of, text_of
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
@@ -896,14 +886,11 @@ class GitHub:
         stop = self._verify_before_send(pull.number, repo, expect) if expect is not None else None
         if stop is None and method is not None:
             stop = github_merge.queue_method_refusal(pull, method, github_merge.queue_merge_method(repo.get("mergeQueue")))
-        added = stop is None and not node["isInMergeQueue"]
-        if added:
+        if stop is None and not node["isInMergeQueue"]:
             stop = self._put_in_queue(pull, node["id"], jump, expect)
         if stop is not None:
             return stop
-        detail = f"#{pull.number} をマージキューへ入れた（マージキューの待ち）"
-        found = "" if added else queue_entry_of(node)
-        return MergeOutcome(False, MERGE_QUEUE_PENDING, detail, pull.head_sha, added_to_queue=added, queue_entry=found)
+        return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{pull.number} をマージキューへ入れた（マージキューの待ち）", pull.head_sha)
 
     def _queue_state(self, pull: Pull, expect: Optional[MergeExpect]) -> dict[str, Any]:
         """マージキューの状態の問い合わせ。`expect` があれば確かめの項目を足して同じ 1 回で読む。"""
@@ -943,24 +930,11 @@ class GitHub:
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
         return isinstance(node, dict) and node["isInMergeQueue"] is True
 
-    def queue_holder(self, number: int) -> Optional[QueueHolder]:
-        """PR `number` の今のマージキューの項目を入れたアカウントと、項目の対象。キューに無ければ None。"""
-        node = self.repository(github_merge.QUEUE_HOLDER_QUERY, {"number": int(number)})["pullRequest"]
-        entry = node.get("mergeQueueEntry") if isinstance(node, dict) else None
-        if not isinstance(entry, dict):
-            return None
-        return QueueHolder(account_id_of(entry.get("enqueuer")), *target_of(node), queue_entry_of(node))
-
-    def dequeue(self, number: int, entry: str = "") -> bool:
-        """PR `number` をマージキューから外す（入っていなければ何もしない）。`entry`（項目の ID）が今の項目と違えば、外さずに偽を返す。
-        GitHub の取り外しは PR を指定するので、項目の読み取りと取り外しの要求の間に入れ替わった項目は区別できない。"""
+    def dequeue(self, number: int) -> None:
+        """PR `number` をマージキューから外す（入っていなければ何もしない）。"""
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
-        if not (isinstance(node, dict) and node["isInMergeQueue"]):
-            return True
-        if entry and queue_entry_of(node) != entry:
-            return False
-        self._leave_queue(node["id"])
-        return True
+        if isinstance(node, dict) and node["isInMergeQueue"]:
+            self._leave_queue(node["id"])
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:
