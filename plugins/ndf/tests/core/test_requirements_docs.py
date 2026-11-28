@@ -178,6 +178,9 @@ def test_the_comment_mark_in_an_attribute_does_not_hide_the_following_criteria(v
         '<details><!--\n\n--> \\<!-- <span title="<!--">本文</span>',
         '<!-- メモ --> <span title="説明\n<!-- 補足">本文</span>',
         '<details><!--\n\n--> <span title="説明\n<!-- 補足">本文</span>',
+        '<details><!--\n\n--> <!-- 注記\n--> <span title="説明\n<!-- 補足">本文</span>',
+        '<!-- 注 --> <span title="閉じ記号 --> の例\n<!-- 開き記号の例">本文</span>',
+        "<details><!--\n\n--> `\n~~~markdown\n<!-- `\n~~~",
     ],
 )
 def test_the_comment_mark_in_a_multiline_attribute_does_not_hide_the_following_criteria(block: str) -> None:
@@ -192,6 +195,19 @@ def test_the_text_after_the_close_is_parsed_inline_once(monkeypatch: pytest.Monk
     list(inputs_decide.outside_fences("<details><!--\n\n--> `<!--` `<!--` `<!--`".split("\n")))
 
     assert len(parsed) == 1
+
+
+@pytest.mark.parametrize(
+    "after, count",
+    [("```\n<!-- 例 -->\n```", 0), ("本文で `<!--` を示す。", 1)],
+)
+def test_the_lines_after_a_bare_close_are_not_read_ahead(after: str, count: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed: list[str] = []
+    parse = inputs_decide._INLINE.inline.parse
+    monkeypatch.setattr(inputs_decide._INLINE.inline, "parse", lambda src, *rest: parsed.append(src) or parse(src, *rest))
+    list(inputs_decide.outside_fences(f"<details><!--\n\n-->\n{after}".split("\n")))
+
+    assert len(parsed) == count
 
 
 def test_the_marks_of_a_paragraph_are_converted_once(monkeypatch: pytest.MonkeyPatch) -> None:

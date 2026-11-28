@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional, TypeVar
 
 from markdown_it import MarkdownIt
-from markdown_it.common.html_re import open_tag
+from markdown_it.common.html_re import attr_name, attribute, open_tag
 from markdown_it.rules_block import StateBlock, html_block, paragraph
 from markdown_it.rules_inline import StateInline, backtick, html_inline
 from markdown_it.token import Token
@@ -29,6 +29,8 @@ KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
 # HTML の文を前から区切る。コメントは閉じ（無ければ末尾）まで 1 つにして中のタグを読まず、タグは改行を含めて読む
 _COMMENT_OR_TAG = re.compile(rf"<!(?=--).*?(?:-->|\Z)|({open_tag})", re.DOTALL)
+# 文の末尾で閉じていないタグ（属性の間か、引用符で始めた属性値の途中）
+_UNFINISHED_TAG = re.compile(rf"""<[A-Za-z][A-Za-z0-9\-]*{attribute}*(?:\s+{attr_name}\s*=\s*(?:"[^"]*|'[^']*)?|\s*/?)\Z""")
 
 
 def _recording(rule: Callable[[StateInline, bool], bool]) -> Callable[[StateInline, bool], bool]:
@@ -72,8 +74,7 @@ def _inline_marks(lines: Sequence[str] | Mapping[int, str], tokens: Iterable[Tok
             if token.type == "inline":
                 token.meta["marks"] = _token_marks(lines, token)
             else:
-                found = _literals(token.content, token.map[0], _tag_spans(token.content))
-                token.meta["marks"] = set(), {mark for mark, _, _ in found}
+                token.meta["marks"] = set(), _literals(token.content, token.map[0], _tag_spans(token.content))
         comments |= token.meta["marks"][0]
         literals |= token.meta["marks"][1]
     return comments, literals
@@ -94,18 +95,11 @@ def _markdown_spans(text: str) -> list[tuple[int, int]]:
     return spans + [(at, at + 4) for at in escaped if (at - len(text[:at].rstrip("\\"))) % 2]
 
 
-def _literals(text: str, first: int, spans: Iterable[tuple[int, int]]) -> list[tuple[tuple[int, int], int, int]]:
-    """`spans` の中の `<!--` を (位置, 範囲の最初の行, 範囲の最後の行) で返す。`text` の先頭の行の添字は `first`。
-
-    位置は `_inline_marks` と同じ形。
-    """
+def _literals(text: str, first: int, spans: Iterable[tuple[int, int]]) -> set[tuple[int, int]]:
+    """`spans` の中の `<!--` の位置（`_inline_marks` と同じ形）。`text` の先頭の行の添字は `first`。"""
     ends = [m.start() for m in re.finditer("\n", text)] + [len(text)]
-    out = []
-    for begin, stop in spans:
-        for mark in re.compile("<!--").finditer(text, begin, stop):
-            k = bisect_left(ends, mark.start())
-            out.append(((first + k, ends[k] - mark.start()), first + bisect_left(ends, begin), first + bisect_left(ends, stop - 1)))
-    return out
+    found = (mark.start() for begin, stop in spans for mark in re.compile("<!--").finditer(text, begin, stop))
+    return {(first + k, ends[k] - at) for at in found for k in (bisect_left(ends, at),)}
 
 
 def _token_marks(lines: Sequence[str] | Mapping[int, str], token: Token) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
@@ -133,20 +127,23 @@ def _scan_line(
     inside: bool,
     in_html: bool,
     marks: tuple[set[tuple[int, int]], set[tuple[int, int]]],
-) -> tuple[str, bool, bool]:
-    """1 行の (HTML コメントを除いた文, 行の最初の文字がコメントの中か, 行の終わりがコメントの中か)。
+) -> tuple[str, bool, bool, Optional[int]]:
+    """1 行の (HTML コメントを除いた文, 行の最初の文字がコメントの中か, 行の終わりがコメントの中か, 閉じた位置)。
+
+    閉じた位置は、行の中で最後に閉じたコメントの直後の添字（閉じたコメントが無ければ None）。
 
     `<!--` がコメントを開くのは、行の最初の文字にあるか、HTML のブロックの中にあるか、インライン解析がコメントと読む
     ときだけで、ほかはただの文字とする。コード表記の中と、HTML のブロックのタグの属性値の中はコメントを開かない。
     `marks` は `_inline_marks` の結果。
     """
     comments, literals = marks
-    kept, pos, head = "", 0, inside
+    kept, pos, head, closed = "", 0, inside, None
     while pos < len(line):
         if inside:
             end = line.find("-->", pos)
             inside = end < 0
             pos = len(line) if inside else end + 3
+            closed = closed if inside else pos
             continue
         found = line.find("<!--", pos)
         if found < 0:
@@ -162,7 +159,23 @@ def _scan_line(
             continue
         kept += line[pos : found + 4]
         pos = found + 4
-    return kept, head, inside
+    return kept, head, inside, closed
+
+
+def _breaks_block(state: StateBlock, line: int, end: int) -> bool:
+    """`line` が、前の行から続く段落を markdown-it-py の段落の規則で切るか。
+
+    HTML のブロックの規則は除く（属性値の中の行頭の `<!--` は、ブロックを始めない）。
+    """
+    if state.isEmpty(line):
+        return True
+    if state.sCount[line] - state.blkIndent > 3 or state.sCount[line] < 0:
+        return False
+    parent, state.parentType = state.parentType, "paragraph"
+    try:
+        return any(rule(state, line, end, True) for rule in state.md.block.ruler.getRules("paragraph") if rule is not _HTML_BLOCK)
+    finally:
+        state.parentType = parent
 
 
 def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Callable[[StateBlock, int, int, bool], bool]:
@@ -170,8 +183,9 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
 
     コメントの中の囲みの記号を、閉じた後の行まで続く囲みにしない。属性値の中の行頭の `<!--` を、次のブロックの
     コメントの開きにしない。開いたままかは、`_split_comments` と同じく `_scan_line` で決める。
-    コメントを閉じた後ろは、次の空行までをまとめて 1 回解析する。読み足した行は元のブロックの外なので Markdown と
-    して読み、元の HTML のブロックの中で閉じたときは HTML として読む。
+    コメントを閉じた後ろは、閉じた行の残りを解析する。次の行を足すのは、タグが閉じていないまま行が終わるときだけで、
+    markdown-it-py がブロックの切れ目と読む行（空行・囲み・リストなど。HTML のブロックは除く）は越えない。
+    読み足した行は元のブロックの外なので Markdown として読み、元の HTML のブロックの中で閉じたときは HTML として読む。
     """
 
     def run(state: StateBlock, start: int, end: int, silent: bool) -> bool:
@@ -185,39 +199,41 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
             return True
         rows = {n: state.src[state.bMarks[n] + state.tShift[n] : state.eMarks[n]] for n in range(*token.map)}
         marks = _inline_marks(rows, [token])
-        inside = False
+        inside, closed = False, None
         for n, text in rows.items():
-            inside = _scan_line(n, text, inside, in_html, marks)[2]
+            _, _, inside, closed = _scan_line(n, text, inside, in_html, marks)
 
         def full(n: int) -> str:
             return state.src[state.bMarks[n] : state.eMarks[n]]
 
         first = line = state.line
         literals: set[tuple[int, int]] = set()
-        # `parsed` は閉じた後ろを解析した最後の行、`reach` は行をまたぐタグかコード表記が届く最後の行
-        parsed = reach = first - 1
+        # 行をまたぐタグが届く最後の行
+        reach = first - 1
 
         def read_after(at: int, tail: str, spans_of: Callable[[str], list[tuple[int, int]]]) -> None:
-            nonlocal parsed, reach
-            stop = at + 1
-            while stop < end and not state.isEmpty(stop):
+            nonlocal reach
+            text, stop = tail, at + 1
+            while stop < end and _UNFINISHED_TAG.search(text) and not _breaks_block(state, stop, end):
+                text += "\n" + full(stop)
                 stop += 1
-            text = "\n".join([tail, *map(full, range(at + 1, stop))])
-            parsed = stop - 1
             if "<!--" not in text:
                 return
-            for mark, begin, last in sorted(_literals(text, at, spans_of(text)), key=lambda found: found[1]):
-                literals.add(mark)
-                if begin <= max(at, reach) < mark[0]:
-                    reach = last
+            spans = spans_of(text)
+            found = _literals(text, at, spans)
+            literals.update(found)
+            chain = at
+            for begin, last in sorted((at + text.count("\n", 0, a), at + text.count("\n", 0, b)) for a, b in spans):
+                if begin <= chain < last:
+                    chain = last
+            if any(at < n <= chain for n, _ in found):
+                reach = max(reach, chain)
 
-        if in_html and not inside:
-            tail = full(first - 1).rpartition("-->")[2]
-            if re.search("<[A-Za-z]", tail):
-                read_after(first - 1, tail, _tag_spans)
+        if in_html and not inside and closed is not None:
+            read_after(first - 1, rows[first - 1][closed:], _tag_spans)
         while line < end and (inside or line <= reach):
             text = full(line)
-            if inside and line > parsed and "-->" in text:
+            if inside and "-->" in text:
                 read_after(line, text.partition("-->")[2], _markdown_spans)
             inside = _scan_line(line, text, inside, True, (set(), literals))[2]
             line += 1
@@ -235,7 +251,8 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
 # コードブロックと HTML のブロックの範囲を読む（リスト項目の中の字下げは、行頭からの字下げの数では判定できない）。
 # ブロックの範囲だけを読むので、インラインは解析しない
 _MARKDOWN = MarkdownIt("commonmark").disable(["inline", "text_join"])
-_MARKDOWN.block.ruler.at("html_block", _holding_comment(html_block), {"alt": ["paragraph", "reference", "blockquote"]})
+_HTML_BLOCK = _holding_comment(html_block)
+_MARKDOWN.block.ruler.at("html_block", _HTML_BLOCK, {"alt": ["paragraph", "reference", "blockquote"]})
 _MARKDOWN.block.ruler.at("paragraph", _holding_comment(paragraph))
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
@@ -326,7 +343,7 @@ def _split_comments(lines: Sequence[str], tokens: Sequence[Token]) -> list[tuple
             if i in code:
                 out.append((line, False, start))
                 continue
-        kept, head, inside = _scan_line(i, line, inside, i in html, marks)
+        kept, head, inside, _ = _scan_line(i, line, inside, i in html, marks)
         out.append((kept, head, start))
     return out
 
