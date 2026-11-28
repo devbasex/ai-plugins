@@ -158,7 +158,7 @@ def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypat
             merge_approval.write_revocations(hub, [merge_approval.Revocation(target, frozenset({"r0"}), "reopen:x")], hub.viewer())
             after_reopen.extend(hub.dequeued)
             hub.dequeued.clear()
-        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューへ入れた", merge_hub.HEAD)
+        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューへ入れた", merge_hub.HEAD, added_to_queue=True)
 
     monkeypatch.setattr(hub, "merge", enqueue)
     _, found = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
@@ -167,3 +167,16 @@ def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypat
         assert after_reopen == [7] and hub.dequeued == [7] and found["cause"]["kind"] == "approval_stale"
     else:
         assert hub.dequeued == [] and found["cause"]["kind"] == github.MERGE_QUEUE_PENDING
+
+
+def test_a_pr_already_in_the_queue_is_not_read_again(monkeypatch, capsys, last_result):
+    """打ち直しでキューにある PR は入れ直さないので、証跡の読み直しで通信を増やさない（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO)
+    _approve(hub)
+    waiting = github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューにある", merge_hub.HEAD)
+    monkeypatch.setattr(hub, "merge", lambda number, **_kwargs: waiting)
+
+    _, found = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert found["cause"]["kind"] == github.MERGE_QUEUE_PENDING
+    assert hub.calls.count("comments") == 1 and hub.dequeued == []

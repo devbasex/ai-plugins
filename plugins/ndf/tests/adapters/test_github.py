@@ -129,6 +129,7 @@ def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued:
     })  # fmt: skip
     out = _hub(server).merge(7, jump=jump)
     assert (out.merged, out.kind) == (False, "ci_pending")
+    assert out.added_to_queue is (enqueued == 1)
     mutations = [json.loads(r.content) for r in server.sent("POST") if b"enqueuePullRequest" in r.content]
     assert len(mutations) == enqueued
     if enqueued:

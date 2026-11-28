@@ -178,7 +178,7 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
     別のアカウントが `approvals` を今も承認と数えるなら、token の利用者の分を書いてキューから外した後に `TrailError`
     （そのアカウントの `ndf ci merge` は通るため）。同じ識別子の承認を token の利用者が書いていても同じ。コメントの一覧は
     PR ごとに 1 回だけ読み、公開範囲は全体で 1 回だけ照会する。打ち直しで行は増えない。`viewer` のアカウント ID が
-    読めていないか、承認の対象のリポジトリが `hub.repo` と違えば、何も読み書きせずに `TrailError`。"""
+    読めていないか、承認の対象のリポジトリが `hub.repo` と違えば、PR のコメントもキューの状態も読み書きせずに `TrailError`。"""
     _require_login(viewer)
     foreign = sorted({r.target.repo for r in revocations if not same_repo(r.target.repo, hub.repo)})
     if foreign:

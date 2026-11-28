@@ -886,11 +886,13 @@ class GitHub:
         stop = self._verify_before_send(pull.number, repo, expect) if expect is not None else None
         if stop is None and method is not None:
             stop = github_merge.queue_method_refusal(pull, method, github_merge.queue_merge_method(repo.get("mergeQueue")))
-        if stop is None and not node["isInMergeQueue"]:
+        added = stop is None and not node["isInMergeQueue"]
+        if added:
             stop = self._put_in_queue(pull, node["id"], jump, expect)
         if stop is not None:
             return stop
-        return MergeOutcome(False, MERGE_QUEUE_PENDING, f"#{pull.number} をマージキューへ入れた（マージキューの待ち）", pull.head_sha)
+        detail = f"#{pull.number} をマージキューへ入れた（マージキューの待ち）"
+        return MergeOutcome(False, MERGE_QUEUE_PENDING, detail, pull.head_sha, added_to_queue=added)
 
     def _queue_state(self, pull: Pull, expect: Optional[MergeExpect]) -> dict[str, Any]:
         """マージキューの状態の問い合わせ。`expect` があれば確かめの項目を足して同じ 1 回で読む。"""

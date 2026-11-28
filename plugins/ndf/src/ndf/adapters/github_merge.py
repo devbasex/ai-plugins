@@ -121,6 +121,7 @@ class MergeOutcome(NamedTuple):
     """マージの結果。`kind` は断りの停止理由の種類（`refused`・`METHOD_REFUSED`・`base_conflict`・`not_ci`・`unknown`）か待ち（`MERGE_QUEUE_PENDING`）。
 
     `merge_sha` はマージで本流へ入ったコミット（GitHub がマージの応答か PR の欄で返したときだけ。ほかは空）。
+    `added_to_queue` は、待ち（`MERGE_QUEUE_PENDING`）のうち、この呼び出しが PR をキューへ入れたときだけ真。
     """
 
     merged: bool
@@ -128,6 +129,7 @@ class MergeOutcome(NamedTuple):
     detail: str
     head_sha: str
     merge_sha: str = ""
+    added_to_queue: bool = False
 
 
 class FileAt(NamedTuple):
