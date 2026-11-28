@@ -205,22 +205,18 @@ def _row(rows: list[LaneRow], key: str, lane: str) -> LaneRow:
 
 @dataclass(frozen=True)
 class RowChange:
-    """順番表の 1 行の変更のリクエスト。`index` は並びの位置（0 が先頭。None なら末尾）。
-    `moved_from` は、足す行を別のレーンから移すときの元の（レーン, 行のキー）。"""
+    """順番表の 1 行の変更のリクエスト。`index` は並びの位置（0 が先頭。None なら末尾）。"""
 
     actor: str
     reason: Optional[str] = None
     index: Optional[int] = None
-    moved_from: Optional[tuple[str, str]] = None
 
 
 def add_row(conn: sa.Connection, plan_id: str, lane: str, inp: dict[str, Any], change: RowChange) -> str:
     """順番表へ行を足す（未着手）。足した行のキーを返す。"""
     view, _ = _lane_rows(conn, plan_id, lane)
     key = _new_key(store.read_events(conn, view.lanes[lane].machine_id))
-    payload: dict[str, Any] = {"input": inp, "index": change.index}
-    if change.moved_from is not None:
-        payload["moved_from"] = {"lane": change.moved_from[0], "row": change.moved_from[1]}
+    payload = {"input": inp, "index": change.index}
     checked_write(conn, plan_id, lane, [model.EventDraft("row_added", change.actor, key, reason=change.reason, payload=payload)])
     return key
 

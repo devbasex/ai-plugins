@@ -35,7 +35,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import command, definition, design_record, invoke, issue_values, model, stages, store, withdraw
+from ndf.progress import command, definition, design_record, invoke, issue_values, model, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
 from ndf.progress.run_view import (
@@ -94,21 +94,12 @@ def append(
 ) -> list[int]:
     """`build` が今のステートマシンから作った下書きを追記する（ぶつかれば作り直す。空なら書かない）。`after` は同じトランザクションで打つ。"""
 
-    def with_conn(conn: Any, v: View) -> list[model.EventDraft]:
-        drafts = build(v)
-        after(conn)
-        return drafts
-
-    return append_in(st, machine_id, with_conn)
-
-
-def append_in(st: store.Store, machine_id: str, build: Callable[[Any, View], list[model.EventDraft]]) -> list[int]:
-    """`append` と同じで、`build` にトランザクションの接続も渡す（下書きを作るのに、ほかのステートマシンを読み書きする）。"""
-
     def write(conn: Any) -> list[int]:
         v = view(conn, machine_id)
-        drafts = build(conn, v)
-        return store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
+        drafts = build(v)
+        seqs = store.append_events(conn, machine_id, drafts, v.events[-1].seq if v.events else 0) if drafts else []
+        after(conn)
+        return seqs
 
     return command.retrying_transaction(st, write)
 
@@ -550,7 +541,7 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     if m.step is None:
         _finish_stage(d, v, m.stage)
     else:
-        write_step(d, v, m.stage, _run_step(d, v, m.stage, m.step))
+        d.write(*_run_step(d, v, m.stage, m.step))
     if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
     return None
@@ -836,11 +827,7 @@ def approved_seen(v: View, stage: str, root: Path) -> Optional[dict[str, Any]]:
 
 
 def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> list[model.EventDraft]:
-    """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。読み手役のステップは済ませるかを先に決める（#4446）。
-    承認を無効にできずに止まった工程は、ステップを呼ばずに無効にする事象を返す（書くのは `write_step`）。"""
-    if withdraw.held_back(v, s, design_record.GATE) is not None:
-        why = "止まった時に無効にできなかった設計の承認を無効にして、レビューから流し直す"
-        return design_record.reset_drafts(v, s, why)
+    """ステップを 1 つ呼ぶ。打ち直しで直る止まりは方針どおりに打ち直す（SF8）。読み手役のステップは済ませるかを先に決める（#4446）。"""
     prog = step_progress(v, s.name)
     skipped = _reading_skipped(d, v, s, step, prog) if step.kind == stages.READING_KIND else None
     if skipped is not None:
@@ -861,31 +848,6 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
         run = _reading_run(v, s, step, run, work_dir)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     return _step_draft(v, s, step, prog, res)
-
-
-def write_step(d: Drive, v: View, s: stages.StageDef, drafts: list[model.EventDraft]) -> None:
-    """ステップの結果の事象を書く。消費した設計の承認を無効にする（承認ゲートのステップを未了に戻す）なら、同じ
-    トランザクションで、回答が外した課題を戻し、課題を繰り越したレーンの行を取り消す。
-
-    繰り越し行を取り消せなければ、承認は無効にせず失敗の事象だけを書き、理由へ直し方を足して、元の停止理由を
-    残す（`withdraw.HELD_CAUSE`）。`retry` の後は `_run_step` がステップを打たずに、ここで無効にし直す。
-    """
-    answered = withdraw.consumed_answer(v, s, design_record.GATE, drafts)
-    if answered is None:
-        d.write(*drafts)
-        return
-    why = f"工程 {s.name} が {APPROVAL_STALE} で止まり、外した承認が無効になった"
-    # 失敗の事象は行を実行中でなくするので、課題を戻す事象はその前に置く
-    resets = [x for x in drafts if x.kind != FAILED]
-    failed = [x for x in drafts if x.kind == FAILED]
-    try:
-        append_in(d.st, d.machine_id, lambda conn, now: [*resets, *withdraw.take_back(conn, now, s.name, answered, why), *failed])
-    except withdraw.Blocked as exc:
-        held = failed[0].payload if failed else withdraw.held_back(v, s, design_record.GATE)
-        original = held.get(withdraw.HELD_CAUSE, held["cause"])
-        cause = {**original, "detail": f"{original['detail']}。{exc}"}
-        payload = {"cause": cause, "step": held["step"], withdraw.HELD_CAUSE: original}
-        d.write(model.EventDraft(FAILED, ACTOR, s.name, payload=payload, rev=v.rev))
 
 
 def _stage_output(s: stages.StageDef, prog: StepProgress) -> tuple[dict[str, Any], dict[str, Any]]:

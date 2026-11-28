@@ -16,7 +16,7 @@ from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
 from ndf.contracts import result
 from ndf.core import actors, approval_words, merge_approval, production_merge
-from ndf.progress import command, invoke, lane, model, plan, run, stages, store, withdraw
+from ndf.progress import command, invoke, lane, model, plan, run, stages, store
 from ndf.progress.gate import design
 from ndf.progress.gate.asking import (
     ORGANIZER_ANSWERS,
@@ -550,13 +550,20 @@ def _take_back(
 
     比べた後に回答が読まれていれば（同じ回答の事象が今も読む回答でなければ）何も書かない。"""
     stage = str(answered.draft.row_key)
+    undo: list[bool] = []
 
-    def build(conn: Any, now: run.View) -> list[model.EventDraft]:
+    def build(now: run.View) -> list[model.EventDraft]:
+        undo.clear()
         if not _still(now, answered):
             return []
-        return [*back(now), *withdraw.take_back(conn, now, stage, answered, why)]
+        undo.append(True)
+        return [*back(now), *_undropped(now, stage, answered)]
 
-    run.append_in(st, machine_id, build)
+    def after(conn: Any) -> None:
+        if undo:
+            _uncarry(conn, machine_id, run.event_payload(answered).get("carried_row"), why)
+
+    run.append(st, machine_id, build, after)
 
 
 # 対象に結び付かない設計の承認を待ちへ戻す理由（承認ゲートの待ちの記録に残る）
@@ -621,7 +628,7 @@ def _reopen_unbound(st: store.Store, machine_id: str) -> Optional[str]:
     消費済みなら承認ゲートのステップを先に未了に戻す。書く時点で同じ承認でなくなっていれば何も書かない。"""
     held: list[_Unbound] = []
 
-    def build(conn: Any, now: run.View) -> list[model.EventDraft]:
+    def build(now: run.View) -> list[model.EventDraft]:
         held.clear()
         got = _unbound_approval(now)
         if got is None:
@@ -630,10 +637,13 @@ def _reopen_unbound(st: store.Store, machine_id: str) -> Optional[str]:
         name, step = got.stage.name, got.step
         reset = [_no_report_draft(now, name, step.id, stages.RESET, got.generation, UNBOUND_REASON)] if got.consumed else []
         wait = _no_report_draft(now, name, step.id, "waiting", got.generation, UNBOUND_REASON)
-        undone = withdraw.take_back(conn, now, name, got.answered, UNBOUND_REASON)
-        return [*reset, wait, *_reading_reset(now, name, step.gate), *undone]
+        return [*reset, wait, *_reading_reset(now, name, step.gate), *_undropped(now, name, got.answered)]
 
-    run.append_in(st, machine_id, build)
+    def after(conn: Any) -> None:
+        if held:
+            _uncarry(conn, machine_id, run.event_payload(held[0].answered).get("carried_row"), UNBOUND_REASON)
+
+    run.append(st, machine_id, build, after)
     return UNBOUND_REASON if held else None
 
 
@@ -732,7 +742,7 @@ def _step_once(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dic
         v = run.read(st, machine_id)
         m = run.decide(v)
         if m.action == run.Action.RESUME and m.stage is not None and m.step is not None:
-            run.write_step(d, v, m.stage, run._run_step(d, v, m.stage, m.step))
+            d.write(*run._run_step(d, v, m.stage, m.step))
             d.synced()
         v = run.read(st, machine_id)
         m = run.decide(v)
@@ -753,6 +763,27 @@ def _judged_elsewhere(p: Mapping[str, Any], q: Question, seen: Target, now: Targ
     if seen.head is None or now.head is None or seen.head != now.head:
         return f"head の SHA（判定した値 {seen.head}・今の値 {now.head}）"
     return None
+
+
+def _undropped(v: run.View, stage: str, answered: model.Event) -> list[model.EventDraft]:
+    """待ちへ戻した回答が外した課題を、今のスプリントの文脈の `issues` へ戻す事象（回答の前の値。`_dropped` の逆）。"""
+    if not run.event_payload(answered).get("dropped"):
+        return []
+    earlier = [ev for ev in v.events if ev.seq < answered.seq]
+    before = stages.compose_context(v.doc["context"], stages.recorded_outputs(earlier, v.rev))
+    payload = {"outputs": {"issues": before["issues"]}}
+    return [model.EventDraft(stages.OUTPUTS_EVENT, run.CONDUCTOR, stage, payload=payload, rev=v.rev)]
+
+
+def _uncarry(conn: Any, machine_id: str, carried: Optional[str], reason: str) -> None:
+    """待ちへ戻した回答が外した課題を入れたレーンの行を取り消す（`_carry` の逆）。"""
+    if not carried:
+        return
+    found = lane.sprint_row(conn, machine_id)
+    if found is None:
+        return
+    plan_id, name, _row = found
+    lane.cancel_row(conn, plan_id, name, carried, lane.RowChange(run.CONDUCTOR, reason))
 
 
 def _still(v: run.View, answered: model.Event) -> bool:

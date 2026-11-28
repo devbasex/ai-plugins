@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from typing import Any, Optional
@@ -15,23 +14,6 @@ from ndf.progress.lane.types import PENDING, PLAN_ROW, LaneRow, LaneSpec, PlanVi
 
 
 # 記録に残る 11.0.13 までのレーンの plans・計画の max_lanes・max_plans は読まない（#3989 の決定 2）
-
-
-# `moved_from` を持たないバージョンの `ndf lanes move` は、足す行の理由にだけ移動元を残した
-_MOVED_REASON = re.compile(r"レーン (\S+) の行 (\S+) から移した: ")
-
-
-def _moved_from(d: model.EventDraft) -> Optional[tuple[str, str]]:
-    """行を足す事象が別のレーンからの移動なら、元の（レーン, 行のキー）。"""
-    moved = d.payload.get("moved_from")
-    if moved:
-        return (moved["lane"], moved["row"])
-    if d.actor != "organizer" or d.reason is None:
-        return None
-    legacy = _MOVED_REASON.match(d.reason)
-    if legacy is None:
-        return None
-    return (legacy[1], legacy[2])
 
 
 def _spec(name: str, body: Mapping[str, Any]) -> LaneSpec:
@@ -97,7 +79,7 @@ def _row_from(rows: dict[str, LaneRow], ev: model.Event) -> Optional[LaneRow]:
     d = ev.draft
     row = rows.get(d.row_key)
     if d.kind == "row_added":
-        return LaneRow(d.row_key, dict(d.payload["input"]), PENDING, reason=d.reason, moved_from=_moved_from(d))
+        return LaneRow(d.row_key, dict(d.payload["input"]), PENDING, reason=d.reason)
     if row is None:
         return None
     if d.kind == "row_answered":
