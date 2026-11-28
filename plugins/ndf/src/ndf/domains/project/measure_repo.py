@@ -335,13 +335,12 @@ def _old_guide_notes(tree: Tree, files: list[str], imports: list[dict[str, str]]
 def instruction_notes(tree: Tree) -> list[str]:
     """指示書の注意書き（指示書かその読み込むファイルに古い NDF の案内がある・指示書が無い）。"""
     files = instruction_files(tree)
+    if not files:
+        return ["指示書（AGENTS.md・CLAUDE.md など）が無い。NDF と各ランタイムが読む指示書を置くとよい"]
     imports = [
         {"from": f, "to": _normalize(str(PurePosixPath(f).parent / m.group(1)))} for f in files for m in IMPORT_TOKEN.finditer(tree.text(f))
     ]
-    notes = _old_guide_notes(tree, files, imports)
-    if not files:
-        notes.append("指示書（AGENTS.md・CLAUDE.md など）が無い。NDF と各ランタイムが読む指示書を置くとよい")
-    return notes
+    return _old_guide_notes(tree, files, imports)
 
 
 def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
