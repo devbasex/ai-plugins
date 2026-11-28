@@ -72,25 +72,37 @@ def section_lines(body: str, heading: str) -> Optional[list[str]]:
 
 
 def outside_fences(lines: Iterable[str], fence: re.Pattern[str] = _FENCE) -> Iterator[tuple[int, str]]:
-    """囲み（`fence` に当たる行で開いて閉じる）の外の行を `(添字 0 始まり, 行)` で返す。囲みの行そのものは返さない。"""
-    fenced = False
+    """囲み（`fence` に当たる行で開く）の外の行を `(添字 0 始まり, 行)` で返す。囲みの開閉の行は返さない。
+
+    閉じるのは、開いた行と同じ記号が同じ数以上並び、後ろが空白だけの行。`fence` の 1 つ目の組は記号の始まりを指す。
+    """
+    opened = ""
     for i, line in enumerate(lines):
-        if fence.match(line):
-            fenced = not fenced
-            continue
-        if not fenced:
+        found = fence.match(line)
+        if found:
+            rest = line[found.start(1) :]
+            after = rest.lstrip(rest[0])
+            marks = rest[: len(rest) - len(after)]
+            if not opened:
+                opened = marks
+                continue
+            if marks.startswith(opened) and not after.strip():
+                opened = ""
+                continue
+        if not opened:
             yield i, line
 
 
 def criteria(body: str) -> list[str]:
     """受け入れ条件のセクションのチェックボックスの先頭の行の文（上から）。セクションが無ければ空。"""
-    return [block.split("\n", 1)[0] for block in criteria_blocks(body)]
+    return [block.split("\n", 1)[0].strip() for block in criteria_blocks(body)]
 
 
 def criteria_blocks(body: str) -> list[str]:
     """受け入れ条件のセクションのチェックボックスを、字下げした継続の行を含めて返す（上から。番号の数え方は `criteria` と同じ）。
 
-    各行は前後の空白を落として改行でつなぐ。空行は飛ばし、字下げの無い行で条件は終わる。
+    先頭の行はチェックボックスの後ろの文、続く行は書かれたままで、改行でつなぐ。空行では終わらず、字下げの無い行で終わる。
+    空白と空行の整え方は、呼び手が決める。
     """
     blocks: list[list[str]] = []
     inside = False
@@ -100,12 +112,12 @@ def criteria_blocks(body: str) -> list[str]:
     for line in found:
         box = _BOX.match(line)
         if box:
-            blocks.append([box.group(1).strip()])
+            blocks.append([box.group(1)])
             inside = True
-        elif inside and line.strip():
-            inside = line.startswith((" ", "\t"))
+        elif inside:
+            inside = not line.strip() or line.startswith((" ", "\t"))
             if inside:
-                blocks[-1].append(line.strip())
+                blocks[-1].append(line)
     return ["\n".join(block) for block in blocks]
 
 

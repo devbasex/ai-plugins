@@ -53,8 +53,17 @@ def test_criteria_digests_change_with_the_continuation_lines(operation: str, out
     assert rd.criteria_list_digest(before) != rd.criteria_list_digest(after)
 
 
-def test_criteria_of_skips_the_headings_in_code_blocks() -> None:
-    example = "```markdown\n## 受け入れ条件\n\n- [ ] 例\n```\n\n"
+@pytest.mark.parametrize(
+    "example",
+    [
+        "```markdown\n## 受け入れ条件\n\n- [ ] 例\n```\n\n",
+        # 別の記号の行・短い並び・後ろに語のある行は、囲みを閉じない
+        "```text\n~~~\n```\n\n",
+        "````markdown\n```\n## 受け入れ条件\n\n- [ ] 例\n````\n\n",
+        "~~~\n~~~python\n## 受け入れ条件\n\n- [ ] 例\n~~~~\n\n",
+    ],
+)
+def test_criteria_of_skips_the_headings_in_code_blocks(example: str) -> None:
     assert [c.text for c in rd.criteria_of(example + _doc_text())] == ["甲", "乙"]
 
 

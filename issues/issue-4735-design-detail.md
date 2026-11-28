@@ -149,7 +149,7 @@ plugins/ndf/src/ndf/
 | `Doc` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(path: str, source: str, commit: Optional[str], issues: tuple[int, ...], body: str, criteria: tuple[Criterion, ...], criteria_digest: str)` | 読んだ要求仕様書 1 本 |
 | `Lookup` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(docs: dict[int, Doc], missing: tuple[int, ...])` | 番号ごとの要求仕様書と、見つからない番号 |
 | `RequirementsError` | `core/requirements_decide.py` | 新設（例外） | `(cause: str, detail: str, gaps: Sequence[dict[str, str]] = ())` | 読めない理由を結果 JSON の `cause` で持つ |
-| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(text: str) -> str` | チェックボックスの印と先頭の番号を除き、各行の前後の空白と空行を落とした文の SHA-256 の先頭 12 桁を返す |
+| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(text: str) -> str` | 条件の文を設計書の「条件の版を計算する文」の順に整え、SHA-256 の先頭 12 桁を返す |
 | `criteria_of` | `core/requirements_decide.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを、字下げした継続の行を含めて上から番号を振って読み、文の重なりを断る |
 | `criteria_list_digest` | `core/requirements_decide.py` | 新設 | `(criteria: Sequence[Criterion]) -> str` | 条件の版を番号の順に改行でつないだ文字列の SHA-256 の先頭 12 桁を返す |
 | `parse_doc` | `core/requirements_decide.py` | 新設 | `(path: str, raw: bytes, *, source: str, commit: Optional[str], repo: str) -> Doc` | バイト列を UTF-8 で読み、元の Issue の行と条件を確かめて `Doc` にする |
