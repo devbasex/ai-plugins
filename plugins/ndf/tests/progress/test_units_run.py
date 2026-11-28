@@ -613,6 +613,28 @@ def test_a_merged_commit_the_fetch_does_not_show_yet_is_taken_in_later_and_keeps
     assert json.loads(ingest.read_text()) == {}
 
 
+def test_a_merge_commit_outside_the_sprint_branch_does_not_move_the_sprint_worktree(world):
+    ctx = _ctx(world)
+    head = _git(world.sprint, "rev-parse", "HEAD")
+    _git(world.sprint, "switch", "-q", "-c", "other")
+    _git(world.sprint, "commit", "-q", "--allow-empty", "-m", "別のブランチ")
+    outside = _git(world.sprint, "rev-parse", "HEAD")
+    _git(world.sprint, "switch", "-q", BRANCH)
+
+    taken = units_invoke.advance(ctx, {"A": github_pulls.MergedPull(101, outside)})
+
+    assert taken == frozenset() and _git(world.sprint, "rev-parse", "HEAD") == head
+
+
+def test_a_merged_unit_the_sprint_head_already_contains_is_not_taken_in_again(world, monkeypatch):
+    assert world.run().status == "ok"
+    monkeypatch.setattr(units_invoke, "advance", lambda ctx, pulls: pytest.fail("反映済みの単位は渡さない"))
+
+    again = world.run()
+
+    assert again.status == "ok", again.report
+
+
 # --- 単位の作業場所 ---------------------------------------------------------------------------------
 
 

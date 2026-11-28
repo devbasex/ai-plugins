@@ -338,21 +338,30 @@ class _Flow:
                 self.board.taken(key)
                 self.order.finish(key)
             elif not self.board.add_ingest(key, pull):
-                detail = f"PR #{pull.number} のマージ {pull.merge_sha} を、上限の時間内にスプリントの作業場所へ反映できない"
-                self.failures[key] = UnitsStopped(github_merge.MERGE_QUEUE_PENDING, detail)
+                self._expired_in_ingest(key, pull)
         return True
 
     def poll(self) -> None:
-        """次の問い合わせの時刻に達していれば、待ちの PR の状態をまとめて読み、反映待ちを反映し直し、上限を超えた待ちを外す。"""
+        """次の問い合わせの時刻に達していれば、待ちの PR の状態をまとめて読み、反映待ちを反映し直す。上限を超えた待ちは外す。
+
+        上限が来ただけのときは、問い合わせずに超えた待ちだけを外し、次の問い合わせの時刻を変えない。
+        """
         if self.broken is not None or not self.board.due():
             return
-        states = self.board.read()
-        for key in sorted(states, key=self.order.position.__getitem__):
-            self._apply(key, states[key])
-        self.take_in(retry=True)
+        reading = self.board.read_due()
+        states = self.board.read() if reading else {}
+        if reading:
+            for key in sorted(states, key=self.order.position.__getitem__):
+                self._apply(key, states[key])
+            self.take_in(retry=True)
         for key in [k for k in self.board.queued if self.board.expired(k)]:
             self._expired_in_queue(key, self.board.queued.pop(key).number)
-        self.board.schedule(states)
+        for key in [k for k in self.board.ingest if self.board.expired(k)]:
+            self._expired_in_ingest(key, self.board.ingest.pop(key))
+        if reading:
+            self.board.schedule(states)
+        else:
+            self.board.rest()
 
     def _apply(self, key: str, state: units_queue.State) -> None:
         """読んだ状態の次の手を当てる。"""
@@ -383,6 +392,11 @@ class _Flow:
         kind = github_merge.MERGE_QUEUE_PENDING if wait is None else "infra_wait"
         self.failures[key] = UnitsStopped(kind, detail, retry_after=wait)
 
+    def _expired_in_ingest(self, key: str, pull: github_pulls.MergedPull) -> None:
+        """反映を待つ上限を超えたマージを失敗にする。"""
+        detail = f"PR #{pull.number} のマージ {pull.merge_sha} を、上限の時間内にスプリントの作業場所へ反映できない"
+        self.failures[key] = UnitsStopped(github_merge.MERGE_QUEUE_PENDING, detail)
+
     def result(self) -> Flowed:
         for key, ticket in self.board.queued.items():
             detail = f"PR #{ticket.number} はマージキューの待ち"
@@ -398,6 +412,8 @@ def dropped(number: int, state: units_queue.State) -> str:
     """キューの待ちをやめて失敗にする理由。"""
     if state.kind == units_queue.CLOSED:
         return f"PR #{number} がマージされずに閉じられた"
+    if state.kind == units_queue.ELSEWHERE:
+        return f"PR #{number} がスプリントブランチでないブランチへマージされた"
     return f"PR #{number} は打ち直した後もマージキューから外れた"
 
 
@@ -419,7 +435,7 @@ def remerge(
     act = units_queue.action(state, record is not None and bool(record["resent"]))
     if act == units_queue.WAIT:
         waiting = Queued(github_merge.MERGE_QUEUE_PENDING, f"PR #{number} はマージキューの待ち")
-        waiting.ticket = ticket
+        waiting.ticket = ticket._replace(retry_after=state.retry_after)
         raise waiting
     if act == units_queue.FAIL:
         raise UnitsStopped("precondition", dropped(number, state))
@@ -431,6 +447,8 @@ def remerge(
     except Queued as exc:
         exc.ticket = exc.ticket._replace(resent_now=True)
         raise
+    except Outdated:
+        raise  # 断られた PR はキューに残らず、単位を始め直せば進む
     except UnitsStopped as exc:
         raise Unconfirmed(exc.kind, exc.detail, retry_after=exc.retry_after) from exc
 

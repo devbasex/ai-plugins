@@ -471,8 +471,9 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
             raise exc
         return _unit_stop_of(report, "単位を流せない")
 
-    # マージのコミットが分かる単位は、作業場所へ反映できたことを確かめてから後の単位を始める
-    landing = {k: p for k, p in done.items() if p.merge_sha}
+    # マージのコミットを手元の HEAD が含まない単位だけを、作業場所へ反映できたことを確かめてから後の単位を始める
+    sprint = Git(ctx.sprint)
+    landing = {k: p for k, p in done.items() if p.merge_sha and not _within(sprint, p.merge_sha, "HEAD")}
     order = units_flow.Order(found.units, frozenset(done) - landing.keys(), chained=not found.source)
     watching = _watching(ctx, ports, hub)
     ops = units_flow.Ops(
@@ -551,7 +552,7 @@ def _watching(ctx: Context, ports: Ports, hub: github.GitHub) -> units_queue.Wat
     overrides = ctx.run.overrides
     budget = overrides["ci_budget"] if "ci_budget" in overrides else route.params()["ci_budget"].default
     return units_queue.Watching(
-        read=lambda numbers: units_queue.read(hub, numbers),
+        read=lambda numbers: units_queue.read(hub, numbers, ctx.branch),
         advance=lambda pulls: advance(ctx, pulls),
         ingest=ctx.work_dir / UNITS_DIR / INGEST_FILE,
         budget=float(str(budget)),
@@ -572,15 +573,16 @@ def advance(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> froze
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
     head = _catch_up_to(g, ctx, known, tip)
-
-    def within(sha: str, of: str) -> bool:
-        return g.commit_or_none(sha) is not None and g.is_ancestor(sha, of)
-
-    taken = frozenset(k for k, p in pulls.items() if not p.merge_sha or within(p.merge_sha, head))
-    if any(within(p.merge_sha, tip) for k, p in pulls.items() if k not in taken):
+    taken = frozenset(k for k, p in pulls.items() if not p.merge_sha or _within(g, p.merge_sha, head))
+    if any(_within(g, p.merge_sha, tip) for k, p in pulls.items() if k not in taken):
         _check_sprint_branch(g, ctx)
         raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
     return taken
+
+
+def _within(g: Git, sha: str, of: str) -> bool:
+    """コミット `sha` が手元にあり、`of` の履歴に含まれるか。"""
+    return g.commit_or_none(sha) is not None and g.is_ancestor(sha, of)
 
 
 def _start_unit(
@@ -940,8 +942,8 @@ def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
 
 
 def _catch_up_to(g: Git, ctx: Context, landed: Sequence[github_pulls.MergedPull], tip: str) -> str:
-    """スプリントの作業場所を、単位のマージコミットのうち手元の HEAD から最も先のものまで fast-forward で進め、進めた後の
-    HEAD を返す。並列に流すとマージの順は並びと違いうるので、祖先の関係で選ぶ。取得済みのリモートの HEAD（`tip`）が
+    """スプリントの作業場所を、`tip` の履歴にある単位のマージコミットのうち手元の HEAD から最も先のものまで fast-forward で
+    進め、進めた後の HEAD を返す。並列に流すとマージの順は並びと違いうるので、祖先の関係で選ぶ。取得済みのリモートの HEAD（`tip`）が
     マージコミットの 1 つで、手元から進められれば、ほかの候補は調べない（Git の起動を単位の数に比例させない）。
 
     手元で読めるマージコミットが無いか、手元がその祖先でなければ進めない（違いは呼び手が利用者に知らせる）。進める直前に、
@@ -955,7 +957,7 @@ def _catch_up_to(g: Git, ctx: Context, landed: Sequence[github_pulls.MergedPull]
     else:
         for pull in landed:
             sha = pull.merge_sha
-            if sha and sha != target and g.commit_or_none(sha) is not None and g.is_ancestor(target, sha):
+            if sha and sha != target and g.commit_or_none(sha) is not None and g.is_ancestor(target, sha) and g.is_ancestor(sha, tip):
                 target, number = sha, pull.number
     if target == head:
         return head

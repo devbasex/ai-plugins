@@ -19,6 +19,7 @@ from ndf.core.plan import files as plan_files
 
 # 読んだ PR の状態の種類
 MERGED, QUEUED, OPEN, CLOSED, UNKNOWN = "merged", "queued", "open", "closed", "unknown"
+ELSEWHERE = "elsewhere"  # スプリントブランチでないブランチへマージされた
 # 次の手
 DONE, WAIT, RESEND, FAIL = "done", "wait", "resend", "fail"
 
@@ -33,12 +34,14 @@ class State(NamedTuple):
 
 class Ticket(NamedTuple):
     """キューで待つ単位の PR。`record` は単位の保存先の `queue.json`、`resend` は `ndf ci merge` を打ち直し、マージできれば
-    結果の項目とマージした PR を返す（呼んだスレッドで打つ）。`resent_now` はこの起動で打ち直し済みか。"""
+    結果の項目とマージした PR を返す（呼んだスレッドで打つ）。`resent_now` はこの起動で打ち直し済みか。`retry_after` は
+    待ちに加える前の状態の読み取りで GitHub が示した待ちの秒。"""
 
     number: int
     record: Path
     resend: Callable[[], tuple[dict[str, Any], github_pulls.MergedPull]]
     resent_now: bool = False
+    retry_after: Optional[float] = None
 
 
 class Watching(NamedTuple):
@@ -53,20 +56,23 @@ class Watching(NamedTuple):
     sleep: Callable[[float], None] = time.sleep
 
 
-def read(hub: github.GitHub, numbers: Sequence[int]) -> dict[int, State]:
-    """番号ごとの PR の状態を GraphQL でまとめて読む（100 件ごとに 1 回）。読めなければ、すべて `unknown` にする。"""
+def read(hub: github.GitHub, numbers: Sequence[int], base: str) -> dict[int, State]:
+    """番号ごとの PR の状態を GraphQL でまとめて読む（100 件ごとに 1 回）。読めなければ、すべて `unknown` にする。
+
+    `base` は PR のマージ先として期待するブランチで、ほかのブランチへのマージはマージ済みと扱わない。
+    """
     try:
         pulls = hub.pulls(numbers, rest_fallback=False)
     except github.GitHubError as exc:
         return {n: State(UNKNOWN, retry_after=exc.retry_after) for n in numbers}
-    return {n: _state_from_pull(pulls[n] if n in pulls else None) for n in numbers}
+    return {n: _state_from_pull(pulls[n] if n in pulls else None, base) for n in numbers}
 
 
-def _state_from_pull(pull: Optional[github_pulls.Pull]) -> State:
+def _state_from_pull(pull: Optional[github_pulls.Pull], base: str) -> State:
     if pull is None:
         return State(UNKNOWN)
     if pull.merged:
-        return State(MERGED, pull.merge_sha)
+        return State(MERGED, pull.merge_sha) if pull.base_ref == base else State(ELSEWHERE)
     if pull.queued:
         return State(QUEUED)
     return State(OPEN if pull.state == "open" else CLOSED)
@@ -78,7 +84,7 @@ def action(state: State, resent: bool) -> str:
         return DONE
     if state.kind == OPEN:
         return FAIL if resent else RESEND
-    return FAIL if state.kind == CLOSED else WAIT
+    return FAIL if state.kind in (CLOSED, ELSEWHERE) else WAIT
 
 
 # --- 打ち直しをまたぐ記録 -------------------------------------------------------------------------
@@ -136,6 +142,7 @@ class Board:
         """キューの待ちに加える。上限をすでに超えていれば加えずに偽を返す。"""
         since = float(queued_record(ticket.record, ticket.number, self.watching.clock())["queued_at"])
         self.since[key] = since
+        self._note_reset(key, ticket.retry_after)
         if self.expired(key):
             return False
         self.queued[key] = ticket
@@ -191,6 +198,10 @@ class Board:
     def due(self) -> bool:
         return self.waiting() and self.watching.clock() >= self._target()
 
+    def read_due(self) -> bool:
+        """次の問い合わせの時刻に達したか。待ちの上限が来ただけなら偽（ほかの PR を読まない）。"""
+        return self.next_at is not None and self.watching.clock() >= self.next_at
+
     def _target(self) -> float:
         """次の問い合わせの時刻と、いちばん早い待ちの上限の早い方。"""
         assert self.next_at is not None, "待ちを加えると次の時刻を持つ"
@@ -206,13 +217,17 @@ class Board:
             return {}
         found = self.watching.read([t.number for t in self.queued.values()])
         states = {k: found[t.number] for k, t in self.queued.items()}
-        now = self.watching.clock()
         for key, state in states.items():
             if state.retry_after is None:
                 self.resumable.pop(key, None)
             else:
-                self.resumable[key] = now + state.retry_after
+                self._note_reset(key, state.retry_after)
         return states
+
+    def _note_reset(self, key: str, retry_after: Optional[float]) -> None:
+        """GitHub が示した待ちの秒があれば、待ちが解ける時刻を持つ。"""
+        if retry_after is not None:
+            self.resumable[key] = self.watching.clock() + retry_after
 
     def schedule(self, states: Mapping[str, State]) -> None:
         """問い合わせの後の次の時刻を決める。状態が変わらない間は間隔を延ばし、変われば 1 ステップ縮める。"""
@@ -227,4 +242,9 @@ class Board:
         if self.waiting():
             self._arm()
         else:
-            self.interval, self.previous = self.first, None
+            self.rest()
+
+    def rest(self) -> None:
+        """待ちが無くなっていれば、次の問い合わせの時刻と間隔を最初に戻す。"""
+        if not self.waiting():
+            self.next_at, self.interval, self.previous = None, self.first, None

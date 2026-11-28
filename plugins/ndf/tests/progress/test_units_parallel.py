@@ -502,8 +502,8 @@ def test_a_pull_over_the_wait_limit_fails_while_other_units_run_and_holds_the_su
 
     got = fake.flow()
 
-    # 上限の時刻に最後の 1 回を読んで外す
-    assert [t for t, _ in fake.reads] == [10, 20, 25]
+    # 上限の時刻には読まずに外す
+    assert [t for t, _ in fake.reads] == [10, 20]
     assert [(u.name, e.kind) for u, e in got.failures] == [("A", kind)]
     assert fake.names("start") == ["A", "X"] and [u.name for u, _ in got.waiting] == ["w4"]
     assert not [e for e in fake.log if e[0] == "resend"]
@@ -553,6 +553,30 @@ def test_a_resent_unit_refused_as_behind_is_started_again_within_the_limit(tmp_p
     assert not got.failures and len(got.items) == 3
 
 
+def test_a_resent_merge_only_unit_refused_as_behind_stays_outdated(tmp_path):
+    (tmp_path / "queue.json").write_text(json.dumps({"pr": 1, "resent": False, "queued_at": 0}), encoding="utf-8")
+
+    def resend():
+        raise units_flow.Outdated("not_ci", "古い")
+
+    ticket = units_queue.Ticket(1, tmp_path / "queue.json", resend)
+
+    with pytest.raises(units_flow.Outdated):
+        units_flow.remerge(_unit("A"), ticket, lambda numbers: {1: OPEN}, lambda: 0)
+
+
+def test_the_reset_time_of_the_first_read_of_a_rerun_is_kept_for_an_expired_wait(tmp_path):
+    (tmp_path / "queue.json").write_text(json.dumps({"pr": 1, "resent": False, "queued_at": 0}), encoding="utf-8")
+    ticket = units_queue.Ticket(1, tmp_path / "queue.json", lambda: pytest.fail("打ち直さない"))
+    limited = units_queue.State("unknown", retry_after=600)
+    with pytest.raises(units_flow.Queued) as raised:
+        units_flow.remerge(_unit("A"), ticket, lambda numbers: {1: limited}, lambda: 4000)
+    board = units_queue.Board(units_queue.Watching(budget=3600, clock=lambda: 4000))
+
+    assert not board.add_queued("A", raised.value.ticket)
+    assert board.resets_after_deadline("A") == 600
+
+
 def test_the_queue_state_is_read_without_the_rest_fallback():
     def pull(**kw):
         base = dict(number=1, state="open", merged=False, head_sha="h", head_ref="b", base_ref="s", body="", merge_state="clean",
@@ -562,16 +586,25 @@ def test_the_queue_state_is_read_without_the_rest_fallback():
     class Hub:
         def pulls(self, numbers, spare=(), *, rest_fallback=True):
             assert rest_fallback is False
-            return {1: pull(merged=True, state="closed", merge_sha="m"), 2: pull(queued=True), 3: pull(), 4: pull(state="closed"), 5: None}
+            other = pull(merged=True, state="closed", merge_sha="o", base_ref="other")
+            return {
+                1: pull(merged=True, state="closed", merge_sha="m"),
+                2: pull(queued=True),
+                3: pull(),
+                4: pull(state="closed"),
+                5: None,
+                6: other,
+            }
 
     class Limited:
         def pulls(self, numbers, spare=(), *, rest_fallback=True):
             raise github.GitHubError("上限", status=403, retry_after=60, quota="graphql")
 
-    got = units_queue.read(Hub(), [1, 2, 3, 4, 5])
+    got = units_queue.read(Hub(), [1, 2, 3, 4, 5, 6], "s")
 
-    assert [got[n].kind for n in range(1, 6)] == ["merged", "queued", "open", "closed", "unknown"] and got[1].merge_sha == "m"
-    assert units_queue.read(Limited(), [1]) == {1: units_queue.State("unknown", retry_after=60)}
+    assert [got[n].kind for n in range(1, 7)] == ["merged", "queued", "open", "closed", "unknown", "elsewhere"]
+    assert got[1].merge_sha == "m"
+    assert units_queue.read(Limited(), [1], "s") == {1: units_queue.State("unknown", retry_after=60)}
 
 
 @pytest.mark.parametrize(
@@ -583,6 +616,7 @@ def test_the_queue_state_is_read_without_the_rest_fallback():
         ("open", False, "resend"),
         ("open", True, "fail"),
         ("closed", False, "fail"),
+        ("elsewhere", False, "fail"),
     ],
 )
 def test_the_next_step_for_the_state(kind, resent, expected):
