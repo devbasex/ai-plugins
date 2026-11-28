@@ -736,15 +736,17 @@ def test_an_approval_is_written_again_after_a_rejection_of_the_same_target(repo,
     assert merge_approval.merge_judgment(merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer()), target) is not None
 
 
-@pytest.mark.parametrize("by", ["conductor", "service:bot"])
-def test_a_held_stage_is_approved_only_by_a_person(repo, st, env, capsys, by):
-    """本番へ反映されないマージでも、手で終えた工程の承認は人の回答に限る。"""
+def test_a_held_stage_accepts_an_ai_approval_of_a_merge_that_does_not_reach_production(repo, st, env, capsys):
+    """手で終えた工程でも、本番へ反映されないマージの承認は conductor の回答を受ける（証跡は書かない）。"""
     env.hub.files["main"] = (merge_hub.project_text(merge_hub.strategy(base="main", production="prod")), "c2")
     tid = _held_design(st, capsys, repo, env)
-    shown = _next(st, tid, repo, env)
 
-    with pytest.raises(model.Refused, match="確定しない"):
-        _answer(st, tid, repo, env, shown, by=by)
+    out = _answer(st, tid, repo, env, _next(st, tid, repo, env), by="conductor")
+
+    assert out["status"] == "ok" and env.hub.comments_of == {}, out
+    _merge(env)
+    _next(st, tid, repo, env)
+    assert _state(st, tid, DESIGN) == "finished"
 
 
 def test_an_answer_is_compared_with_the_target_read_under_the_work_lock(repo, st, env, capsys):

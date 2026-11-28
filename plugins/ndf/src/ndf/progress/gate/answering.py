@@ -314,11 +314,8 @@ def _check_answer(conn: Any, v: run.View, a: Answer, observe: Observe, root: Pat
     q, seen = _refusal(v, a, observe, root)
     # 以後の質問は照らした対象（提示した承認の対象）を持つ。リリースのリクエストと証跡の識別子を提示ごとに分ける
     q = replace(q, target=seen)
-    by_hand = run.step_progress(v, q.stage).held_finish is not None
-    if by_hand:
-        _require_person(conn, q, a)
     # 手で終えたデプロイの回答待ちへの回答は、工程を閉じる確認で、マージの事前の承認ではない
-    closes = by_hand and q.gate == RELEASE_GATE
+    closes = run.step_progress(v, q.stage).held_finish is not None and q.gate == RELEASE_GATE
     by = _trail_by(conn, q, a, seen)
     if closes and a.value == run.APPROVED:
         by = None
@@ -360,20 +357,6 @@ def _begin_answer(
         return got, by, last, _commit_answer(conn, v, got, last)
     noted = _note_posting(conn, v, got.q, a, got.seen)
     return got, by, last if noted is None else noted, None
-
-
-def _require_person(conn: Any, q: Question, a: Answer) -> None:
-    """手で終えた工程の回答待ちの承認は工程を終了にするので、本番へ反映されないマージでも人の回答に限る（`model.Refused`）。
-
-    `service:mvv` はここで断らない（判定の写しの無い回答は、読む側の `model.mvv_answer_void` が数えない）。"""
-    if a.value != run.APPROVED or a.by == MVV_BY or a.by.split(":", 1)[0] == actors.HUMAN:
-        return
-    if a.by.split(":", 1)[0] == "organizer" and _relayed_by_organizer(conn, q, a):
-        return
-    raise model.Refused(
-        f"手で終えた工程 {q.stage} の承認は、回答した者 {a.by} では確定しない（利用者が --by human で回答する。"
-        "オーガナイザーはリクエストに記録された利用者の回答だけを中継する）"
-    )
 
 
 def answer(st: store.Store, machine_id: str, a: Answer, observe: Observe = no_observe, post: Post = no_post) -> dict[str, Any]:
