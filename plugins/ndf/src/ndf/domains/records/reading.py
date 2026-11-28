@@ -316,7 +316,7 @@ def prompt(entry: Mapping[str, Any]) -> str:
     _require_prompt(entry)
     files, reader, kind = entry["files"], entry["reader"], entry["questions_kind"]
     types = writing.types_section()
-    if not entry.get(DISTINCTION_KEY, True):
+    if DISTINCTION_KEY in entry and not entry[DISTINCTION_KEY]:
         types = writing.without_distinction(types)
     lines = [
         "次の文書を、下に示す読み手になったつもりで最初から最後まで読み、読み手に通じるかを確かめてください。",
@@ -430,7 +430,7 @@ def _require_prompt(entry: Any) -> None:
         raise ReadingInvalid(f"reader は、{'・'.join(READER)} の 3 つの空でない文字列を持つオブジェクトにする")
     if not (isinstance(kind, str) and (kind == "none" or kind in RESTATE)):
         raise ReadingInvalid(f"questions_kind は {'・'.join(RESTATE)}・none のどれかにする")
-    if not isinstance(entry.get(DISTINCTION_KEY, True), bool):
+    if DISTINCTION_KEY in entry and not isinstance(entry[DISTINCTION_KEY], bool):
         raise ReadingInvalid(f"{DISTINCTION_KEY} は、真偽（true か false）にする")
 
 

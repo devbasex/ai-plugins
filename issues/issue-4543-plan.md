@@ -86,7 +86,7 @@
   - `tests/contracts/test_writing.py`
   - `tests/domains/records/test_reading.py`
 - **変更内容:**
-  - 小見出しの前後に `<!-- ndf:distinction-begin -->` と `<!-- ndf:distinction-end -->` を置く
+  - 小見出しの前後に `<!-- ndf-distinction-begin -->` と `<!-- ndf-distinction-end -->` を置く
   - `writing.py` に、目印の定数と、本文から目印で囲まれた範囲を除いて返す関数を足す。関数は見出しの文を持たない（決定 6）
   - `reading.py` の `prompt` は、任意のキー `distinction`（真偽。省けば真）を受け取り、偽なら小見出しを外す
   - `document-rebuild` の SKILL.md の `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `false` にすると足す

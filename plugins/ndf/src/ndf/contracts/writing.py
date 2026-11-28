@@ -12,8 +12,8 @@ CRITERIA = "data/writing-criteria.md"
 TYPES_HEADING = "## 3. 読み手に通じない文の 4 つの型"
 _SECTION = "## "
 # 現状と改善の案の書き分けの小見出しを囲む行。外す範囲は見出しの文ではなくこの 2 行で決める（#4543 の決定 6）
-DISTINCTION_BEGIN = "<!-- ndf:distinction-begin -->"
-DISTINCTION_END = "<!-- ndf:distinction-end -->"
+DISTINCTION_BEGIN = "<!-- ndf-distinction-begin -->"
+DISTINCTION_END = "<!-- ndf-distinction-end -->"
 
 
 class CriteriaBroken(contracts.ContractError):
