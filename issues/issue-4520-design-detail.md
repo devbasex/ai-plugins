@@ -189,7 +189,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- | --- |
 | `plan_reopen` | `progress/reopening.py` | 新設 | `(v: View, stage: str, *, later: str, reason: str, trigger: Mapping, notes: str \| None) -> Reopen` | 開き直す工程を決め、`reopened` と `enabled` の下書き、進みがあった工程の名前、取り消されない操作の警告、取り消す承認の対象を返す（書かない） |
 | `revoke_approvals` | `progress/reopening.py` | 新設 | `(r: Reopen, post: Revoke) -> None` | 取り消す承認があれば、まとめて `write_revocations` へ渡す。`answer` と `_cmd_retry` が DB の追記より前に呼ぶ |
-| `write_revocations` | `core/merge_approval.py` | 新設 | `(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None` | 対象の最新の承認が `approvals` の承認なら、`回答: rejected`・`担い手: reopen` の行を書く。最新の承認が別のもので、それより前に `approvals` の承認があれば、`失効する承認:` で `approvals` を指す却下を書く。それ以外は書かない。残る承認の無い対象の PR と、別のアカウントが `approvals` の承認を今も持つ対象の PR は、行を書いた後に `hub.dequeue` でマージキューから外す。別のアカウントが `approvals` の承認を今も持ち、そのアカウントで `ndf ci merge` を打てば通り得るなら、開き直しを断るために `TrailError` を投げる。投げるのは、実行アカウントの分の取り消しと、対象の PR のキューからの取り外しを済ませた後である。承認の対象のリポジトリが `hub.repo` と違えば、PR のコメントもキューの状態も読み書きせずに `TrailError`。コメントの一覧は PR ごとに 1 回読む |
+| `write_revocations` | `core/merge_approval.py` | 新設 | `(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None` | `reopen` の却下で失効していない `approvals` の承認があるときだけ、`回答: rejected`・`担い手: reopen` の行を書く。対象の最新の承認が `approvals` の承認なら、先の承認をすべて取り消す却下を書く。それ以外（最新の承認が別のもの、後の通常の却下で承認が無い）は、`失効する承認:` で `approvals` を指す却下を書く。残る承認の無い対象の PR と、別のアカウントに失効していない `approvals` の承認がある対象の PR は、行を書いた後に `hub.dequeue` でマージキューから外す。別のアカウントに `reopen` の却下で失効していない `approvals` の承認があるなら（最新の承認が別にあっても、後に通常の却下があっても）、開き直しを断るために `TrailError` を投げる。投げるのは、実行アカウントの分の取り消しと、対象の PR のキューからの取り外しを済ませた後である。承認の対象のリポジトリが `hub.repo` と違えば、PR のコメントもキューの状態も読み書きせずに `TrailError`。コメントの一覧は PR ごとに 1 回読む |
 | `work_stopped` | `progress/reopening.py` | 新設 | `(st: Store, machine_id: str) -> ContextManager[None]` | 作業の排他を取り、起動のマーカーも確かめる。作業が流れていれば断る |
 | `_cmd_retry` | `progress/gate/finishing.py` | 変更 | `(a: Namespace, cwd: Path, st: Store) -> dict` | 失敗の工程は今のまま `retry` を書き、終了と手で終えた回答待ちは `--later` を必須にして開き直す。確定した開き直しの送り直しには、書かずに初回の結果を返す。開き直しは `store.approval_lock` の中で行う |
 
@@ -233,7 +233,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `plan_reopen` | 指定と後ろの工程に `reopened` | `keep` は 1 件。後ろがすべて未着手なら `stages` は指定だけ。`keep` でも `no_release` で無効にした工程は戻す | 人が無効にした工程と中止の工程を含めない |
-| `revoke_approvals` | 承認した対象に却下の行が増え、同じ対象の `merge_judgment` が None | 本番へ反映されない承認は対象にしない。打ち直しで行は増えず、キューから外す。残る承認の PR は外さない。別のアカウントで取り消し済み・編集済み・証跡なしは断らない | 書けない・外せない・別のアカウントの承認が残るなら事象を追記しない |
+| `revoke_approvals` | 承認した対象に却下の行が増え、同じ対象の `merge_judgment` が None | 本番へ反映されない承認は対象にしない。打ち直しで行は増えず、キューから外す。残る承認の PR は外さない。別のアカウントで `reopen` の却下により失効済み・編集済み・証跡なしは断らない | 書けない・外せない・別のアカウントの承認が残るなら事象を追記しない |
 | `_cmd_retry` | 失敗の工程は今と同じ事象 | — | 異常系の各行 |
 
 ## 手で終える操作

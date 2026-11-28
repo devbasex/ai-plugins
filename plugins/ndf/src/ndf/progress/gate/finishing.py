@@ -117,13 +117,14 @@ def _cmd_retry(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, A
     """失敗の工程は事象 `retry` を書く（済んだステップを残す）。終了の工程は `--later` に従って開き直す。"""
     if not a.reason.strip():
         raise model.Refused("retry には理由が要る（--reason <理由>）")
+    # 送り直しは書かないので、排他の前に返す（開き直しの直後に起動した作業が排他を持っていても受ける）
+    replayed = _replayed_reopen(a, run.read(st, a.machine_id)) if a.later else None
+    if replayed is not None:
+        return replayed
     with reopening.work_stopped(st, a.machine_id):
         v = run.read(st, a.machine_id)
         v.snap.stage(a.stage)  # 工程の無い名前はここで断る
         state = v.rows[a.stage].state
-        replayed = _replayed_reopen(a, v) if state == "pending" and a.later else None
-        if replayed is not None:
-            return replayed
         refused = _retry_refusal(a.machine_id, a.stage, state, a.later)
         if refused is not None:
             whole = f"ステートマシンは{model.label(v.whole)}。" if model.is_terminal(v.whole) else ""

@@ -207,15 +207,16 @@ def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
 def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None:
     """対象ごとに、`approvals` の承認を担い手 `reopen` の却下の行で取り消し、PR をマージキューから外す。
 
-    最新の承認が `approvals` の承認なら、先の承認をすべて取り消す却下を投稿する。最新の承認が別のもの（残す工程や別の
-    ステートマシンの承認）なら、`approvals` の承認だけを指す失効の行を投稿する（残す承認のコメントが後で編集されても、
-    取り消した承認を数え直さない）。`approvals` の承認が無い・既に取り消し済みなら行は書かない。
+    最新の承認が `approvals` の承認なら、先の承認をすべて取り消す却下を投稿する。それ以外（残る承認が別のものか、
+    後の通常の却下で承認が無い）なら、`approvals` の承認だけを指す失効の行を投稿する。残す承認や通常の却下のコメントが
+    後で編集・削除されても、取り消した承認を数え直さないためである。`approvals` の承認が無いか、担い手 `reopen` の行で
+    失効済みなら書かない（`_not_voided`）。
 
     キューから外すのは、残る承認の無い PR と、別のアカウントが `approvals` を今も承認と数える PR（キューに入れたのが
     どの承認かは分からない）。行を書いた後に外し（外した後に始まる `ndf ci merge` は入れ直さない）、行を書き終えた
     打ち直しでも外す。
 
-    別のアカウントが `approvals` を今も承認と数えるなら、token の利用者の分を書いてキューから外した後に `TrailError`
+    別のアカウントに `reopen` の行で失効させていない `approvals` の承認があるなら、token の利用者の分を書いてキューから外した後に `TrailError`
     （そのアカウントの `ndf ci merge` は通るため）。同じ識別子の承認を token の利用者が書いていても同じ。コメントの一覧は
     PR ごとに 1 回だけ読み、公開範囲は全体で 1 回だけ照会する。打ち直しで行は増えない。`viewer` のアカウント ID が
     読めていないか、承認の対象のリポジトリが `hub.repo` と違えば、PR のコメントもキューの状態も読み書きせずに `TrailError`。"""
@@ -231,15 +232,16 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
         if target.number not in read:
             read[target.number] = list(_unedited_rows(hub.comments(target.number)))
         found = read[target.number]
-        live = _live_approvals([row for c, row in found if same_writer(c, viewer)], target)
+        mine = [row for c, row in found if same_writer(c, viewer)]
+        live = _live_approvals(mine, target)
         holders = _other_holders(found, viewer, target, approvals)
         others.update(dict.fromkeys(holders))
-        revoked = any(_points_at(approvals, row) for row in live)
-        kept = bool(live) and not _points_at(approvals, live[-1])
+        latest_revoked = bool(live) and _points_at(approvals, live[-1])
+        kept = bool(live) and not latest_revoked
         if not kept or holders:
             leaving[target.number] = None
-        if revoked:
-            voids = approvals if kept else frozenset()
+        if _not_voided(mine, target, approvals):
+            voids = frozenset() if latest_revoked else approvals
             row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id, voids=voids)
             publisher.comment(target.number, render_merge_row(row))
     for number in leaving:
@@ -249,20 +251,23 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
         raise TrailError(f"取り消す承認の証跡を別のアカウント（{names}）が書いている。承認を書いたアカウントで打ち直す")
 
 
+def _not_voided(rows: Sequence[MergeRow], target: MergeTarget, approvals: frozenset[str]) -> bool:
+    """`rows` に、担い手 `reopen` の行でまだ失効させていない `approvals` の承認があるか。
+
+    通常の却下は数えない。その却下のコメントが後で編集・削除されると、承認がまた効くためである。"""
+    counted = [r for r in rows if r.answer == APPROVED or r.by == REOPEN_BY]
+    return any(_points_at(approvals, row) for row in _live_approvals(counted, target))
+
+
 def _other_holders(found: Sequence[tuple[Authored, MergeRow]], viewer: Viewer, target: MergeTarget, approvals: frozenset[str]) -> list[str]:
-    """`approvals` の承認を、今も取り消していない別のアカウントの名前。そのアカウントの最新でない承認も数える
-    （新しい承認のコメントが編集されると、下の承認が効く）。
+    """`reopen` の行で失効させていない `approvals` の承認（`_not_voided`）を持つ、別のアカウントの名前。
 
     識別子はアカウントの間で差し引かない（投稿の後に確定が失敗した回答を別のアカウントで送り直すと、同じ識別子が両方に残る）。"""
     theirs: defaultdict[int, list[tuple[str, MergeRow]]] = defaultdict(list)
     for c, row in found:
         if c.author_id > 0 and not same_writer(c, viewer):
             theirs[c.author_id].append((c.author, row))
-    return [
-        written[-1][0]
-        for written in theirs.values()
-        if any(_points_at(approvals, row) for row in _live_approvals([row for _, row in written], target))
-    ]
+    return [written[-1][0] for written in theirs.values() if _not_voided([row for _, row in written], target, approvals)]
 
 
 class TrailError(Exception):

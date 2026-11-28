@@ -494,6 +494,27 @@ def test_another_account_holding_a_revoked_approval_leaves_the_queue_even_with_a
     assert hub.dequeued == [7]
 
 
+@pytest.mark.parametrize("gone", ["deleted", "edited"])
+def test_a_revoked_approval_stays_revoked_without_the_later_rejection(gone):
+    """通常の却下で消えていた承認にも失効の行を書くので、その却下が無くなっても数え直さない。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    for answer, record in (("approved", "yes"), ("rejected", "no")):
+        merge_approval.write_merge_row(hub, merge_approval.MergeRow(answer, "user", target, True, record), hub.viewer())
+    revocation = merge_approval.Revocation(target, frozenset({"yes"}), "reopen:x")
+
+    merge_approval.write_revocations(hub, [revocation], hub.viewer())
+    merge_approval.write_revocations(hub, [revocation], hub.viewer())
+
+    comments = hub.comments_of[7]
+    assert len(comments) == 3
+    if gone == "deleted":
+        del comments[1]
+    else:
+        comments[1] = comments[1]._replace(edited=True)
+    assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target) is None
+
+
 def test_a_revocation_of_another_repository_touches_nothing():
     hub = merge_hub.MergeHub()
     target = merge_approval.MergeTarget("o/other", 7, "main", merge_hub.HEAD)
@@ -621,7 +642,9 @@ def test_the_same_reopen_sent_again_returns_the_first_result(repo, st, env, caps
     first = _retry(capsys, tid, DESIGN, "--later", "reopen")
     before, calls = _events(st, tid), list(env.hub.calls)
 
-    again = _retry(capsys, tid, DESIGN, "--later", "reopen")
+    # 開き直した後に起動した作業が排他を持ち、まだ何も記録していなくても受ける
+    with store.run_lock(st, tid):
+        again = _retry(capsys, tid, DESIGN, "--later", "reopen")
 
     assert again["status"] == "ok", again
     assert again["items"] == first["items"] and again["metrics"]["seqs"] == first["metrics"]["seqs"]
