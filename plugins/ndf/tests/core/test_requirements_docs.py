@@ -150,9 +150,34 @@ def test_the_comment_ends_at_its_close(opening: str, closing: str) -> None:
     assert [c.text.split("\n")[0] for c in rd.criteria_of(_doc_text(criteria=body))] == ["甲", "乙"]
 
 
-def test_a_comment_line_inside_a_paragraph_does_not_change_the_digest() -> None:
+@pytest.mark.parametrize("comment", ["<!-- メモ -->", "<!-- メモ\n\n      -->"])
+def test_a_comment_line_inside_a_paragraph_does_not_change_the_digest(comment: str) -> None:
     rest = "\n      a\n        b"
-    assert rd.criterion_digest(f"- [ ] 甲\n      <!-- メモ -->{rest}") == rd.criterion_digest(f"- [ ] 甲{rest}")
+    assert rd.criterion_digest(f"- [ ] 甲\n      {comment}{rest}") == rd.criterion_digest(f"- [ ] 甲{rest}")
+
+
+@pytest.mark.parametrize("literal", ["`<!--`", "\\<!--"])
+def test_the_code_notation_is_not_read_inside_the_html_block(literal: str) -> None:
+    body = f"- [ ] 甲\n\n<details>\n<!-- 前置き --> {literal}\n- [ ] 記入例\n-->\n</details>\n\n- [ ] 乙\n"
+    assert [c.text.split("\n")[0] for c in rd.criteria_of(_doc_text(criteria=body))] == ["甲", "乙"]
+
+
+def test_the_text_after_the_close_is_parsed_inline_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed: list[str] = []
+    parse = inputs_decide._INLINE.inline.parse
+    monkeypatch.setattr(inputs_decide._INLINE.inline, "parse", lambda src, *rest: parsed.append(src) or parse(src, *rest))
+    list(inputs_decide.outside_fences("<details><!--\n\n--> `<!--` `<!--` `<!--`".split("\n")))
+
+    assert len(parsed) == 1
+
+
+def test_the_marks_of_a_paragraph_are_converted_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    converted: list[str] = []
+    convert = inputs_decide._token_marks
+    monkeypatch.setattr(inputs_decide, "_token_marks", lambda lines, token: converted.append(token.content) or convert(lines, token))
+    list(inputs_decide.outside_fences("> `<!--` を説明する".split("\n")))
+
+    assert len(converted) == 1
 
 
 @pytest.mark.parametrize("body", ["甲\n      <!--\n\nx\n-->", "甲 <!-- a --> と\n      <!--\n\n-->"])
