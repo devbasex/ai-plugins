@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import time
@@ -327,38 +328,42 @@ class _Filing:
         entry = self.entries[ident] if ident in self.entries else {}
         return str(entry["url"]) if "url" in entry else None
 
-    def _named(self, ident: str, urls: Sequence[Optional[str]], read: Mapping[str, Optional[Listed]]) -> Optional[str]:
+    def _named(
+        self, ident: str, urls: Sequence[Optional[str]], read: Mapping[str, Optional[Listed]], prs_of: Callable[[str], Sequence[int]]
+    ) -> Optional[str]:
         """`urls` のうち、指す Issue が信用する作者のこの指摘の Issue である最初の URL。"""
         text = self.rows[ident][0]["text"]
         for url in urls:
             issue = read[url] if url else None
             if (
                 issue
-                and leftover_decide.names_finding(issue, ident, text)
+                and leftover_decide.names_finding(issue, ident, text, prs_of)
                 and self._trusts(issue.author, issue.author_id, issue.association)
             ):
                 return url
         return None
 
-    def known(self) -> None:
+    def known(self) -> bool:
         """起票の記録・行の引き継ぎ（`prior_issue`）・状態の引き継ぎ（`CARRIED_URLS`）の URL が信用する作者のこの指摘の Issue なら、
         起票せず行に書く。起票の記録と行の URL が違えば捨て、起票の記録か作る候補として扱う。読めなければ起票も採用もしない。
-        Issue はまとめて読む（`GitHub.nodes`）。"""
+        Issue はまとめて読む（`GitHub.nodes`）。起票の記録に無かった URL を使えば真を返し、呼び手が記録へ書く。"""
         recorded = {ident: url for ident in self.rows if (url := self.url_of(ident))}
         carried = {ident: str(row[Filed.PRIOR]) for ident, rows in self.rows.items() for row in rows if row.get(Filed.PRIOR)}
         urls = carried | recorded
         pool = _carried_urls(self.data)
         wanted = list(dict.fromkeys([*urls.values(), *pool]))
         if not wanted:
-            return
+            return False
+        # 引き継いだ Issue の本文の解析は、候補の数によらず本文ごとに 1 回にする
+        prs_of = functools.cache(leftover_decide.issue_prs)
         try:
             read = self.port.issues(wanted)
-            usable = {ident: url for ident in self.rows if (url := self._named(ident, [urls.get(ident), *pool], read))}
+            usable = {ident: url for ident in self.rows if (url := self._named(ident, [urls.get(ident), *pool], read, prs_of))}
         except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
             # 状態の引き継ぎの URL は、どの候補の Issue かが読むまで分からないので、全部の候補を保留する
             for ident in self.rows if pool else urls:
                 self.fail(ident, _reason(exc))
-            return
+            return False
         for ident, rows in self.rows.items():
             for row in rows:
                 row.pop(Filed.PRIOR, None)
@@ -367,6 +372,7 @@ class _Filing:
                 self.done(ident, usable[ident])
             elif ident in recorded:
                 del self.entries[ident]["url"]
+        return any(recorded.get(ident) != url for ident, url in usable.items())
 
     def sort(self, manual: bool) -> tuple[list[str], bool]:
         """URL の記録の無い候補を確かめ、作る識別値と、記録に無かった URL を見つけたかを返す。作成を試みた記録のある識別値は、
@@ -435,19 +441,20 @@ class _Filing:
             for ident in self.rows:
                 self.fail(ident, f"起票の記録を読めない: {_reason(exc)}")
             return self._finish()
-        self.known()
+        adopted = self.known()
         try:
             fresh, found = self.sort(manual)
         except Exception as exc:  # noqa: BLE001 ネットワーク: 伏せ字か作者の権限の確かめに失敗すれば起票しない
             for ident in self.rows:
                 if not self.url_of(ident):
                     self.fail(ident, _reason(exc))
-            return self._finish()
+            return self._close(adopted)
         at = self.announce(fresh) if fresh else None
         if at is not None:
             self.create(fresh, at)
-        # 結果の書き込み（作ったとき、または作るものが無く、検索と一覧で見つけた URL を記録へ足すとき）
-        return self._close(at is not None or bool(found and not fresh))
+        # 結果の書き込み（作ったとき、または作るものが無く、引き継ぎ・検索・一覧で見つけた URL を記録へ足すとき）。引き継いだ URL も
+        # 書くのは、巻き直し後の PR の別の保存先が、この指摘の出ない記録のコメントの後でも引けるようにするためである
+        return self._close(at is not None or bool((found or adopted) and not fresh))
 
     def _close(self, record: bool) -> list[str]:
         """`record` なら起票の記録へ結果を書き、注意を返す。"""

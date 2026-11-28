@@ -659,7 +659,8 @@ def test_issue_3780_2_the_table_and_the_list_show_how_a_finding_was_left() -> No
     data["findings"][0]["issue"] = url
     body = report_decide.comment(7, data, fin.CONVERGED)
     rows = {line.split("|")[1].strip(): line for line in body.splitlines() if line.startswith("| r2-")}
-    assert url in rows["r2-1"] and "記録のみ" in rows["r2-2"]
+    # 公開先の Issue は、伏せ字が所有者名を置き換えても開ける `#番号` で出す
+    assert "#100" in rows["r2-1"] and url not in rows["r2-1"] and "記録のみ" in rows["r2-2"]
     assert "Value 6" in rows["r2-1"] and "MVV" not in rows["r2-2"]
     assert "未解決 0" in body
     listed = {i["id"]: (i.get("parked"), i.get("issue")) for i in report_decide.open_items(body)}
@@ -696,7 +697,7 @@ def test_issue_3780_2_report_files_once_after_a_failed_creation(repos: Repos, tm
     assert "記録のみ" in hub.comments[-1][2]
     for _ in range(2):
         _report_of(state_dir, capsys)
-    assert len(github.issues) == 1 and github.issues[0]["html_url"] in hub.comments[-1][2]
+    assert len(github.issues) == 1 and f"起票: #{github.issues[0]['number']}）" in hub.comments[-1][2]
     assert store.read_object(path)["findings"][0]["issue"] == github.issues[0]["html_url"]
 
 
@@ -828,7 +829,8 @@ def test_issue_3780_2_results_carry_how_each_finding_was_left() -> None:
     [decision] = verdict.decisions
     assert all(part in decision["decision"] + decision["basis"] for part in ("r2-1", "Value 6", url))
     assert "変えていない行" in decision["basis"]
-    del data["findings"][0]["line"]
+    # 理由は行に残った初出時の位置でなく、残すと決めたときに照らした位置から出す
+    data["findings"][0]["parked_on_line"] = False
     [decision] = leftover_decide.decisions(data["findings"], record)
     assert "行を特定していない" in decision["basis"] and "変えていない行" not in decision["basis"]
 

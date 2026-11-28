@@ -219,15 +219,18 @@ def _light(f: Mapping[str, Any]) -> bool:
     return not criteria_decide.blocking(criteria_decide.severity_of(f.get("severity")))
 
 
-def _left_label(f: Mapping[str, Any]) -> str:
+def _left_label(f: Mapping[str, Any], repo: Optional[str]) -> str:
     """直さずに残した指摘の終わり方（起票の URL か、記録のみ）。プロジェクト MVV に反する指摘は、その項目を添える。"""
     url = f.get(leftover_decide.Filed.URL)
+    # 公開先 `repo` の Issue は `#番号` で出す。完全な URL は、所有者名が手元のアカウント名と同じだと伏せ字で開けなくなる
+    if repo and leftover_decide.issue_url(url, repo):
+        url = f"#{url.rsplit('/', 1)[-1]}"
     label = f"直さずに残した（起票: {url}）" if url else "直さずに残した（記録のみ）"
     item = f.get(MVV)
     return f"{label}・MVV の {item} に反する" if item else label
 
 
-def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
+def _finding_rows(findings: Sequence[Mapping[str, Any]], repo: Optional[str] = None) -> list[str]:
     """指摘の表。判定役の確認で下げた指摘は、元の重要度と定型の理由を出す（`check` の自由記述は写さない。#4363）。"""
     rows = ["| 番号 | 担当 | 重要度 | 場所 | 指摘 | 終わり方 | 見送った理由 |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for f in findings:
@@ -236,7 +239,7 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
         if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
             shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
         elif outcome == fin.UNRESOLVED and f.get(leftover_decide.PARKED):
-            shown = _left_label(f)
+            shown = _left_label(f, repo)
         severity, reason = _cell(criteria_decide.severity_of(f.get("severity"))), f.get("reason")
         check = f.get(criteria_decide.CHECK)
         if isinstance(check, Mapping) and check.get(criteria_decide.LOWERED):
@@ -280,7 +283,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
         "",
         "### 指摘",
         "",
-        *(_finding_rows(findings) if findings else ["指摘は無い。"]),
+        *(_finding_rows(findings, store.repo_of(data)) if findings else ["指摘は無い。"]),
     ]
     if warnings:
         lines += ["", "### 注意", "", *(f"- {_cell(w)}" for w in warnings)]

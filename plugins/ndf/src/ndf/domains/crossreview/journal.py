@@ -549,6 +549,7 @@ class FindingJournal:
             passed = self.passed(fid, touched, unconfirmed=fid in unconfirmed)
             if not passed:
                 row[PARKED] = True
+                row[leftover_decide.PARKED_ON_LINE] = any("line" in _place(r) for r in self._reports[fid])
                 url = filed.get(leftover_decide.normalized(row["text"]))
                 if url and not row.get(leftover_decide.Filed.URL):
                     # Issue が消されていることがあるので、起票の公開で確かめてから `issue` にする

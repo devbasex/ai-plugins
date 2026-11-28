@@ -466,6 +466,24 @@ def test_issue_3780_a_carried_url_of_the_pr_before_a_rewind_is_used_from_another
     again.ref = store.StateRef(9, 9, Path("unused"))
     assert again.go() == [] and again.row[Filed.URL] == url
     assert github.created() == 1
+    # 見つけた URL は巻き直し後の PR の起票の記録に残り、引き継ぎの無い次の保存先も引ける
+    later = Run(github)
+    later.ref = again.ref
+    assert later.go() == [] and later.row[Filed.URL] == url
+    assert github.created() == 1
+
+
+def test_issue_3780_the_body_of_a_carried_issue_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    parsed: list[str] = []
+    real = leftover_decide.issue_prs
+    monkeypatch.setattr(leftover_decide, "issue_prs", lambda body: parsed.append(body) or real(body))
+    again = Run(github, _row(text="別の指摘"), _row("r2-2", text="さらに別の指摘"))
+    again.data[leftover.CARRIED_URLS] = [url]
+    again.go()
+    assert len(parsed) == 1
 
 
 def test_issue_3780_a_carried_url_is_found_by_the_issue_mark_without_the_text_of_the_record() -> None:

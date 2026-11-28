@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, NamedTuple, Optional
 
@@ -21,6 +21,9 @@ from ndf.domains.records import mvv_decide
 
 # 直さずに残す指摘の行の欄。修正担当へ渡さず、次のラウンドを始める理由にも数えない
 PARKED = "parked"
+# 残すと決めたときに照らした出し直しに、行があったかの記録（結果の `decisions` の理由に使う）。行の `line` は初出時の位置が残る
+# ことがあるので、理由の元にしない
+PARKED_ON_LINE = "parked_on_line"
 # 指摘の行番号が、その位置の基準のコミットの PR の差分に載らないことの記録。行番号は起票の場所に使うので行に残し、投稿の位置
 # （`location`）だけをファイルにする
 OFF_DIFF = "off_diff"
@@ -234,15 +237,22 @@ def matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool:
     return re.search(rf"/pull/{int(origin_pr)}(?!\d)", _prose(listed.body)) is not None
 
 
-def names_finding(listed: Listed, ident: str, text: str) -> bool:
+def issue_prs(body: str) -> tuple[int, ...]:
+    """引用とコードブロックを除いた本文にある PR の URL の番号。"""
+    return tuple(dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", _prose(body))))
+
+
+def names_finding(listed: Listed, ident: str, text: str, prs_of: Callable[[str], Sequence[int]] = issue_prs) -> bool:
     """起票の記録か引き継ぎの URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。
 
     目印は、今の識別値 `ident` か、本文の PR の URL の番号（起票時の元の PR）と指摘の本文 `text` の識別値を受ける。PR を
-    巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。"""
+    巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。
+    本文の解析（`prs_of`）は `ident` の目印が無いときだけする。"""
     if listed.is_pull:
         return False
-    idents = [ident, *(identity(int(pr), text) for pr in re.findall(r"/pull/(\d+)", _prose(listed.body)))]
-    return any(issue_mark(i) in listed.body for i in idents)
+    if issue_mark(ident) in listed.body:
+        return True
+    return any(issue_mark(identity(pr, text)) in listed.body for pr in prs_of(listed.body))
 
 
 def _issue_number(url: str, issues_url: str) -> Optional[int]:
@@ -328,10 +338,10 @@ def decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> 
         if not _left(row) or not item:
             continue
         where = result_fields(row, comment_url)
-        if type(row.get("line")) is int:
+        if row.get(PARKED_ON_LINE, True):
             why = "2 ラウンド目以降の、変えていない行への major"
         else:
-            # 行が無いので変えた行と照らせない（指したファイルが変わっていないことだけを確かめた。`proceeds`）
+            # 照らした出し直しに行が無いので、指したファイルが変わっていないことだけを確かめた（`proceeds`）
             why = "2 ラウンド目以降の、行を特定していない major（指したファイルは変えていない）"
         out.append(
             {
