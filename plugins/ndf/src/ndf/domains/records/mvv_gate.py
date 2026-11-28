@@ -16,6 +16,7 @@ MVV とレッドラインのパスは PR のベースのコミットから 1 度
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
@@ -27,7 +28,7 @@ from ndf.adapters import github, llm, publish, run_log
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, Pull, Unread
 from ndf.contracts import internal, limits
-from ndf.core import issue_docs, production_merge
+from ndf.core import issue_docs, merge_approval, production_merge
 from ndf.domains.records import design_check_rules, files, jsonfile, jsonl, mvv
 from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
@@ -35,6 +36,8 @@ from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, judgeable, may_skip, note, refusals
 from ndf.progress.model import MVV_GATE_STEPS, MVV_PACES, MVV_SKIP_GATES, NO_SKIP
 
+# 承認する PR の番号を持つ入力のキー（設計の判定の `--expect-pr`。判定する PR は作業場所のブランチで決まる）
+EXPECT_PR = "expect_pr"
 # 判定の回答のスキーマ（contracts/schemas/mvv-verdict.schema.json）
 VERDICT_SCHEMA = "mvv-verdict"
 # 判定の 1 回の呼び出しの上限
@@ -63,6 +66,10 @@ OpenHub = Callable[[Path, str], GitHub]
 
 class GateError(Exception):
     """判定を打てない（PR が無い・LLM が回答しない）。承認ゲートは省かずに人へ問う。"""
+
+
+class OtherPull(Exception):
+    """判定する PR が入力の `EXPECT_PR` と違う。PR の中身を読まず、判定もコメントもしない。"""
 
 
 class _Moved(Exception):
@@ -304,7 +311,8 @@ class _Judging:
 
     def __init__(self, root: Path, gate_name: str, hub: GitHub, number: int, pull: Pull) -> None:
         self.root, self.gate, self.hub, self.number, self.pull = root, gate_name, hub, number, pull
-        self.where = {"root": root, "gate": gate_name, "pr": number, "head": pull.head_sha}
+        # `pull` と MVV の `version` は判定のコメントの識別子（`_note_key`）の入力
+        self.where = {"root": root, "gate": gate_name, "pr": number, "head": pull.head_sha, "pull": pull, "version": None}
 
     def text(self, kind: str, exc: BaseException | str) -> str:
         return failure_text(kind, exc, self.where)
@@ -395,6 +403,14 @@ def _read_records(j: _Judging, snap: mvv.Snapshot, warnings: list[dict[str, Any]
     return _Records(rows, broken, found)
 
 
+def _pull_to_judge(root: Path, gate_name: str, inputs: Mapping[str, Any], hub: GitHub) -> int:
+    """判定する PR の番号（`pr_number`）。入力の `EXPECT_PR` と違えば `OtherPull`。"""
+    number = pr_number(root, gate_name, inputs, hub)
+    if EXPECT_PR in inputs and number != inputs[EXPECT_PR]:
+        raise OtherPull()
+    return number
+
+
 def _judged(
     where: tuple[Path, str], gate_name: str, inputs: Mapping[str, Any], open_hub: OpenHub, ask: Ask, warnings: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -402,10 +418,11 @@ def _judged(
     # `where` は判定するリポジトリとリモート名。リモート名は `gate` が 1 度だけ解き、GitHub の接続先とベースの取得の両方に使う
     root, remote = where
     hub = open_hub(root, remote)
-    number = pr_number(root, gate_name, inputs, hub)
+    number = _pull_to_judge(root, gate_name, inputs, hub)
     j = _Judging(root, gate_name, hub, number, hub.pull(number))
     try:
         snap, facts, project = _base_snapshot(j, remote, inputs)
+        j.where["version"] = snap.version
     except (GitError, mvv.MvvError, jsonfile.JsonFileError, identity.IdentityError, OSError) as exc:
         return j.stopped("base_unreadable", ["ベースの MVV を読めない: " + j.text("base_unreadable", exc)])
     # 手順 (3): 検査 1 だけが判定を止める。承認済みの MVV が無いリポジトリの出力と PR を今と同じにする（コメントを書かない）
@@ -564,18 +581,42 @@ def post_note(hub: GitHub, number: int, text: str) -> publish.Published:
 def _recorded(hub: GitHub, number: int, outcome: dict[str, Any], where: Mapping[str, Any]) -> dict[str, Any]:
     """判定の結果（省く・省かないの両方）を PR へ載せ、人が後から確かめられるようにする。
 
+    本文に識別子（`_note_key`）を入れ、同じ書き手の編集されていないコメントに同じ識別子があれば、投稿せずにそれを判定の
+    記録にする（打ち直しでコメントを増やさない）。
     マージに使える承認の証跡は、省くと決めた判定でもここでは書かない。判定は回答と排他できないので、変更要求・却下の後に
     承認が並びうる。書くのは、`service:mvv` の承認を確定する `next` である（`progress.gate.mvv_trail`。#4520 の決定 7）。
     書けなければ判定を保ったまま省かない側へ倒し、`noted` を偽にする（原因は `failure_text` の定型文と識別子だけ）。
     """
     text = note(outcome["gate"], outcome["verdict"], outcome["why"], outcome["holds"], outcome.get("head"))
+    marker = f"<!-- {identity.FIXED_WORDS['workflow_namespace']}:mvv-note {_note_key(hub, number, outcome, where)} -->"
     try:
-        made = post_note(hub, number, text)
+        url = _posted_note(hub, number, marker)
+        if url is None:
+            url = post_note(hub, number, f"{text.rstrip()}\n\n{marker}\n").url
     except GitHubError as exc:
         why = [*outcome["why"], "判定の記録を PR に書けない: " + failure_text("note_unwritten", exc, where)]
         kept = {k: v for k, v in outcome.items() if k != "target"}
         return {**kept, "skip": False, "why": why, "noted": False}
-    return {**outcome, "noted": True, "note_url": made.url}
+    return {**outcome, "noted": True, "note_url": url}
+
+
+def _note_key(hub: GitHub, number: int, outcome: Mapping[str, Any], where: Mapping[str, Any]) -> str:
+    """判定のコメントの識別子。判定の入力（区分・リポジトリ・PR・マージ先・HEAD・本文と題・MVV のバージョン）と結論
+    （判定の値か判定できなかった種類・省くか・保留）から作る。理由の文は入れない。"""
+    pull, verdict, stopped = where["pull"], outcome["verdict"], outcome.get("stopped_by")
+    concluded = verdict.get("verdict") if isinstance(verdict, Mapping) else stopped and stopped["kind"]
+    held = [outcome["gate"], hub.repo, number, pull.base_ref, pull.head_sha, pull.body, getattr(pull, "title", "")]
+    held += [where["version"], concluded, outcome["skip"], outcome["holds"]]
+    return hashlib.sha256(json.dumps(held, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+def _posted_note(hub: GitHub, number: int, marker: str) -> Optional[str]:
+    """識別子の行 `marker` を持つ、token の利用者と同じアカウントが書いた、編集されていないコメントの URL。無ければ None。"""
+    found = [c for c in hub.comments(number) if not c.edited and marker in c.body]
+    if not found:
+        return None
+    viewer = hub.viewer()
+    return next((c.url for c in found if merge_approval.same_writer(c, viewer)), None)
 
 
 def has_gate(mode: Any, gate_name: str) -> bool:
@@ -598,7 +639,7 @@ def gate(
     判定のステップはモードを問わず流れ（工程の出力 `mvv_gate` をどのモードでもそろえる）、承認ゲートを持たないモードでは判定しない。
     PR を読む前の失敗だけをここで受け、判定を持たない結果にする（PR を読んだ後の失敗は `_judged` が受ける）。
     MVV 判定の記録に読めない行があれば `warnings` へ足す。`inputs` の `NO_SKIP` が真なら、承認でない回答が残る工程の
-    判定として省かない（#4520）。
+    判定として省かない（#4520）。判定する PR が入力の `EXPECT_PR` と違えば `OtherPull`。
     """
     if not has_gate(inputs.get("mode"), gate_name):
         return mm.stop_outcome(gate_name, "no_gate", [f"モード {inputs.get('mode')} は承認ゲート {gate_name} を持たない"])

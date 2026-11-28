@@ -157,11 +157,12 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
     void = rejected or _void_answer(v, prog.answer, step.gate)
     answer = None if void else prog.answer
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
-    held = prog.waiting is not None or step.id in prog.held
-    # 手で終えた回答待ちは、前に流したステップの判定で省かない
-    # 手で終えた回答待ちと、承認でない回答が残る承認ゲートは、判定で省かない
+    # 手で終えた回答待ちは、前に流したステップの判定でなく `finish` が打った判定があるときだけ省く
+    held = prog.hand_judged is None if by_hand else step.id in prog.held
+    # 承認でない回答が残る承認ゲートは、判定で省かない
     objected = listen and approval_decide.skip_barred(v.stage_events(s.name), step.gate, s.mvv_before(step.id))
-    skip = listen and not held and not by_hand and not objected and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
+    undecided = listen and prog.waiting is None and not held and not objected
+    skip = undecided and model.mvv_skip(prog.done, s.mvv_before(step.id), step.gate) is not None
     if waiting and answer is None and not skip:
         return Move(Action.GATE, s, step, prog)
     return Move(Action.CONSUME if listen else Action.RESUME, s, step, prog, answer)
@@ -836,13 +837,13 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
     if step.kind == stages.READING_KIND:
         work_dir.mkdir(parents=True, exist_ok=True)
         run = _reading_run(v, s, step, run, work_dir)
-    run = _kept_by_objection(v, s, step, run)
+    run = kept_by_objection(v, s, step, run)
     res = _retrying(lambda again: d.env.invoker(replace(run, again=again), d.cwd, work_dir, ans), d.env.sleep)
     d.env.forget()  # 流したステップは PR へ push しうるので、次は対象を読み直してから比べる
     return _step_draft(v, s, step, prog, res)
 
 
-def _kept_by_objection(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun) -> invoke.StageRun:
+def kept_by_objection(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun) -> invoke.StageRun:
     """承認でない回答が残る設計の MVV 判定は `--no-skip` で打つ（`approval_decide.objection_bars_skip`）。"""
     if not approval_decide.objection_bars_skip(lambda: v.stage_events(s.name), step.id):
         return run

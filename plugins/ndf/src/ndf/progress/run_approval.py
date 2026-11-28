@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
@@ -69,6 +71,31 @@ def gate_report(step: stages.StepDef, answer: model.Event) -> dict[str, Any]:
     return result.result(TOOL, result.OK, summary, metrics={"answer": p["answer"], "seq": answer.seq})
 
 
+def _pass_without_answer(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
+    """回答の無い承認ゲート。有効な先の承認があればそれで済ませ、MVV 判定が省くと決めていれば `service:mvv` の承認を書き、
+    どちらでもなければ承認ゲートの待ちを返す。手で終えた回答待ちの先の承認は `finish` が照らしたので使わない。"""
+    assert m.stage is not None and m.step is not None and m.progress is not None
+    by_hand = m.progress.held_finish is not None
+    waiting = replace(m, action=Action.GATE, event=None)
+    # 同じ対象への有効な先の承認があれば、MVV の回答を書かずにそれを使う
+    found = None if by_hand else standing_approval(d, v, m.stage, m.step)
+    if found is not None:
+        d.write(_passed(v, m, found))
+        return None
+    objected = approval_decide.skip_barred(v.stage_events(m.stage.name), m.step.gate, m.stage.mvv_before(m.step.id))
+    held = None if objected else model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
+    if held is None:
+        return d.report(v, waiting)
+    qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
+    payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
+    draft = model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev)
+    if by_hand and _judged_target_moved(d, v, m, draft):
+        return None
+    if not _write_after_answers(d, v, draft):
+        return None  # 呼び手が最新の記録から決め直す
+    return d.proceed(v, m, f"{reason}。回答は検証を通してから読むので next を打つ")
+
+
 def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     """承認ゲートの回答を読む。回答が無ければ直前の MVV 判定が省けると決めた承認ゲートで、`service:mvv` の承認を書く。
 
@@ -78,30 +105,17 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     数えない MVV 判定の回答（`model.mvv_answer_void`）と、省けると決めた判定の無い手は、事象を書かずに承認ゲートの待ちを返す（#3959）。
     """
     assert m.stage is not None and m.step is not None and m.progress is not None
-    if m.progress.held_finish is not None:
+    by_hand = m.progress.held_finish is not None
+    if by_hand and m.event is not None:
         return consume_held(d, v, m)
     waiting = replace(m, action=Action.GATE, event=None)
     if m.event is not None and model.mvv_answer_void(event_payload(m.event), m.step.gate):
         return d.report(v, waiting)
     if m.event is None:
-        # 同じ対象への有効な先の承認があれば、MVV の回答を書かずにそれを使う
-        found = standing_approval(d, v, m.stage, m.step)
-        if found is not None:
-            d.write(_passed(v, m, found))
-            return None
-        objected = approval_decide.skip_barred(v.stage_events(m.stage.name), m.step.gate, m.stage.mvv_before(m.step.id))
-        held = None if objected else model.mvv_skip(m.progress.done, m.stage.mvv_before(m.step.id), m.step.gate)
-        if held is None:
-            return d.report(v, waiting)
-        qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
-        payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
-        draft = model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev)
-        if not _write_after_answers(d, v, draft):
-            return None  # 呼び手が最新の記録から決め直す
-        return d.proceed(v, m, f"{reason}。回答は検証を通してから読むので next を打つ")
+        return _pass_without_answer(d, v, m)
     if event_payload(m.event)["answer"] == APPROVED:
         if event_payload(m.event).get("by") == model.MVV_SERVICE:
-            _pass_by_mvv(d, v, m)
+            _confirm_mvv(d, v, m, lambda: d.write_if_unchanged(v, _passed(v, m, m.event)))
         else:
             d.write(_passed(v, m, m.event))
         return None
@@ -109,6 +123,20 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     d.refuse(v, m, detail)
     d.synced()
     return None
+
+
+def _judged_target_moved(d: Hands, v: View, m: Move, draft: model.EventDraft) -> bool:
+    """手で終えた回答待ちを省く承認 `draft` を書く前に、判定した対象の全体を今の対象と照らす。違えば承認を書かず、
+    承認ゲートを人の回答の待ちにして真を返す。自動の流れは、書いた回答を次の `next` が読む前に照らす（`recheck`）。"""
+    assert m.stage is not None and m.step is not None and m.progress is not None
+    got = _standing(d, v, m.stage, m.step, model.Event(0, datetime.now(timezone.utc), draft))
+    if not got.differences:
+        return False
+    why = "MVV 判定の対象が今と違うので、人へ問う: " + " / ".join(got.differences)
+    wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
+    if _write_after_answers(d, v, model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev)):
+        d.warn(why)
+    return True
 
 
 def _write_after_answers(d: Hands, v: View, draft: model.EventDraft) -> bool:
@@ -122,13 +150,14 @@ def _write_after_answers(d: Hands, v: View, draft: model.EventDraft) -> bool:
         return d.write_if_unchanged(v, draft)
 
 
-def _pass_by_mvv(d: Hands, v: View, m: Move) -> None:
-    """MVV 判定の承認を確定する。回答と共有する排他の中で記録を確かめ、承認の証跡を書いてから承認ゲートのステップを済ませる
-    （#4520 の決定 7）。排他の中では回答が確定しないので、後の変更要求・却下の証跡は承認の証跡より後に並ぶ。
+def _confirm_mvv(d: Hands, v: View, m: Move, passed: Callable[[], object]) -> None:
+    """MVV 判定の承認を確定する。回答と共有する排他の中で記録を確かめ、承認の証跡を書いてから `passed`（承認ゲートを
+    済ませる書き込み）を打つ（#4520 の決定 7）。排他の中では回答が確定しないので、後の変更要求・却下の証跡は承認の
+    証跡より後に並ぶ。
 
     待ったか事象が増えていれば何も書かず、呼び手が決め直す。省けない記録があるか、PR の証跡に同じ対象への利用者の却下が
-    あれば、承認ゲートの待ちへ戻す。証跡を書けなければ
-    `model.Refused` で、ステップは済ませない。"""
+    あれば、承認ゲートの待ちへ戻す。どれも `passed` は打たない。証跡を書けなければ
+    `model.Refused` で、`passed` は打たない。"""
     assert m.stage is not None and m.step is not None and m.progress is not None and m.event is not None
     with store.approval_lock_after_answer(d.st, v.machine_id, d.env.sleep) as waited:
         with store.transaction(d.st) as conn:
@@ -140,7 +169,7 @@ def _pass_by_mvv(d: Hands, v: View, m: Move) -> None:
         elif (withheld := d.env.mvv_trail(event_payload(m.event))) is not None:
             _back_to_waiting(d, v, m, withheld.why, withheld)
         else:
-            d.write_if_unchanged(v, _passed(v, m, m.event))
+            passed()
 
 
 def _back_to_waiting(d: Hands, v: View, m: Move, why: str, withheld: Optional[approval_decide.Withheld] = None) -> None:
@@ -202,8 +231,7 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
 
     承認の対象が変わっていれば今の対象で質問し直し、設計は承認した PR がマージ済みでなければ終了を書かない。"""
     assert m.stage is not None and m.step is not None and m.progress is not None and m.progress.held_finish is not None
-    if m.event is None:
-        return d.report(v, replace(m, action=Action.GATE))
+    assert m.event is not None
     if event_payload(m.event)["answer"] != APPROVED:
         d.refuse(v, m, f"承認ゲート {m.step.gate} で承認されなかった（{m.event.draft.reason}）")
         d.synced()
@@ -220,6 +248,18 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
             d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
         d.warn(why)
         return None
+    if event_payload(m.event).get("by") != model.MVV_SERVICE:
+        return _finish_held_stage(d, v, m, got)
+    # MVV 判定の承認は、マージの確かめの前に証跡を書く（設計 PR のマージが読む）
+    stopped: list[Optional[dict[str, Any]]] = []
+    _confirm_mvv(d, v, m, lambda: stopped.append(_finish_held_stage(d, v, m, got)))
+    return stopped[0] if stopped else None
+
+
+def _finish_held_stage(d: Hands, v: View, m: Move, got: approval_decide.Standing) -> Optional[dict[str, Any]]:
+    """有効な承認を読んだ手で終えた回答待ちの工程に終了を書く。設計の PR が未マージなら、終了を書かずに止まる結果を返す。"""
+    assert m.stage is not None and m.step is not None and m.progress is not None and m.progress.held_finish is not None
+    assert m.event is not None
     if m.step.gate == approval_decide.DESIGN_GATE and not got.merged:
         detail = (
             f"承認した設計 PR がマージされていない。承認済みのコミット {got.head} をマージしてから ndf progress next {v.machine_id} を打つ"

@@ -300,7 +300,7 @@ _TRAIL_ANSWERS = {
     run.REJECTED: approval_words.REJECTED,
     run.REQUEST_CHANGES: approval_words.REJECTED,
 }
-# MVV 判定が通した回答（証跡は `mvv_gate.py` が判定の記録と同じコメントに書くので、ここでは書かない）
+# MVV 判定が通した回答（証跡は、承認を確定する `next` が `mvv_trail` で書くので、ここでは書かない）
 MVV_BY = model.MVV_SERVICE
 
 

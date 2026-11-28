@@ -15,6 +15,7 @@ from ndf.progress.folding import step_progress
 from ndf.progress.run_view import (
     ANSWERED,
     APPROVAL_POSTING,
+    FINISH_HELD,
     REJECTING_KEY,
     STEP_EVENT,
     View,
@@ -114,9 +115,17 @@ def skip_barred(rows: Sequence[model.Event], gate: Optional[str], judged_step: O
     """MVV 判定で承認ゲート `gate` を省けないか。承認でない回答が残るか、判定のステップ `judged_step` が済んだ後に却下か
     変更要求の証跡の投稿を試みた記録があれば真（回答の確定に失敗していても、PR には却下が載りうる）。
 
-    `rows` は工程のすべての事象。"""
-    judged = max((ev.seq for ev in rows if ev.draft.kind == STEP_EVENT and event_payload(ev).get("step") == judged_step), default=0)
+    `rows` は工程のすべての事象。手の経路の判定は、回答待ちの記録（`finish_held`）が持つ。"""
+    judged = max((ev.seq for ev in rows if _judged_by(ev, judged_step)), default=0)
     return objection_remains(rows, gate) or rejection_posted_after(rows, gate, judged)
+
+
+def _judged_by(ev: model.Event, judged_step: Optional[str]) -> bool:
+    """事象 `ev` が判定のステップ `judged_step` の結果を持つか。"""
+    p = event_payload(ev)
+    if ev.draft.kind == FINISH_HELD:
+        return "judged" in p and p["judged"]["step"] == judged_step
+    return ev.draft.kind == STEP_EVENT and p.get("step") == judged_step
 
 
 def objection_bars_skip(rows: Callable[[], Sequence[model.Event]], step_id: str) -> bool:

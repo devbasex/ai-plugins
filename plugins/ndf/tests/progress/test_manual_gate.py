@@ -63,6 +63,8 @@ def env(repo, st, monkeypatch):
         forget=reader.forget,
     )
     monkeypatch.setattr(finishing, "shared_hub", lambda cwd: lambda: hub)
+    # 手で終える操作の MVV 判定は、省かない結果を返す偽物にする
+    monkeypatch.setattr(finishing, "judge_invoker", lambda r, cwd, work_dir, answer=None: lanes.ok_result(r, values))
     return SimpleNamespace(env=e, calls=calls, script=script, hub=hub, reader=reader)
 
 
@@ -335,12 +337,13 @@ def test_a_hand_written_design_output_needs_no_mvv_gate_and_it_is_not_used(repo,
     tid = _new(capsys)
     _before_design(capsys, repo, tid)
     assert _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR}, check=True)["status"] == "ok"
-    mvv = lanes.values(repo, "sprint/s1")["mvv_gate"]
+    mvv = {**lanes.values(repo, "sprint/s1")["mvv_gate"], "skip": True}
 
     out = _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR, "mvv_gate": mvv})
 
     assert out["status"] == "ok" and any("mvv_gate" in w for w in out["warnings"]), out
-    assert "mvv_gate" not in run.read(st, tid).context()
+    # 文脈には、書いた値でなく `finish` が打った判定の結果が載る
+    assert run.read(st, tid).context()["mvv_gate"] == lanes.values(repo, "sprint/s1")["mvv_gate"]
 
 
 def test_a_rejection_of_a_held_stage_fails_it(repo, st, env, capsys):

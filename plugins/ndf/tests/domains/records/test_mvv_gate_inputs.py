@@ -328,11 +328,19 @@ def test_expect_pr_of_another_pr_stops_without_reading_judging_or_commenting(
     assert "56" not in out["summary"] and "12" not in out["summary"]
 
 
-def test_expect_pr_is_invalid_for_the_design_gate(repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    _no_judging(monkeypatch)
+def test_expect_pr_of_the_design_gate_judges_only_the_branch_pr(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], notes: list[tuple[int, str]]
+) -> None:
     monkeypatch.setenv("NDF_STAGE_INPUT", json.dumps(_plan_inputs(repo)))
+    monkeypatch.setattr(cli, "_hub", lambda root, remote=None: _UnreadHub(5, DOCS))
+    monkeypatch.setattr(mvv_gate.llm, "ask", lambda *a, **k: pytest.fail("LLM を呼んだ"))
+    out = _cli_gate(repo, capsys, "design", "--expect-pr", "6")
+    assert (out["status"], out["cause"]["kind"]) == ("stopped", "not_applicable") and notes == []
+    assert "5" not in out["summary"] and "6" not in out["summary"]
+    monkeypatch.setattr(cli, "_hub", _hub(5, DOCS))
+    monkeypatch.setattr(mvv_gate, "gate", partial(mvv_gate.gate, ask=Ask(FOLLOW)))
     out = _cli_gate(repo, capsys, "design", "--expect-pr", "5")
-    assert (out["status"], out["cause"]["kind"]) == ("stopped", "invalid")
+    assert out["status"] == "ok" and out["outputs"]["mvv_gate"]["pr"] == 5 and [n for n, _ in notes] == [5]
 
 
 def test_expect_pr_without_the_pr_in_the_context_is_input_missing(

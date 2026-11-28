@@ -172,7 +172,9 @@ def test_finish_writes_the_declared_outputs_after_the_marker(repo, capsys, tmp_p
     _, made = _new(capsys, last_result)
     tid = made["metrics"]["machine_id"]
     code, out = _finish(capsys, last_result, tmp_path, tid, "設計", DESIGN_OUTPUT)
-    assert code == 0 and out["status"] == "ok" and "warnings" not in out
+    assert code == 0 and out["status"] == "ok"
+    # 作業場所の記録が無いので MVV 判定は打てず、警告にして人へ問う
+    assert [w.startswith("MVV 判定をできない") for w in out["warnings"]] == [True], out
     assert len(out["metrics"]["seqs"]) == 2
     tail = _tail(capsys, last_result, tid, "設計")
     # 設計は承認ゲートを持ち、承認の記録が無いので回答待ちになる
@@ -197,7 +199,7 @@ def test_finish_drops_the_keys_check_warns_of(repo, capsys, tmp_path, last_resul
     code, finished = _finish(capsys, last_result, tmp_path, tid, "設計", output)
     assert code == 0 and finished["status"] == "ok", finished
     assert checked["warnings"] == ["工程 設計 の定義の outputs に無いキーを finish が捨てる: pr"]
-    assert finished["warnings"] == ["工程 設計 の定義の outputs に無いキーを捨てた: pr"]
+    assert [w for w in finished["warnings"] if "MVV 判定" not in w] == ["工程 設計 の定義の outputs に無いキーを捨てた: pr"]
     tail = _tail(capsys, last_result, tid, "設計")
     assert tail[-1] == ("outputs_recorded", {"outputs": DESIGN_OUTPUT["outputs"]})
 
