@@ -237,7 +237,7 @@ def _file_mismatches(approved: units_files.Tree, now: units_files.Tree, targets:
         new_read = set(units_files.find(now, read, new_names).values())
     except units_files.UnitsFileError as exc:
         return [str(exc)]
-    before, after = units_files.named(old_names, issues), units_files.named(new_names, issues)
+    before, after = units_files.paths_naming(old_names, issues), units_files.paths_naming(new_names, issues)
     found = [f"{path}: 承認した単位のファイルが無い" for path in sorted(before - after)]
     found += [f"{path}: 承認の時点に無い単位のファイルがある" for path in sorted(after - before)]
     common = sorted(old_read & new_read)

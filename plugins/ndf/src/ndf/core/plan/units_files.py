@@ -209,7 +209,7 @@ def find(tree: Tree, issues: Sequence[int], names: Optional[Sequence[str]] = Non
     return out
 
 
-def named(names: Sequence[str], issues: Sequence[int]) -> set[str]:
+def paths_naming(names: Sequence[str], issues: Sequence[int]) -> set[str]:
     """ファイル名の番号の並びに `issues` のどれかを持つ単位のファイル。`find` と違い、同じ課題のファイルが 2 つあっても止めない。"""
     wanted = set(issues)
     return {path for path in names if _numbers_in(_UNITS_PATH, path) & wanted}
