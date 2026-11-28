@@ -869,6 +869,13 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.Reader
         detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}", *run.warnings]
         raise DriveStopped("precondition", "\n".join(str(line) for line in run_log.redact(detail)))
     if run.read_pr is not None and store.repo_of(run.data) is None:
+        # 保存済みのラウンドがどのリポジトリの PR のものか確かめられないので、読んだ PR へ結び直さない（#3780）
+        if store.list_of(run.data, store.ROUNDS):
+            raise DriveStopped(
+                "precondition",
+                f"状態の保存先 {cfg.state_dir} のラウンドに対象のリポジトリ target_repo が無く、どの PR のレビューか確かめられない。"
+                "保存先を消して打ち直す",
+            )
         # 起票先の確認に使う。head を確かめて読んだ PR のリポジトリだけを書く（#3780）
         run.data[store.REPO_KEY] = run.read_pr.ident.partition("#")[0]
         _save(run)

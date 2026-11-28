@@ -293,6 +293,20 @@ def test_issue_3780_2_run_fills_an_unconfirmed_repository(
     assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
 
 
+def test_issue_3780_2_run_does_not_bind_saved_rounds_to_the_read_repository(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    """対象のリポジトリの無い保存済みのラウンドは、同じブランチと head でも別のリポジトリのものかもしれないので、結び直さずに止める。"""
+    read = threads.ReadPr(f"other/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "other/r")
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    ref = store.state_pr(fake.state_dir, PR)
+    store.write_object(ref.path, {"pr": PR, "rounds": [{"round": 1, "head": read.head}]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert code != 0 and got["cause"]["kind"] == "precondition" and "target_repo" in got["cause"]["detail"]
+    assert store.state_repo(ref) is None and not fake.calls and hub.comments == []
+
+
 def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, monkeypatch, hub) -> None:
     # 起票の候補が無ければ、主 worktree を調べない
     monkeypatch.setattr(location, "main_worktree", lambda g: pytest.fail("主 worktree を調べた"))

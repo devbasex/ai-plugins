@@ -219,13 +219,16 @@ def _light(f: Mapping[str, Any]) -> bool:
     return not criteria_decide.blocking(criteria_decide.severity_of(f.get("severity")))
 
 
+def _own_issue(value: object, repo: Optional[str]) -> Optional[str]:
+    """記録のコメントに載せてよい起票の URL（対象のリポジトリ `repo` の Issue だと確かめられる値だけ。`repo` が無ければ載せない）。"""
+    return leftover_decide.issue_url(value, repo) if repo else None
+
+
 def _left_label(f: Mapping[str, Any], repo: Optional[str]) -> str:
     """直さずに残した指摘の終わり方（起票の URL か、記録のみ）。プロジェクト MVV に反する指摘は、その項目を添える。"""
-    url = f.get(leftover_decide.Filed.URL)
-    # 公開先 `repo` の Issue は `#番号` で出す。完全な URL は、所有者名が手元のアカウント名と同じだと伏せ字で開けなくなる
-    if repo and leftover_decide.issue_url(url, repo):
-        url = f"#{url.rsplit('/', 1)[-1]}"
-    label = f"直さずに残した（起票: {url}）" if url else "直さずに残した（記録のみ）"
+    url = _own_issue(f.get(leftover_decide.Filed.URL), repo)
+    # `#番号` で出す。完全な URL は、所有者名が手元のアカウント名と同じだと伏せ字で開けなくなる
+    label = f"直さずに残した（起票: #{url.rsplit('/', 1)[-1]}）" if url else "直さずに残した（記録のみ）"
     item = f.get(MVV)
     return f"{label}・MVV の {item} に反する" if item else label
 
@@ -301,7 +304,7 @@ def _open_value(value: Any) -> str:
     return encoded.replace("--", "-\\u002d")
 
 
-def _open_item(f: Mapping[str, Any], mark: Any, repo: Any) -> dict[str, Any]:
+def _open_item(f: Mapping[str, Any], mark: Any, repo: Optional[str]) -> dict[str, Any]:
     """`open_block` の一覧の、指摘 1 件の項目。`mark` はその指摘のスレッドの記録、`repo` は対象のリポジトリ。"""
     thread = mark.get("comment") if isinstance(mark, Mapping) else None
     keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
@@ -313,7 +316,7 @@ def _open_item(f: Mapping[str, Any], mark: Any, repo: Any) -> dict[str, Any]:
         keep[leftover_decide.PARKED] = True
     # 確かめる前の URL は別の欄で残し、別の保存先でも確かめられるようにする。対象のリポジトリの Issue の URL だけを書く
     for key in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR):
-        if url := leftover_decide.issue_url(f.get(key), repo):
+        if url := _own_issue(f.get(key), repo):
             keep[key] = url
     return {**keep, "thread": thread if type(thread) is int else None}
 
@@ -325,7 +328,7 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     （PR 3944 の r6-4）。引き継いだ起票の URL のうち指摘の項目に無いものは、URL だけの項目で足す（その指摘が出ない実行を
     挟んでも、次の保存先へ渡す。#3780）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
-    repo = data.get(store.REPO_KEY)
+    repo = store.repo_of(data)
     items = [
         _open_item(f, done.get(f.get("id")), repo)
         for f in store.list_of(data, store.FINDINGS)
@@ -338,7 +341,7 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         item[k] = cleaned
     held = {item.get(k) for item in items for k in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)}
     for carried in store.list_of(data, leftover_decide.CARRIED_URLS):
-        url = leftover_decide.issue_url(carried, repo)
+        url = _own_issue(carried, repo)
         if url and url not in held:
             items.append({leftover_decide.PARKED: True, leftover_decide.Filed.URL: url})
     payload = "[" + ", ".join("{" + ", ".join(f"{_open_value(k)}: {_open_value(v)}" for k, v in item.items()) + "}" for item in items) + "]"

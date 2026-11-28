@@ -205,7 +205,7 @@ def test_changed_files_are_listed_once_per_round(wt: Path, tmp_path: Path, capsy
 
 
 def _record(findings: list, threads_: dict, at: str, trusted: bool = True) -> prior_decide.Remark:
-    body = report_decide.comment(PR, {"findings": findings, "threads": threads_}, None)
+    body = report_decide.comment(PR, {"findings": findings, "threads": threads_, "target_repo": "o/r"}, None)
     return prior_decide.Remark("comment", "ndf", body, at=at, trusted=trusted)
 
 
@@ -523,7 +523,7 @@ def test_issue_3780_an_unconfirmed_url_is_published_and_restored_apart_from_a_co
     url = "https://github.com/o/r/issues/100"
     row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url}
     parked = {**row, "parked": True}
-    [item] = report_decide.open_items(report_decide.open_block({"findings": [parked]}))
+    [item] = report_decide.open_items(report_decide.open_block({"target_repo": "o/r", "findings": [parked]}))
     assert item["prior_issue"] == url and "issue" not in item
     journal = FindingJournal()
     journal.carry(prior_decide.recorded([_record([parked], {}, "2026-11-20T00:00:00Z")])[0])
@@ -554,6 +554,13 @@ def test_issue_3780_only_an_issue_url_of_the_target_is_published(url: str) -> No
     row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url, "issue": url}
     [item] = report_decide.open_items(report_decide.open_block({"target_repo": "o/r", "findings": [row]}))
     assert "prior_issue" not in item and "issue" not in item
+
+
+def test_issue_3780_no_issue_url_is_published_without_a_confirmed_target() -> None:
+    url = "https://github.com/other/r/issues/100"
+    row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "parked": True, "issue": url, "prior_issue": url}
+    body = report_decide.comment(PR, {"findings": [row], leftover.CARRIED_URLS: [url]}, None)
+    assert "issues/100" not in body and "記録のみ" in body
 
 
 def test_broken_leftover_fields_in_the_record_are_ignored() -> None:
