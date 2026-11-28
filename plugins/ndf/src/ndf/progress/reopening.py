@@ -2,7 +2,8 @@
 
 開き直しは事象 `reopened` 1 つで表し、過去の事象は消さない。畳み込み（`folding`）と文脈（`stages.recorded_outputs`）と
 承認を読む側（`run_view.StageAnswers`・`gate.records.approved_head`）が、直近の開き直しより前を今の判断に使わない。
-PR のコメントの証跡だけを読む `ndf ci merge` のために、開き直す工程の承認は PR の側でも取り消す。
+PR のコメントの証跡だけを読む `ndf ci merge` のために、開き直す工程の承認は PR の側でも取り消し、マージキューに
+入った PR はキューから外す（キューは証跡を読まずにマージする）。
 """
 
 from __future__ import annotations
@@ -145,7 +146,7 @@ def plan_reopen(v: View, stage: str, *, later: str, reason: str, trigger: Mappin
 
 
 def revoke_approvals(r: Reopen, post: Revoke) -> None:
-    """承認の取り消しを書く。DB の追記より前に呼ぶ（書けなければ `post` が `model.Refused`）。"""
+    """承認を取り消し、PR をマージキューから外す。DB の追記より前に呼ぶ（できなければ `post` が `model.Refused`）。"""
     if r.revoke:
         post(r.revoke)
 

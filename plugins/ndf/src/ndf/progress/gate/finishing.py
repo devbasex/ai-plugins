@@ -19,7 +19,7 @@ from ndf.progress.records import github_records, sync_records
 
 
 def _revoker(cwd: Path) -> reopening.Revoke:
-    """承認の取り消しを PR へ書く口。書けなければ `model.Refused`（開き直しを記録しない）。"""
+    """承認の取り消しを PR へ書き、マージキューから外す口。どちらかができなければ `model.Refused`（開き直しを記録しない）。"""
     get_hub = shared_hub(cwd)
 
     def revoke(revocations: list[merge_approval.Revocation]) -> None:
@@ -28,7 +28,7 @@ def _revoker(cwd: Path) -> reopening.Revoke:
             merge_approval.write_revocations(hub, revocations, hub.viewer())
         except (merge_approval.TrailError, GitHubError, GitError) as exc:
             numbers = "・".join(f"#{n}" for n in sorted({r.target.number for r in revocations}))
-            raise model.Refused(f"PR {numbers} の承認を取り消せないので、開き直さない: {exc}") from None
+            raise model.Refused(f"PR {numbers} の承認の取り消しとマージキューからの取り外しを終えられないので、開き直さない: {exc}") from None
 
     return revoke
 
@@ -50,7 +50,7 @@ def _retry_refusal(machine_id: str, stage: str, state: str, later: Optional[str]
 
 
 def _reopen_stage(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
-    """終了した工程を開き直し、進捗記録を書き直す。PR の承認の取り消しは、DB の追記より先に書く。"""
+    """終了した工程を開き直し、進捗記録を書き直す。PR の承認の取り消しは、DB の追記より先に行う。"""
     revoke = _revoker(cwd)
     attempts = command.append_attempts()
     for attempt in range(1, attempts + 1):

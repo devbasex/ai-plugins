@@ -306,6 +306,8 @@ def test_reopening_revokes_the_merge_approval_of_the_stage_once(repo, st, env, c
     assert _judgment(env, target) is None
     rows = merge_approval.merge_rows(env.hub, target.number, env.hub.viewer())
     assert [(r.answer, r.by) for r in rows] == [("approved", "user"), ("rejected", "reopen")]
+    # 取り消した承認の PR は、キューに入っていれば GitHub がマージしないように外す
+    assert env.hub.dequeued == [target.number]
 
 
 def test_a_later_approval_from_elsewhere_is_not_revoked(repo, st, env, capsys):
@@ -322,6 +324,8 @@ def test_a_later_approval_from_elsewhere_is_not_revoked(repo, st, env, capsys):
 
     assert out["status"] == "ok", out
     assert _judgment(env, target) == row
+    # 残る承認の PR はキューから外さない
+    assert env.hub.dequeued == []
 
 
 @pytest.mark.parametrize(("note", "revoked"), [(1, False), (2, True)])
@@ -350,6 +354,7 @@ def test_revocations_read_the_comments_of_a_pr_once():
     merge_approval.write_revocations(hub, revocations, hub.viewer())
 
     assert hub.calls == ["comments", "post_comment", "post_comment"]
+    assert hub.dequeued == [7]
 
 
 def test_an_unfinished_stage_with_a_recorded_merge_is_warned(repo, st, env, capsys):
@@ -378,6 +383,92 @@ def test_a_revocation_that_cannot_be_written_records_nothing(repo, st, env, caps
     out = _retry(capsys, tid, DESIGN, "--later", "reopen")
     assert out["cause"]["kind"] == "refused", out
     assert _events(st, tid) == before
+
+
+def _approved_design(capsys, repo, st, env) -> tuple[str, merge_approval.MergeTarget]:
+    """設計を本番へ反映される対象で承認し、終了まで進めたステートマシン。"""
+    tid = _new(capsys)
+    lanes.turn(st, tid, repo, env.env)
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    _approve_production(st, tid, env, target)
+    lanes.turn(st, tid, repo, env.env)
+    return tid, target
+
+
+def test_an_approval_written_by_another_account_refuses_the_reopen(repo, st, env, capsys):
+    tid, target = _approved_design(capsys, repo, st, env)
+    before, comments = _events(st, tid), list(env.hub.comments_of[target.number])
+    env.hub.login, env.hub.account_id = "someone", 2
+
+    out = _retry(capsys, tid, DESIGN, "--later", "keep")
+
+    detail = out["cause"]["detail"]
+    assert out["cause"]["kind"] == "refused" and "承認を書いたアカウント" in detail and "octocat" in detail, out
+    assert _events(st, tid) == before and env.hub.comments_of[target.number] == comments and env.hub.dequeued == []
+
+    env.hub.login, env.hub.account_id = "octocat", 1
+    assert _retry(capsys, tid, DESIGN, "--later", "keep")["status"] == "ok"
+
+
+@pytest.mark.parametrize("gone", ["deleted", "edited", "revoked"])
+def test_an_approval_that_no_account_can_merge_with_does_not_refuse(repo, st, env, capsys, gone):
+    """証跡がどこにも無い・編集されて数えない・書いたアカウントで取り消し済みなら、別のアカウントでも開き直せる。"""
+    tid, target = _approved_design(capsys, repo, st, env)
+    comments = env.hub.comments_of[target.number]
+    if gone == "deleted":
+        comments.clear()
+    elif gone == "edited":
+        comments[:] = [c._replace(edited=True) for c in comments]
+    else:
+        trail = merge_approval.merge_rows(env.hub, target.number, env.hub.viewer())[0]
+        revocation = merge_approval.Revocation(target, frozenset({trail.record_id}), "reopen:x")
+        merge_approval.write_revocations(env.hub, [revocation], env.hub.viewer())
+    env.hub.account_id = 2
+
+    out = _retry(capsys, tid, DESIGN, "--later", "keep")
+
+    assert out["status"] == "ok", out
+    assert env.hub.dequeued[-1:] == [target.number]
+
+
+def test_approvals_written_by_two_accounts_are_revoked_one_account_at_a_time():
+    """自分の分を書いてから断るので、アカウントを替えて打ち直せば終わる。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+    for account in (1, 2):
+        hub.account_id = account
+        merge_approval.write_merge_row(hub, merge_approval.MergeRow("approved", "user", target, True, f"by-{account}"), hub.viewer())
+    revocation = merge_approval.Revocation(target, frozenset({"by-1", "by-2"}), "reopen:x")
+
+    hub.account_id = 1
+    with pytest.raises(merge_approval.TrailError, match="承認を書いたアカウント"):
+        merge_approval.write_revocations(hub, [revocation], hub.viewer())
+    hub.account_id = 2
+    merge_approval.write_revocations(hub, [revocation], hub.viewer())
+
+    for account in (1, 2):
+        hub.account_id = account
+        assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, 7, hub.viewer()), target) is None
+
+
+def test_a_pr_that_cannot_leave_the_merge_queue_records_nothing_and_a_retry_dequeues(repo, st, env, capsys, monkeypatch):
+    tid, target = _approved_design(capsys, repo, st, env)
+    before = _events(st, tid)
+
+    def fail(number: int) -> None:
+        raise GitHubError("キューを読めない", 502)
+
+    with monkeypatch.context() as m:
+        m.setattr(env.hub, "dequeue", fail)
+        out = _retry(capsys, tid, DESIGN, "--later", "keep")
+    assert out["cause"]["kind"] == "refused" and "キューを読めない" in out["cause"]["detail"], out
+    assert _events(st, tid) == before
+
+    # 取り消しの証跡は書けているので、打ち直しは行を増やさずにキューから外す
+    comments = len(env.hub.comments_of[target.number])
+    out = _retry(capsys, tid, DESIGN, "--later", "keep")
+    assert out["status"] == "ok", out
+    assert len(env.hub.comments_of[target.number]) == comments and env.hub.dequeued == [target.number]
 
 
 def test_approvals_before_a_reopen_are_not_read_as_the_current_approval(repo, st, env, capsys):

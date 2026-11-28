@@ -6,13 +6,15 @@
 
 承認の対象は 4 つの値（ベースリポジトリ・PR の番号・マージ先・HEAD）で、証跡の行はその対象・回答・担い手・
 「本番へ反映されるか」・回答の記録の識別子を持つ。
-工程の開き直しは、承認した対象へ担い手 `reopen` の却下の行を足して承認を取り消す（`write_revocations`）。
+工程の開き直しは、承認した対象へ担い手 `reopen` の却下の行を足して承認を取り消し、PR をマージキューから外す
+（`write_revocations`）。
 """
 
 from __future__ import annotations
 
 import re
-from typing import NamedTuple, Sequence
+from collections import defaultdict
+from typing import Iterable, Iterator, NamedTuple, Sequence
 
 from ndf import identity
 from ndf.adapters.github import Authored, GitHub, Viewer
@@ -128,16 +130,21 @@ def merge_rows(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]:
     アカウントで、編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。
 
     `viewer` のアカウント ID が読めていない（0）なら、数えずに `TrailError`（理由は `NO_LOGIN`）。"""
+    _require_login(viewer)
+    return [row for c, row in _unedited_rows(hub.comments(number)) if same_writer(c, viewer)]
+
+
+def _require_login(viewer: Viewer) -> None:
     if viewer.account_id <= 0:
         raise TrailError(NO_LOGIN)
-    rows = []
-    for c in hub.comments(number):
-        if c.edited or not same_writer(c, viewer):
-            continue
-        row = _parse_merge_row(c.body)
+
+
+def _unedited_rows(comments: Iterable[Authored]) -> Iterator[tuple[Authored, MergeRow]]:
+    """編集されていないコメントの証跡の行と、そのコメント。書き手は問わない。"""
+    for c in comments:
+        row = None if c.edited else _parse_merge_row(c.body)
         if row is not None:
-            rows.append(row._replace(url=c.url))
-    return rows
+            yield c, row._replace(url=c.url)
 
 
 def merge_judgment(rows: Sequence[MergeRow], now: MergeTarget) -> MergeRow | None:
@@ -162,21 +169,54 @@ def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer) -> bool:
 
 
 def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None:
-    """対象ごとに、最新の証跡が `approvals` の承認なら担い手 `reopen` の却下の行を投稿する。承認が無い・既に却下・
-    最新の承認が別のもの（残す工程や別のステートマシンの承認）なら書かない。
+    """対象ごとに、最新の証跡が `approvals` の承認なら担い手 `reopen` の却下の行を投稿し、PR をマージキューから外す。
 
-    コメントの一覧は PR ごとに 1 回だけ読み、公開範囲は全体で 1 回だけ照会する。`ndf ci merge` は同じ対象の最新の行が
-    却下なら承認が無いと扱う（`merge_judgment`）。打ち直しで行は増えない。`viewer` のアカウント ID が読めていなければ
-    `TrailError`（`merge_rows` が投げる）。"""
+    承認が無い・既に却下なら行は書かない。最新の承認が別のもの（残す工程や別のステートマシンの承認）なら、行を書かず
+    キューからも外さない。キューは行を書いた後に外し（外した直後の `ndf ci merge` が入れ直さない）、行を書き終えた
+    打ち直しでも外す。
+
+    `approvals` の証跡が別のアカウントのコメントにしか無く、そのアカウントで今も承認と数えるなら、token の利用者の分を
+    書いた後に `TrailError`（そのアカウントの `ndf ci merge` は通るため）。コメントの一覧は PR ごとに 1 回だけ読み、
+    公開範囲は全体で 1 回だけ照会する。打ち直しで行は増えない。`viewer` のアカウント ID が読めていなければ `TrailError`。"""
+    _require_login(viewer)
     publisher = Publisher(hub)
-    read: dict[int, list[MergeRow]] = {}
+    read: dict[int, list[tuple[Authored, MergeRow]]] = {}
+    leaving: dict[int, None] = {}
+    others: dict[str, None] = {}
     for target, approvals, record_id in revocations:
         if target.number not in read:
-            read[target.number] = merge_rows(hub, target.number, viewer)
-        latest = merge_judgment(read[target.number], target)
-        if latest is None or approvals.isdisjoint((latest.record_id, latest.url)):
+            read[target.number] = list(_unedited_rows(hub.comments(target.number)))
+        found = read[target.number]
+        mine = [row for c, row in found if same_writer(c, viewer)]
+        others.update(dict.fromkeys(_other_holders(found, mine, viewer, target, approvals)))
+        latest = merge_judgment(mine, target)
+        if latest is not None and approvals.isdisjoint((latest.record_id, latest.url)):
             continue
-        publisher.comment(target.number, render_merge_row(MergeRow(REJECTED, REOPEN_BY, target, True, record_id)))
+        leaving[target.number] = None
+        if latest is not None:
+            publisher.comment(target.number, render_merge_row(MergeRow(REJECTED, REOPEN_BY, target, True, record_id)))
+    if others:
+        names = "・".join(others)
+        raise TrailError(f"取り消す承認の証跡を別のアカウント（{names}）が書いている。承認を書いたアカウントで打ち直す")
+    for number in leaving:
+        hub.dequeue(number)
+
+
+def _other_holders(
+    found: Sequence[tuple[Authored, MergeRow]], mine: Sequence[MergeRow], viewer: Viewer, target: MergeTarget, approvals: frozenset[str]
+) -> list[str]:
+    """`approvals` のうち token の利用者の証跡に無い承認を、今も対象の承認と数える別のアカウントの名前。"""
+    own = {value for r in mine if r.answer == APPROVED and r.target.same(target) for value in (r.record_id, r.url)}
+    theirs: defaultdict[int, list[tuple[str, MergeRow]]] = defaultdict(list)
+    for c, row in found:
+        if c.author_id > 0 and not same_writer(c, viewer):
+            theirs[c.author_id].append((c.author, row))
+    holders = []
+    for written in theirs.values():
+        latest = merge_judgment([row for _, row in written], target)
+        if latest is not None and not (approvals - own).isdisjoint((latest.record_id, latest.url)):
+            holders.append(written[-1][0])
+    return holders
 
 
 class TrailError(Exception):
