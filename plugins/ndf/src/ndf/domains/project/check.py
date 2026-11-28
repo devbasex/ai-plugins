@@ -27,8 +27,8 @@ from ndf.core import branch_strategy as bs
 from ndf.domains.project import analysis_record
 from ndf.domains.records import files, jsonfile
 
-# 解析器のバージョン。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する。旧い project_lib と同じ値）
-ANALYZER = 4
+# 解析器のバージョン。測る項目・入力のパスの表を変えたら上げる（上がると check が古いと判定する）
+ANALYZER = 5
 SCHEMA = contracts.schema_path("ndf-settings/project")
 WORKFLOWS = ".github/workflows/*"
 # 根と 1 段下のファイル名で当てる表（依存の定義・テストの設定・コンテナ・デプロイ）。指示書は事実の表 instruction-files の根の名前

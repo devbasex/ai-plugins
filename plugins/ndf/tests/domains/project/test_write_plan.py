@@ -16,7 +16,7 @@ from ndf.domains.records import files
 INPUTS = {"pyproject.toml": "3634277f"}
 # リモートの無い一時のリポジトリのブランチの構成（計測時の値として測定の結果に入れる）
 NO_REMOTE = {"head": None, "present": []}
-MEASURE = {"items": {}, "inputs": INPUTS, "notes": ["気づき"], "branch_state": NO_REMOTE}
+MEASURE = {"analyzer": check.ANALYZER, "items": {}, "inputs": INPUTS, "notes": ["気づき"], "branch_state": NO_REMOTE}
 IGNORE, RECORD, PROJECT = (files.relpath(k) for k in ("project-analysis-ignore", "project-analysis", "project"))
 
 
@@ -35,8 +35,8 @@ def repo(tmp_path, monkeypatch) -> Path:
 
 
 def _plan(repo: Path, existing=None, measure=MEASURE, answers=None, record=None) -> write.Plan:
-    """計画を決める。測定の結果にブランチの構成が無ければ、リモートの無い構成を計測時の値として入れる。"""
-    measure = {"branch_state": NO_REMOTE, **measure}
+    """計画を決める。測定の結果にブランチの構成と解析器のバージョンが無ければ、リモートの無い構成と今のバージョンを計測時の値として入れる。"""
+    measure = {"branch_state": NO_REMOTE, "analyzer": check.ANALYZER, **measure}
     return write.plan(write.Inputs(repo, repo, existing, measure, answers or {}, record))
 
 

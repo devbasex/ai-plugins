@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ndf-settings/project.schema.json",
   "title": "プロジェクトの設定（.ndf/project.json）",
-  "description": "言語・テスト・CI・リリースの経路・課題の保存先の設定。人と解析（M7）が書く。無ければ既定で動く",
+  "description": "テスト・CI・リリースの経路の設定。人と解析（M7）が書く。無ければ既定で動く",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -23,24 +23,6 @@
     "branch_strategy": {
       "$ref": "#/$defs/BranchStrategy",
       "description": "ブランチ戦略の設定。ブランチの名前・リリース方式・リリース・承認・マージを 1 か所で持ち、ndf project branch-strategy だけが作る・更新する・移す・消す。工程の部品は ndf.core.branch_strategy で読む"
-    },
-    "languages": {
-      "anyOf": [
-        {
-          "items": {
-            "$ref": "#/$defs/Language"
-          },
-          "type": "array"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "言語ごとの名前・フレームワーク・バージョンの並び（名前の順）。解析（M7）が書く"
     },
     "test": {
       "anyOf": [
@@ -71,81 +53,6 @@
       ],
       "default": null,
       "description": "CI の必須のチェック"
-    },
-    "services": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Services"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "テストと動作の確かめに要るコンテナ・compose のファイル・データベース"
-    },
-    "issues": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Issues"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "課題の保存先（primary と others）"
-    },
-    "checks": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Checks"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "静的解析・整形の Tool の並び"
-    },
-    "ndf_policies": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/NdfPolicies"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "NDF の方針の採否（doc_lint・reject_md_wording_tests など）"
-    },
-    "instructions": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/Instructions"
-        },
-        {
-          "$ref": "#/$defs/Unknown"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "指示書のファイル・読み込み・注記"
     },
     "materials": {
       "anyOf": [
@@ -1433,23 +1340,6 @@
       "title": "CauseType",
       "type": "object"
     },
-    "Checks": {
-      "additionalProperties": false,
-      "properties": {
-        "tools": {
-          "items": {
-            "$ref": "#/$defs/Tool"
-          },
-          "title": "Tools",
-          "type": "array"
-        }
-      },
-      "required": [
-        "tools"
-      ],
-      "title": "Checks",
-      "type": "object"
-    },
     "Ci": {
       "additionalProperties": false,
       "properties": {
@@ -1865,114 +1755,6 @@
       "title": "Environment",
       "type": "object"
     },
-    "Import": {
-      "additionalProperties": false,
-      "properties": {
-        "from": {
-          "title": "From",
-          "type": "string"
-        },
-        "to": {
-          "title": "To",
-          "type": "string"
-        }
-      },
-      "required": [
-        "from",
-        "to"
-      ],
-      "title": "Import",
-      "type": "object"
-    },
-    "Instructions": {
-      "additionalProperties": false,
-      "properties": {
-        "files": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Files",
-          "type": "array"
-        },
-        "imports": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/Import"
-          },
-          "title": "Imports",
-          "type": "array"
-        },
-        "notes": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Notes",
-          "type": "array"
-        }
-      },
-      "required": [
-        "files"
-      ],
-      "title": "Instructions",
-      "type": "object"
-    },
-    "Issues": {
-      "additionalProperties": false,
-      "properties": {
-        "primary": {
-          "title": "Primary",
-          "type": "string"
-        },
-        "others": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Others",
-          "type": "array"
-        }
-      },
-      "required": [
-        "primary"
-      ],
-      "title": "Issues",
-      "type": "object"
-    },
-    "Language": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "version": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Version"
-        },
-        "frameworks": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Frameworks",
-          "type": "array"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "title": "Language",
-      "type": "object"
-    },
     "Library": {
       "additionalProperties": false,
       "properties": {
@@ -2122,26 +1904,6 @@
       "title": "Materials",
       "type": "object"
     },
-    "NdfPolicies": {
-      "additionalProperties": false,
-      "description": "NDF 自身の開発の方針の検査を掛けるか。キーが無ければどちらも掛けない（決定 8）。",
-      "properties": {
-        "doc_lint": {
-          "title": "Doc Lint",
-          "type": "boolean"
-        },
-        "reject_md_wording_tests": {
-          "title": "Reject Md Wording Tests",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "doc_lint",
-        "reject_md_wording_tests"
-      ],
-      "title": "NdfPolicies",
-      "type": "object"
-    },
     "Needs": {
       "additionalProperties": false,
       "properties": {
@@ -2240,36 +2002,6 @@
         }
       },
       "title": "Seeds",
-      "type": "object"
-    },
-    "Services": {
-      "additionalProperties": false,
-      "properties": {
-        "container": {
-          "title": "Container",
-          "type": "boolean"
-        },
-        "compose_files": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Compose Files",
-          "type": "array"
-        },
-        "databases": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "title": "Databases",
-          "type": "array"
-        }
-      },
-      "required": [
-        "container"
-      ],
-      "title": "Services",
       "type": "object"
     },
     "StageToggle": {
@@ -2570,25 +2302,6 @@
         "tests"
       ],
       "title": "TestedDocs",
-      "type": "object"
-    },
-    "Tool": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "config": {
-          "title": "Config",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "config"
-      ],
-      "title": "Tool",
       "type": "object"
     },
     "Toolchain": {

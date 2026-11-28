@@ -1,21 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/devbasex/ai-plugins/main/plugins/ndf/skills/development-workflow/schemas/project.schema.json",
   "version": 1,
-  "languages": [
-    {
-      "name": "python",
-      "frameworks": [],
-      "version": "3.11"
-    },
-    {
-      "name": "shell",
-      "frameworks": []
-    },
-    {
-      "name": "javascript",
-      "frameworks": []
-    }
-  ],
   "test": {
     "ci": {
       "only": true
@@ -226,38 +211,6 @@
       "skill-repo-assumptions-check",
       "skill-shell-vars-check"
     ]
-  },
-  "services": {
-    "container": false,
-    "compose_files": [],
-    "databases": []
-  },
-  "issues": {
-    "primary": "github",
-    "others": [
-      "markdown"
-    ]
-  },
-  "checks": {
-    "tools": [
-      {
-        "name": "ruff",
-        "config": "pyproject.toml [tool.ruff]"
-      }
-    ]
-  },
-  "ndf_policies": {
-    "doc_lint": true,
-    "reject_md_wording_tests": true
-  },
-  "instructions": {
-    "files": [
-      "AGENTS.md",
-      "CLAUDE.md",
-      "KIRO.md"
-    ],
-    "imports": [],
-    "notes": []
   },
   "materials": {
     "unknown": "答えが無い"
@@ -521,12 +474,6 @@
   },
   "analysis": {
     "written": {
-      "languages": "7c808a2004eb5724982af572c03821ce64a796569d99da86db7df01c449077c4",
-      "services": "53f4e4c15a04bde773f9d0d89be06cd65f1a9248c0603b06b78bfa8a5f8a0771",
-      "issues": "c851aa29d3c11745f1307194db49eba6a488771771ea86c21c7237e400e336b8",
-      "checks": "c53dec6a7bc99ba9a736a0eb9cf4fdaf9bf0d10ccb7be539658df958ed84c50b",
-      "ndf_policies": "9f70d0f7e679e584f06860208c0540040cb74a8b6c2161894239a60ebefc63ef",
-      "instructions": "9137fe41c9b4a240dcee33f0311f83fb59a55b9165b80c22f8f20218dfc2a95f",
       "materials": "eec1b759fe58ecfcf4c8373becd6975fba410eebb3742cfa3142e56552c8e77b"
     }
   },

@@ -201,7 +201,7 @@ def test_measure_masks_secrets_before_writing(repo, tmp_path, monkeypatch, capsy
 def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_result):
     measured = _measure_file(
         tmp_path,
-        {"checks": {"status": "measured", "value": {"tools": []}}, "test": {"status": "question", "candidates": {}, "evidence": []}},
+        {"ci": {"status": "measured", "value": {"required_checks": []}}, "test": {"status": "question", "candidates": {}, "evidence": []}},
         repo,
     )
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}, "nope": {"value": 1}})
@@ -212,16 +212,16 @@ def test_write_creates_then_keeps_hand_values(repo, tmp_path, capsys, last_resul
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
     got = last_result(capsys.readouterr().out)
     kinds = {r["key"]: r["kind"] for r in got["items"] if "key" in r}
-    assert kinds["checks"] == "written" and kinds["test"] == "written" and kinds["nope"] == "ignored"
+    assert kinds["ci"] == "written" and kinds["test"] == "written" and kinds["nope"] == "ignored"
     decl = json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))
-    assert decl["checks"] == {"tools": []} and set(decl["analysis"]) == {"written"}
+    assert decl["ci"] == {"required_checks": []} and set(decl["analysis"]) == {"written"}
     assert _record(repo)["analyzer"] == check.ANALYZER
-    decl["checks"] = {"tools": [{"name": "ruff", "config": "ruff.toml"}]}  # 人が書き換えた値
+    decl["ci"] = {"required_checks": ["lint"]}  # 人が書き換えた値
     (repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
     rows = {r["key"]: r for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
-    assert rows["checks"]["kind"] == "mismatch"
-    assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["checks"] == decl["checks"]
+    assert rows["ci"]["kind"] == "mismatch"
+    assert json.loads((repo / ".ndf" / "project.json").read_text(encoding="utf-8"))["ci"] == decl["ci"]
 
 
 def test_issue_4580_write_keeps_the_flow(repo, tmp_path, capsys, last_result):
@@ -232,7 +232,7 @@ def test_issue_4580_write_keeps_the_flow(repo, tmp_path, capsys, last_result):
     }
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text(json.dumps({"version": 1, "workflow": flow}, ensure_ascii=False), encoding="utf-8")
-    measured = _measure_file(tmp_path, {"checks": {"status": "measured", "value": {"tools": []}}}, repo)
+    measured = _measure_file(tmp_path, {"ci": {"status": "measured", "value": {"required_checks": []}}}, repo)
     answers = _answers(tmp_path, {"test": {"value": {"suites": []}}})
     assert cli.main(["write", "--root", str(repo), "--measure", str(measured), "--answers", str(answers)]) == 0
     last_result(capsys.readouterr().out)
@@ -253,43 +253,43 @@ def test_merge_item_branches():
     """現状固定（I-008）: 秘密の形・キーが無い・手の値・食い違い・前の write の値の置き換えの各経路。"""
 
     old = {"x": 1}
-    ours = {"languages": value_digest(old)}
+    ours = {"materials": value_digest(old)}
     unknown = {"unknown": "測れない"}
-    assert write.merge_item("languages", (True, {"t": SECRET}), {"x": 2}, "測った", ours) == (
+    assert write.merge_item("materials", (True, {"t": SECRET}), {"x": 2}, "測った", ours) == (
         {"unknown": write.SECRET_REASON},
-        [{"kind": "secret", "key": "languages"}],
+        [{"kind": "secret", "key": "materials"}],
         True,
     )
-    assert write.merge_item("languages", (False, None), {"t": SECRET}, "測った", {}) == (
+    assert write.merge_item("materials", (False, None), {"t": SECRET}, "測った", {}) == (
         {"unknown": write.SECRET_REASON},
-        [{"kind": "secret", "key": "languages"}, {"kind": "unknown", "key": "languages", "reason": write.SECRET_REASON}],
+        [{"kind": "secret", "key": "materials"}, {"kind": "unknown", "key": "materials", "reason": write.SECRET_REASON}],
         True,
     )
-    assert write.merge_item("languages", (False, None), {"x": 2}, "測った", {}) == (
+    assert write.merge_item("materials", (False, None), {"x": 2}, "測った", {}) == (
         {"x": 2},
-        [{"kind": "written", "key": "languages", "origin": "測った"}],
+        [{"kind": "written", "key": "materials", "origin": "測った"}],
         True,
     )
-    assert write.merge_item("languages", (True, old), {"x": 2}, "測った", {}) == (
+    assert write.merge_item("materials", (True, old), {"x": 2}, "測った", {}) == (
         old,
-        [{"kind": "mismatch", "key": "languages", "declared": old, "analyzed": {"x": 2}}],
+        [{"kind": "mismatch", "key": "materials", "declared": old, "analyzed": {"x": 2}}],
         False,
     )
-    assert write.merge_item("languages", (True, old), {"x": 1}, "測った", {}) == (old, [{"kind": "kept", "key": "languages"}], False)
-    assert write.merge_item("languages", (True, old), unknown, "不明", {}) == (old, [{"kind": "kept", "key": "languages"}], False)
-    assert write.merge_item("languages", (True, old), {"t": SECRET}, "測った", {}) == (
+    assert write.merge_item("materials", (True, old), {"x": 1}, "測った", {}) == (old, [{"kind": "kept", "key": "materials"}], False)
+    assert write.merge_item("materials", (True, old), unknown, "不明", {}) == (old, [{"kind": "kept", "key": "materials"}], False)
+    assert write.merge_item("materials", (True, old), {"t": SECRET}, "測った", {}) == (
         old,
-        [{"kind": "secret", "key": "languages"}, {"kind": "kept", "key": "languages"}],
+        [{"kind": "secret", "key": "materials"}, {"kind": "kept", "key": "materials"}],
         False,
     )
-    assert write.merge_item("languages", (True, old), {"x": 2}, "判断した", ours) == (
+    assert write.merge_item("materials", (True, old), {"x": 2}, "判断した", ours) == (
         {"x": 2},
-        [{"kind": "written", "key": "languages", "origin": "判断した"}],
+        [{"kind": "written", "key": "materials", "origin": "判断した"}],
         True,
     )
-    assert write.merge_item("languages", (True, old), unknown, "不明", ours) == (
+    assert write.merge_item("materials", (True, old), unknown, "不明", ours) == (
         old,
-        [{"kind": "unknown", "key": "languages", "reason": "測れない", "kept_previous": True}],
+        [{"kind": "unknown", "key": "materials", "reason": "測れない", "kept_previous": True}],
         True,
     )
 
@@ -298,21 +298,21 @@ def test_row_line_formats_each_kind():
     """現状固定（I-015）: 出力の行の種類ごとの 1 行と、P 番号の当て方。"""
 
     lines = [
-        write.row_line({"kind": "written", "key": "languages", "origin": "測った"}),
+        write.row_line({"kind": "written", "key": "materials", "origin": "測った"}),
         write.row_line({"kind": "kept", "key": "test"}),
         write.row_line({"kind": "secret", "key": "ci"}),
         write.row_line({"kind": "unknown", "key": "ci", "reason": "時間切れ", "kept_previous": True}),
-        write.row_line({"kind": "unknown", "key": "issues"}),
-        write.row_line({"kind": "mismatch", "key": "checks", "declared": {"a": "値"}, "analyzed": [1]}),
+        write.row_line({"kind": "unknown", "key": "test"}),
+        write.row_line({"kind": "mismatch", "key": "ci", "declared": {"a": "値"}, "analyzed": [1]}),
         write.row_line({"kind": "note", "key": "notes"}),
     ]
     assert lines == [
-        "  P1 languages: 測った",
+        "   materials: 測った",
         "  P2 test: 手の値を保った",
         "  P4 ci: 秘密の形の値を捨てて不明にした",
         "  P4 ci: 不明（時間切れ）（前の値を残した）",
-        "  P8 issues: 不明（None）",
-        '  P9 checks: 食い違い 設定 {"a": "値"} / 解析 [1]',
+        "  P2 test: 不明（None）",
+        '  P4 ci: 食い違い 設定 {"a": "値"} / 解析 [1]',
         "   notes: note",
     ]
 
@@ -451,7 +451,7 @@ def test_an_old_settings_is_stale_not_broken(repo, capsys, last_result, doc):
 
 
 def test_the_second_write_writes_nothing_even_when_the_inputs_change(repo, tmp_path, capsys, last_result):
-    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
     assert _write_cli(repo, measure) == 0
     lines = capsys.readouterr().out.splitlines()
     record, decl = _record(repo), _settings(repo)
@@ -466,19 +466,19 @@ def test_the_second_write_writes_nothing_even_when_the_inputs_change(repo, tmp_p
     assert last_result(capsys.readouterr().out)["metrics"]["written"] == 0
     (repo / "pyproject.toml").write_text("[project]\nname = 'y'\n", encoding="utf-8")
     _git(repo, "commit", "-qam", "change")
-    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 0
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 0
     written = last_result(capsys.readouterr().out)["metrics"]["files"]
     assert str(repo / ".ndf" / "project.json") not in written and str(files.path(repo, "project-analysis")) in written
     assert _judged(capsys, last_result, repo)[0] == 0
 
 
 def test_restoring_only_the_settings_is_stale_but_hand_values_are_not(repo, tmp_path, capsys, last_result):
-    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 0
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 0
     first = (repo / ".ndf" / "project.json").read_text(encoding="utf-8")
-    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]})}, repo)) == 0
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)) == 0
     capsys.readouterr()
     decl = _settings(repo)
-    decl["services"] = {"unknown": "人が直した"}  # analysis.written は変えない
+    decl["materials"] = {"unknown": "人が直した"}  # analysis.written は変えない
     (repo / ".ndf" / "project.json").write_text(json.dumps(decl), encoding="utf-8")
     assert _judged(capsys, last_result, repo)[0] == 0
     (repo / ".ndf" / "project.json").write_text(first, encoding="utf-8")
@@ -486,20 +486,20 @@ def test_restoring_only_the_settings_is_stale_but_hand_values_are_not(repo, tmp_
 
 
 def test_write_moves_an_old_settings_keeping_who_wrote_each_item(repo, tmp_path, capsys, last_result):
-    languages = [{"name": "python", "frameworks": [], "files": 3}]
+    materials = {"deferred_milestones": ["後"]}
     doc = {
         "version": 1,
-        "languages": languages,
+        "materials": materials,
         "test_duration": {"measured": [{"seconds": 1.0}]},
         "ci": {"provider": "github-actions", "workflows": [{"path": "a.yml", "jobs": 1}], "required_checks": ["pytest"]},
-        "analysis": {**OLD_ANALYSIS, "written": {"languages": value_digest(languages)}},
+        "analysis": {**OLD_ANALYSIS, "written": {"materials": value_digest(materials)}},
     }
     _declare(repo, None, doc)
-    items = {"languages": _measured([{"name": "python", "frameworks": ["django"]}]), "ci": _measured({"required_checks": ["lint"]})}
+    items = {"materials": _measured({"deferred_milestones": ["次"]}), "ci": _measured({"required_checks": ["lint"]})}
     assert _write_cli(repo, _measure_file(tmp_path, items, repo)) == 0
     rows = {r["key"]: r["kind"] for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
     decl = _settings(repo)
-    assert decl["languages"] == [{"name": "python", "frameworks": ["django"]}]  # 解析が書いた値は新しい値へ
+    assert decl["materials"] == {"deferred_milestones": ["次"]}  # 解析が書いた値は新しい値へ
     assert decl["ci"] == {"required_checks": ["pytest"]} and rows["ci"] == "mismatch"  # 人の値は旧い形のキーだけを外して残す
     assert "test_duration" not in decl and set(decl["analysis"]) == {"written"} and "ci" not in decl["analysis"]["written"]
     assert _judged(capsys, last_result, repo)[0] == 0
@@ -513,19 +513,19 @@ def test_write_moves_an_old_settings_without_written_and_required_checks(repo, t
 
 
 def test_write_without_a_record_replaces_only_the_values_it_wrote(repo, tmp_path, capsys, last_result):
-    ours, hand = {"tools": []}, {"unknown": "人が書いた"}
-    doc = {"version": 1, "checks": ours, "services": hand, "analysis": {"written": {"checks": value_digest(ours)}}}
+    ours, hand = {"required_checks": []}, {"unknown": "人が書いた"}
+    doc = {"version": 1, "ci": ours, "materials": hand, "analysis": {"written": {"ci": value_digest(ours)}}}
     _declare(repo, None, doc)
-    items = {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]}), "services": _measured({"containers": []})}
+    items = {"ci": _measured({"required_checks": ["lint"]}), "materials": _measured({"deferred_milestones": []})}
     assert _write_cli(repo, _measure_file(tmp_path, items, repo)) == 0
     decl = _settings(repo)
-    assert decl["checks"] == {"tools": [{"name": "ruff", "config": "ruff.toml"}]} and decl["services"] == hand
+    assert decl["ci"] == {"required_checks": ["lint"]} and decl["materials"] == hand
 
 
 @pytest.mark.parametrize("target", ["project", "record"])
 def test_a_write_that_fails_after_the_pending_mark_leaves_it_stale(repo, tmp_path, monkeypatch, capsys, last_result, target):
-    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 0
-    changed = _measure_file(tmp_path, {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]})}, repo)
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 0
+    changed = _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)
     real = cli.signals.replace_text
 
     def failing(path, text):
@@ -556,6 +556,110 @@ def test_changing_only_the_answers_leaves_no_pending_mark(repo, tmp_path, capsys
     assert {k: v for k, v in _record(repo).items() if k != "written_digest"} == {k: v for k, v in record.items() if k != "written_digest"}
     assert "pending" not in _record(repo)
     assert _judged(capsys, last_result, repo)[0] == 0
+
+
+# --- 読み手の無い 6 項目（#4521）: 書かない・残っていれば古い・書き出しで取り除く ---
+
+UNREAD = ("languages", "services", "issues", "checks", "ndf_policies", "instructions")
+OLD_SIX = {
+    "languages": [{"name": "python", "frameworks": []}],
+    "services": {"container": False, "compose_files": [], "databases": []},
+    "issues": {"primary": "github", "others": []},
+    "checks": {"tools": []},
+    "ndf_policies": {"doc_lint": True, "reject_md_wording_tests": True},
+    "instructions": {"files": ["AGENTS.md"], "imports": [], "notes": []},
+}
+
+
+def test_the_first_write_has_none_of_the_unread_items(repo, tmp_path):
+    items = {"ci": _measured({"required_checks": []}), **{k: _measured(v) for k, v in OLD_SIX.items()}}
+    assert _write_cli(repo, _measure_file(tmp_path, items, repo)) == 0
+    decl = _settings(repo)
+    assert not set(UNREAD) & set(decl) and not set(UNREAD) & set(decl["analysis"]["written"])
+    assert not set(UNREAD) & set(write.ITEM_KEYS)
+
+
+def test_answers_to_dropped_items_are_ignored(repo, tmp_path, capsys, last_result):
+    """旧版の測定の結果（issues・ndf_policies が質問）と旧版の回答を組み合わせても、書かずに「無視した回答」にする。"""
+    question = {"status": "question", "candidates": {}, "evidence": []}
+    measure = _measure_file(tmp_path, {"issues": question, "ndf_policies": question, "test": question}, repo)
+    answers = _answers(
+        tmp_path,
+        {"issues": {"value": OLD_SIX["issues"]}, "ndf_policies": {"value": OLD_SIX["ndf_policies"]}, "test": {"value": {"suites": []}}},
+    )
+    assert _write_cli(repo, measure, answers) == 0
+    out = capsys.readouterr().out
+    assert "無視した回答: issues" in out and "無視した回答: ndf_policies" in out
+    kinds = {r["key"]: r["kind"] for r in last_result(out)["items"] if "key" in r}
+    assert (kinds["issues"], kinds["ndf_policies"], kinds["test"]) == ("ignored", "ignored", "written")
+    assert not {"issues", "ndf_policies"} & set(_settings(repo))
+
+
+@pytest.mark.parametrize("key", UNREAD)
+def test_settings_with_a_dropped_item_are_stale_not_broken(repo, capsys, last_result, key):
+    doc = {"version": 1, key: OLD_SIX[key], "analysis": {"written": {}}}
+    _declare(repo, _fresh_record(repo, doc), doc)
+    assert _judged(capsys, last_result, repo) == (3, [f"旧い形の値が設定にある: {key}"])
+
+
+def test_write_removes_the_dropped_items_even_when_edited_by_hand(repo, tmp_path, capsys, last_result):
+    ci, hand_materials = {"required_checks": ["old"]}, {"deferred_milestones": ["人"]}
+    written = {k: value_digest(v) for k, v in OLD_SIX.items() if k != "checks"}  # checks は人が直した値（指紋が違う）
+    written |= {"checks": value_digest({"tools": [{"name": "ruff", "config": "x"}]}), "ci": value_digest(ci)}
+    doc = {"version": 1, "ci": ci, "materials": hand_materials, **OLD_SIX, "analysis": {"written": written}}
+    _declare(repo, None, doc)
+    items = {"ci": _measured({"required_checks": ["lint"]}), "materials": _measured({"deferred_milestones": []})}
+    measure = _measure_file(tmp_path, items, repo)
+    assert _write_cli(repo, measure) == 0
+    rows = {r["key"]: r["kind"] for r in last_result(capsys.readouterr().out)["items"] if "key" in r}
+    decl = _settings(repo)
+    assert not set(UNREAD) & set(decl) and not set(UNREAD) & set(decl["analysis"]["written"])
+    assert decl["ci"] == {"required_checks": ["lint"]} and rows["ci"] == "written"  # 解析が書いた値は新しい値へ
+    assert decl["materials"] == hand_materials and rows["materials"] == "mismatch"  # 人の値は残る
+    text = (repo / ".ndf" / "project.json").read_text(encoding="utf-8")
+    assert _write_cli(repo, measure) == 0
+    assert (repo / ".ndf" / "project.json").read_text(encoding="utf-8") == text
+    capsys.readouterr()
+    assert _judged(capsys, last_result, repo)[0] == 0
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_the_diff_names_the_dropped_items_without_their_values(repo, tmp_path, capsys, dry_run):
+    assigned, paired = "password=" + "hunter2hunter2", "p4ssw0rd-of-the-pair"
+    doc = {"version": 1, "issues": {"primary": assigned}, "services": {"password": paired}}
+    _declare(repo, None, doc)
+    measure = _measure_file(tmp_path, {}, repo)
+    args = ["write", "--root", str(repo), "--measure", str(measure), *(["--dry-run"] if dry_run else [])]
+    assert cli.main(args) == 0
+    out = capsys.readouterr().out  # 差分と結果 JSON の両方
+    assert assigned not in out and paired not in out
+    assert '-  "issues": "（伏せた）"' in out and '-  "services": "（伏せた）"' in out
+
+
+def test_a_measure_of_an_older_analyzer_stays_stale(repo, tmp_path, capsys, last_result):
+    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
+    data = json.loads(measure.read_text(encoding="utf-8"))
+    measure.write_text(json.dumps({**data, "analyzer": check.ANALYZER - 1}), encoding="utf-8")
+    for _ in range(2):
+        assert _write_cli(repo, measure) == 0
+        assert _record(repo)["analyzer"] == check.ANALYZER - 1
+        capsys.readouterr()
+        code, reasons = _judged(capsys, last_result, repo)
+        assert code == 3 and reasons == [f"解析器のバージョンが古い（{check.ANALYZER - 1} < {check.ANALYZER}）"]
+
+
+@pytest.mark.parametrize("analyzer", ["unexpected-analyzer-text", True, 4.5, 0, None])
+def test_a_broken_analyzer_stops_the_write_without_showing_the_value(repo, tmp_path, capsys, last_result, analyzer):
+    measure = _measure_file(tmp_path, {}, repo)
+    data = json.loads(measure.read_text(encoding="utf-8"))
+    del data["analyzer"]
+    measure.write_text(json.dumps(data if analyzer is None else {**data, "analyzer": analyzer}), encoding="utf-8")
+    assert _write_cli(repo, measure) == 1
+    captured = capsys.readouterr()
+    summary = last_result(captured.out)["summary"]
+    assert summary == "測定の結果の analyzer は 1 以上の整数が必要（ndf project measure からやり直す）"
+    assert "unexpected-analyzer-text" not in captured.out + captured.err
+    assert not (repo / ".ndf" / "project.json").exists() and not files.path(repo, "project-analysis").exists()
 
 
 # --- 書き出しを守る（#4516）: 記録が git に無視されることを git に確かめさせ、設定の書き込みと同じロックで守る ---
@@ -598,7 +702,7 @@ def _stopped(capsys, last_result) -> str:
 
 
 def _first_write(repo: Path, tmp_path: Path) -> Path:
-    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
     assert _write_cli(repo, measure) == 0
     return measure
 
@@ -607,7 +711,7 @@ def test_an_empty_gitignore_stops_the_write_unless_git_ignores_the_record_elsewh
     ignore = files.path(repo, "project-analysis-ignore")
     ignore.parent.mkdir(parents=True)
     ignore.write_text("", encoding="utf-8")
-    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
     assert _write_cli(repo, measure) == 1
     assert _stopped(capsys, last_result).startswith(".ndf/analysis/project.json が git に無視されない")
     assert not (repo / ".ndf" / "project.json").exists() and not files.path(repo, "project-analysis").exists()
@@ -630,7 +734,7 @@ def test_a_tracked_record_stops_the_write_before_the_gitignore(repo, tmp_path, m
     _put_record(repo, {"tracked": True})
     _git(repo, "add", "-f", files.relpath("project-analysis"))
     calls = _count_guards(monkeypatch)
-    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 1
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 1
     assert calls == ["check-ignore", "ls-files"]
     assert _stopped(capsys, last_result) == f".ndf/analysis/ の下のファイルが git に追跡されている: {files.relpath('project-analysis')}"
     assert not files.path(repo, "project-analysis-ignore").exists() and not (repo / ".ndf" / "project.json").exists()
@@ -663,7 +767,7 @@ def test_updating_the_record_asks_git_once(repo, tmp_path, monkeypatch, capsys, 
     _first_write(repo, tmp_path)
     calls = _count_guards(monkeypatch)
     capsys.readouterr()
-    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": [{"name": "ruff", "config": "ruff.toml"}]})}, repo)) == 0
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": ["lint"]})}, repo)) == 0
     assert calls == ["check-ignore"] and last_result(capsys.readouterr().out)["metrics"]["written"] > 0
 
 
@@ -719,7 +823,7 @@ def test_git_that_cannot_tell_leaves_the_tree_as_it_was(repo, tmp_path, monkeypa
         ignore.write_text(existing_ignore, encoding="utf-8")
     before = _tree(repo)
     calls = _count_guards(monkeypatch, {command: git.Completed(128, "", "fatal: index file corrupt\n")})
-    assert _write_cli(repo, _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)) == 1
+    assert _write_cli(repo, _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)) == 1
     summary = _stopped(capsys, last_result)
     assert summary.startswith("git が .ndf/analysis/ の追跡と無視を確かめられない: ") and summary.endswith("fatal: index file corrupt")
     assert calls == (list(GUARDS) if command == "ls-files" else ["check-ignore"])
@@ -750,7 +854,7 @@ def test_an_unanswered_ignore_check_stops_before_any_write(tmp_path, monkeypatch
 def test_a_held_lock_stops_the_write_without_reading(repo, tmp_path, monkeypatch, capsys, last_result):
     (repo / ".ndf").mkdir()
     (repo / ".ndf" / "project.json").write_text("{", encoding="utf-8")  # 読めば終了コード 2 になる設定
-    measure = _measure_file(tmp_path, {"checks": _measured({"tools": []})}, repo)
+    measure = _measure_file(tmp_path, {"ci": _measured({"required_checks": []})}, repo)
     real = cli.limits.seconds
     monkeypatch.setattr(cli.limits, "seconds", lambda name: 0 if name == "branch-strategy.write-lock" else real(name))
     with FileLock(str(bw.lock_at(check.repo_dirs(repo).common))):
