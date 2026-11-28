@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from ndf.domains.project import items as forms
-from ndf.domains.project import measure_ci, measure_repo, secret
+from ndf.domains.project import cli, measure_ci, measure_repo, secret
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -48,6 +48,108 @@ def _tree(repo: Path, seconds: float = 30) -> measure_repo.Tree:
     return measure_repo.Tree(repo, time.monotonic() + seconds)
 
 
+# --- 退行（#4521 の受け入れ条件 6・7）: 残る項目（test・materials・ci）と指示書の案内は、測定を絞る前と同じ ---
+
+
+def _add_commit(repo: Path, files: dict[str, str]) -> None:
+    for name, text in files.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add")
+
+
+def _measure_whole(repo: Path, monkeypatch, called: list[str] | None = None) -> dict:
+    """GitHub の origin を持つリポジトリを `measure_project` で測る。`gh` は呼ばず、必須のチェックだけを返す。
+    `called` を渡すと、呼ばれた API のパスを記録する。"""
+    _git(repo, "remote", "add", "origin", "https://github.com/o/r.git")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    paths = called if called is not None else []
+    monkeypatch.setattr(measure_ci.Gh, "get", lambda self, path: paths.append(path) or _RULES)
+    return cli.measure_project(repo, 30)
+
+
+_SECRET_NOTE = "秘密の名前のファイルを開かなかった: .env"
+
+
+def _old_guide_note(where: str) -> str:
+    return f"古い NDF の案内 {where}（NDF_PLUGIN_GUIDE_START）。今の NDF を指さないので、読み込みを外すか消す"
+
+
+def test_regression_test_question_materials_ci_and_old_guide_note(repo, monkeypatch):
+    _add_commit(
+        repo,
+        {
+            "composer.json": '{"require": {"php": "^8.3", "sentry/sdk": "^3"}, "require-dev": {"phpunit/phpunit": "^10"}, '
+            '"scripts": {"test": "phpunit"}}',
+            "web/docker-compose.yml": "services:\n  web:\n    image: nginx\n  db:\n    image: mysql:8\n",
+            "README.md": "# 題\n\n説明\n",
+        },
+    )
+    called: list[str] = []
+    got = _measure_whole(repo, monkeypatch, called)
+    assert called == ["repos/o/r/rules/branches/main"]  # GitHub の API は必須のチェックだけ（受け入れ条件 5）
+    assert list(got["items"]) == ["test", "ci", "materials"]
+    assert got["items"]["test"] == {
+        "status": "question",
+        "candidates": {
+            "runners": [{"runner": "phpunit", "config": ["phpunit.xml"], "dependency": ["phpunit/phpunit"]}],
+            "commands": ["composer.json: test = phpunit"],
+            "compose_services": ["app", "db", "web"],
+        },
+        "evidence": [{"path": "AGENTS.md", "line": 1, "text": "テストは docker compose exec app phpunit で打つ"}],
+    }
+    assert got["items"]["materials"] == {
+        "status": "question",
+        "candidates": {
+            "product": None,
+            "needs": {"usage": [], "market": []},
+            "seeds": {
+                "libraries": [{"name": n, "ecosystem": "packagist", "alternatives": []} for n in ("phpunit/phpunit", "sentry/sdk")],
+                "environment": [],
+            },
+            "deferred_milestones": [],
+        },
+        "evidence": [{"file": "README.md", "text": "# 題"}, {"file": "README.md", "text": "説明"}, {"text": "packagist: sentry/sdk"}],
+    }
+    assert got["items"]["ci"] == forms.measured({"required_checks": ["pytest"]})
+    assert got["notes"] == [_old_guide_note("docs/guide.md を AGENTS.md が読み込んでいる"), _SECRET_NOTE]
+
+
+def test_regression_measured_test_and_missing_instructions_note(repo, monkeypatch):
+    for name in ("AGENTS.md", "composer.json", "phpunit.xml"):
+        _git(repo, "rm", "-q", name)
+    _git(repo, "commit", "-qm", "rm")
+    got = _measure_whole(repo, monkeypatch)
+    assert got["items"]["test"] == forms.measured({"suites": []})
+    assert got["notes"] == ["指示書（AGENTS.md・CLAUDE.md など）が無い。NDF と各ランタイムが読む指示書を置くとよい", _SECRET_NOTE]
+
+
+def test_regression_old_guide_in_an_instruction_file_note(repo, monkeypatch):
+    _add_commit(repo, {"AGENTS.md": "<!-- NDF_PLUGIN_GUIDE_START -->\n"})
+    assert _measure_whole(repo, monkeypatch)["notes"] == [_old_guide_note("AGENTS.md が指示書にある"), _SECRET_NOTE]
+
+
+@pytest.mark.parametrize("agents", ["@docs/guide.md\n", None])
+def test_regression_write_prints_the_instruction_notes(repo, tmp_path_factory, capsys, agents):
+    if agents is None:
+        _git(repo, "rm", "-q", "AGENTS.md")
+        _git(repo, "commit", "-qm", "rm")
+    else:
+        _add_commit(repo, {"AGENTS.md": agents + "テストの話\n"})
+    out = tmp_path_factory.mktemp("out") / "m.json"
+    assert cli.main(["measure", "--root", str(repo), "--out", str(out)]) == 0
+    capsys.readouterr()
+    assert cli.main(["write", "--root", str(repo), "--measure", str(out), "--dry-run"]) == 0
+    expected = (
+        _old_guide_note("docs/guide.md を AGENTS.md が読み込んでいる")
+        if agents
+        else "指示書（AGENTS.md・CLAUDE.md など）が無い。NDF と各ランタイムが読む指示書を置くとよい"
+    )
+    assert f"案内: {expected}" in capsys.readouterr().out.splitlines()
+
+
 def test_tree_skips_secret_files_and_masks_values(repo):
     tree = _tree(repo)
     assert tree.skipped == [".env"]
@@ -62,40 +164,45 @@ def test_tree_past_deadline_raises_time_up(repo):
         _tree(repo, -1).read("AGENTS.md")
 
 
-def test_repo_items(repo):
-    tree = _tree(repo)
-    deps = measure_repo.dependencies(tree)
-    langs = measure_repo.measure_languages(tree, deps)["value"]
-    assert langs[0] == {"name": "php", "frameworks": ["laravel 10"], "version": "8.3"}
-    services, names = measure_repo.measure_services(tree)
-    assert services["value"] == {"container": True, "compose_files": ["compose.yml"], "databases": ["mysql"]}
-    assert names == ["app", "db"]
-    test = measure_repo.measure_test(tree, deps, names)
-    assert test["status"] == "question"
-    assert test["candidates"]["runners"][0]["runner"] == "phpunit"
-    instructions = measure_repo.measure_instructions(tree)["value"]
-    assert instructions["imports"] == [{"from": "AGENTS.md", "to": "docs/guide.md"}]
-    assert "NDF_PLUGIN_GUIDE_START" in instructions["notes"][0]
-
-
-def test_measure_marks_failed_items_unknown(repo):
+def test_measure_puts_only_test_and_materials_and_returns_the_instruction_notes(repo):
     items: dict = {}
-
-    def step(key, fn):
-        if key == "services":
-            items[key] = forms.unknown("測れない")
-            return None
-        return fn()
-
-    issues = measure_repo.measure(_tree(repo), step, items)
-    assert items["services"]["status"] == "unknown"
-    assert items["test"]["candidates"]["compose_services"] == []
-    assert issues == {"markdown_files": 0, "templates": [], "hosts": []}
+    steps: list[str] = []
+    notes = measure_repo.measure(_tree(repo), lambda key, fn: steps.append(key) or fn(), items)
+    assert steps == ["dependencies", "services", "test", "instructions", "materials"]  # 注記は素材より先
+    assert list(items) == ["test", "materials"]
+    assert items["test"]["candidates"]["compose_services"] == ["app", "db"]
+    assert len(notes) == 1 and "NDF_PLUGIN_GUIDE_START" in notes[0]
 
 
-def test_compose_services_reads_names_and_images():
+@pytest.mark.parametrize("failed", ["dependencies", "service_names", "instruction_notes"])
+def test_measure_keeps_measuring_after_a_failed_step(repo, monkeypatch, failed):
+    def boom(tree):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(measure_repo, failed, boom)
+    step = cli._Steps(time.monotonic() + 30)
+    notes = measure_repo.measure(_tree(repo), step, step.items)
+    assert list(step.items) == ["test", "materials"]  # 補助の処理の失敗は項目にしない
+    assert step.items["test"]["candidates"]["compose_services"] == ([] if failed == "service_names" else ["app", "db"])
+    assert (notes == []) == (failed == "instruction_notes")
+
+
+def test_service_names_are_sorted_and_unique_and_skip_unreadable_files(tmp_path):
+    files = {
+        "compose.yml": "services:\n  web:\n    image: x\n  db:\n    image: y\n",
+        "sub/docker-compose.yml": "services:\n  db:\n  app:\n",
+        "docker-compose.big.yml": "services:\n  big:\n" + "#" * measure_repo.MAX_READ + "\n",
+    }
+    assert measure_repo.service_names(_tree(_small_repo(tmp_path, files))) == ["app", "db", "web"]
+
+
+def test_service_names_without_compose_files_is_empty(tmp_path):
+    assert measure_repo.service_names(_tree(_small_repo(tmp_path, {"a.txt": "a\n"}))) == []
+
+
+def test_compose_services_reads_only_the_names():
     text = "version: '3'\nservices:\n  # comment\n  web:\n    image: 'nginx'\n  redis:\n    build: .\nvolumes:\n  x:\n"
-    assert measure_repo.compose_services(text) == [("web", "nginx"), ("redis", "")]
+    assert measure_repo.compose_services(text) == ["web", "redis"]
 
 
 @pytest.mark.parametrize(
@@ -105,14 +212,14 @@ def test_compose_services_reads_names_and_images():
         (
             'services:\n\n  # 先頭のコメント\n  web:  # 行末のコメント\n    image: nginx  # バージョン\n  "db":\n    image: "postgres:16"\n'
             "#root comment\n  cache:\n    image: redis\n",
-            [("db", "postgres:16"), ("cache", "redis")],
+            ["db", "cache"],
         ),
         # `services:` の行末の空白は無視する。次の根の行で終わる
-        ("version: 3\nservices:   \n  a:\n    image: x\nvolumes:\n  data:\n", [("a", "x")]),
+        ("version: 3\nservices:   \n  a:\n    image: x\nvolumes:\n  data:\n", ["a"]),
         ("x:\n  services:\n    nope:\n", []),
         ("services: # コメント\n  a:\n", []),
         # 最初の行の字下げを直下とし、値を持つ行は名前にしない
-        ("services:\n    deep:\n      image: i\n    two: {}\n", [("deep", "i")]),
+        ("services:\n    deep:\n      image: i\n    two: {}\n", ["deep"]),
         ("", []),
     ],
 )
@@ -129,24 +236,20 @@ def test_required_contexts_reads_the_required_status_checks():
     assert measure_ci.required_contexts(rules) == ["a", "b"]
 
 
-# --- measure_ci.measure: GitHub の API は必須のチェック・閉じた PR・課題の 3 か所だけを呼ぶ（#4516 の受け入れ条件 4） ---
+# --- measure_ci.measure: GitHub の API は必須のチェックの 1 か所だけを呼ぶ（#4521 の受け入れ条件 5） ---
 
 _RULES = [{"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "pytest"}]}}]
-_PULLS = [{"merged_at": "2026-01-01T00:00:00Z", "base": {"ref": "main"}, "body": "https://redmine.example.com/x"}]
-_ISSUES = [{"number": 1}, {"number": 2, "pull_request": {}}]
 
 
-def _patch_gh(monkeypatch, fail: dict[str, Exception] | None = None) -> list[str]:
-    """`Gh.get` を差し替え、呼ばれたパスを返す並びに記録する。`fail` はパスの頭 → 投げる例外。"""
+def _patch_gh(monkeypatch, fail: Exception | None = None) -> list[str]:
+    """`Gh.get` を差し替え、呼ばれたパスを返す並びに記録する。`fail` があれば投げる。"""
     called: list[str] = []
-    answers = {"repos/o/r/rules/branches/": _RULES, "repos/o/r/pulls?": _PULLS, "repos/o/r/issues?": _ISSUES}
 
     def fake_get(self, path):
         called.append(path)
-        for head, exc in (fail or {}).items():
-            if path.startswith(head):
-                raise exc
-        return next(v for k, v in answers.items() if path.startswith(k))
+        if fail:
+            raise fail
+        return _RULES
 
     monkeypatch.setattr(measure_ci.Gh, "get", fake_get)
     return called
@@ -157,24 +260,17 @@ def _measure(tmp_path, repo="o/r", head="main"):
     return measure_ci.measure(tree, repo, head, time.monotonic() + 30)
 
 
-def test_measure_calls_only_the_three_github_paths(tmp_path, monkeypatch):
+def test_measure_calls_only_the_branch_rules(tmp_path, monkeypatch):
     called = _patch_gh(monkeypatch)
     got = _measure(tmp_path)
-    assert called == [
-        "repos/o/r/rules/branches/main",
-        "repos/o/r/pulls?state=closed&per_page=100",
-        "repos/o/r/issues?state=all&per_page=100",
-    ]
-    assert not [p for p in called if p.startswith("repos/o/r/actions/")]
-    assert set(got) == {"ci", "merges", "github_issues", "hosts", "notes"}
-    assert got["ci"] == forms.measured({"required_checks": ["pytest"]})
-    assert (got["merges"], got["github_issues"], got["hosts"], got["notes"]) == ({"main": 1}, 1, ["redmine.example.com"], [])
+    assert called == ["repos/o/r/rules/branches/main"]
+    assert got == {"ci": forms.measured({"required_checks": ["pytest"]}), "notes": []}
 
 
 def test_measure_without_head_skips_the_branch_rules_and_makes_ci_unknown(tmp_path, monkeypatch):
     called = _patch_gh(monkeypatch)
     got = _measure(tmp_path, head=None)
-    assert [p for p in called if "/rules/" in p] == []
+    assert called == []
     assert got["ci"]["status"] == "unknown"  # 空の一覧として書くと、解析が前に書いた必須のチェックを消す
     assert [n for n in got["notes"] if n.startswith("CI を測れない: リモートの既定ブランチが分からない")]
 
@@ -183,50 +279,17 @@ def test_measure_without_github_is_unknown_and_calls_nothing(tmp_path, monkeypat
     called = _patch_gh(monkeypatch)
     got = _measure(tmp_path, repo=None)
     assert called == []
-    assert got["ci"]["status"] == "unknown"
-    assert "test_duration" not in got
-    assert measure_ci.measure_issues({"markdown_files": 2, "hosts": ["redmine.example.com"]}, got)["candidates"] == ["markdown", "redmine"]
+    assert got["ci"]["status"] == "unknown" and got["notes"] == []
 
 
-def test_measure_time_up_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypatch):
-    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable(measure_ci.TIME_UP)})
+@pytest.mark.parametrize("reason", [measure_ci.TIME_UP, "gh が失敗した: 401"])
+def test_measure_failure_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypatch, reason):
+    _patch_gh(monkeypatch, measure_ci.GhUnavailable(reason))
     got = _measure(tmp_path)
-    assert got["ci"] == forms.unknown(measure_ci.TIME_UP)
-    assert "CI を測れない: 時間切れ" in got["notes"]
+    assert got == {"ci": forms.unknown(reason), "notes": [f"CI を測れない: {reason}"]}
 
 
-def test_measure_other_failure_on_the_branch_rules_makes_ci_unknown(tmp_path, monkeypatch):
-    _patch_gh(monkeypatch, {"repos/o/r/rules/": measure_ci.GhUnavailable("gh が失敗した: 401")})
-    got = _measure(tmp_path)
-    assert got["ci"] == forms.unknown("gh が失敗した: 401")
-    assert "CI を測れない: gh が失敗した: 401" in got["notes"]
-
-
-# --- measure_repo.measure_languages: 言語の行はファイル数を持たず、名前の順に並ぶ（#4516 の決定 3） ---
-
-
-def _files_tree(files: list[str]) -> measure_repo.Tree:
-    tree = object.__new__(measure_repo.Tree)
-    tree.root, tree.deadline, tree.files = Path("."), time.monotonic() + 30, files
-    return tree
-
-
-def _no_deps() -> dict[str, dict[str, str]]:
-    """`dependencies(tree)` と同じ形（依存の言語ごとの空の辞書）。"""
-    return {lang: {} for lang in measure_repo.DEP_LANGUAGES}
-
-
-def test_measure_languages_rows_have_no_file_count_and_are_sorted_by_name():
-    tree = _files_tree(["a.py", "b.py", "c.py", "x.go", "y.ts"])
-    langs = measure_repo.measure_languages(tree, _no_deps())["value"]
-    assert [row["name"] for row in langs] == sorted(row["name"] for row in langs)
-    assert all("files" not in row for row in langs)
-
-
-def test_measure_languages_order_does_not_follow_the_file_counts():
-    more_python = _files_tree(["a.py", "b.py", "c.py", "x.go"])
-    more_go = _files_tree(["a.py", "x.go", "y.go", "z.go"])
-    assert measure_repo.measure_languages(more_python, _no_deps()) == measure_repo.measure_languages(more_go, _no_deps())
+# --- measure_repo.measure_materials ---
 
 
 def _small_repo(tmp_path, files: dict[str, str]) -> Path:
