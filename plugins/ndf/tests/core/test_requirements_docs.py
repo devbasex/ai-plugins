@@ -6,6 +6,7 @@ import hashlib
 
 import pytest
 
+from ndf.core.plan import inputs_decide
 from ndf.core import requirements_decide as rd
 
 PATH = "issues/issue-7-8-requirements.md"
@@ -119,6 +120,25 @@ def test_criterion_digest_keeps_the_literal_comment_mark(literal: str) -> None:
 def test_a_fence_in_a_comment_does_not_hide_the_following_criteria() -> None:
     got = rd.criteria_of(_doc_text(criteria="- [ ] 甲\n\n<details><!--\n\n```\n-->\n</details>\n\n- [ ] 乙\n"))
     assert [c.text.split("\n", 1)[0] for c in got] == ["甲", "乙"]
+
+
+def test_a_comment_line_keeps_the_code_after_it() -> None:
+    def block(inner: str) -> str:
+        return f"- [ ] 甲\n  <!-- 説明 -->\n      if ok:\n{inner}run()"
+
+    assert rd.criterion_digest(block("          ")) != rd.criterion_digest(block("      "))
+
+
+@pytest.mark.parametrize("opening", ["<details><!--", "文\n\n<details>\n<!--", "文\n      <!--"])
+def test_the_fences_in_comments_are_parsed_once(opening: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed: list[str] = []
+    parse = inputs_decide._MARKDOWN.parse
+    monkeypatch.setattr(inputs_decide._MARKDOWN, "parse", lambda text: parsed.append(text) or parse(text))
+    example = f"{opening}\n\n```\n-->\n\n" * 8
+    got = list(inputs_decide.outside_fences(f"{example}## 後".split("\n")))
+
+    assert got[-1][1] == "## 後"
+    assert len(parsed) == 1
 
 
 def test_a_comment_line_before_the_code_does_not_change_the_digest() -> None:
