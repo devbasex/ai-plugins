@@ -713,9 +713,8 @@ def test_issue_3780_a_rerun_files_after_the_skip_is_resolved(tmp_path: Path, mon
     github = FakeGitHub()
     port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
     hub.leftovers, hub.clean = lambda pr: port, list
-    checked: list[str] = []
     note: list[Optional[str]] = ["リモートが違う" if before == "remote-differs" else None]
-    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: checked.append("target") or note[0])
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: note[0])
     state_dir = tmp_path / "st"
     store.write_object(state_dir / store.STATE_NAME.format(pr=7), {**_left_state(), "target_repo": "o/r"})
     cfg = types.SimpleNamespace(state_dir=state_dir, pr=7, main=tmp_path)
@@ -732,10 +731,27 @@ def test_issue_3780_a_rerun_files_after_the_skip_is_resolved(tmp_path: Path, mon
     assert len(hub.comments) == 1 and github.issues == []
     note[0] = None
     settings_file.write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
-    checked.clear()
     rerun()
-    # 公開し直すかの判定と起票の可否は、起票先の 1 回の確認を使う
-    assert checked == ["target"] and len(hub.comments) == 2 and len(github.issues) == 1
+    assert len(hub.comments) == 2 and len(github.issues) == 1
+
+
+def test_issue_3780_2_filing_reads_the_settings_after_the_threads_are_synced(
+    repos: Repos, tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    from ndf.domains.crossreview import cli
+
+    github = _filing(monkeypatch, hub, repos)
+    sync = cli.threads.sync
+
+    def disable_while_syncing(*args):
+        (repos.main / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "markdown"}}), encoding="utf-8")
+        return sync(*args)
+
+    monkeypatch.setattr(cli.threads, "sync", disable_while_syncing)
+    state_dir = tmp_path / "st"
+    store.write_object(state_dir / store.STATE_NAME.format(pr=7), _left_state())
+    _report_of(state_dir, capsys)
+    assert github.calls == []
 
 
 def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:

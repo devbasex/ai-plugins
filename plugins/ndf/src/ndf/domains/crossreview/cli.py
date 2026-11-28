@@ -488,8 +488,6 @@ class Filer(NamedTuple):
     locate: Callable[[], Optional[Path]] = lambda: None
     repo_arg: Optional[str] = None
     manual: bool = False
-    # 起票の前提（`_filing_target`）の評価の控え。キーは状態の対象のリポジトリで、1 回の起動で同じ確認を繰り返さない
-    seen: Optional[dict[Optional[str], tuple[Optional[str], Optional[str]]]] = None
 
 
 def _mvv_notices(warnings: Sequence[str]) -> list[str]:
@@ -537,18 +535,12 @@ def _post_report(
 
 
 def _filing_target(data: Mapping[str, Any], filer: Filer) -> tuple[Optional[str], Optional[str]]:
-    """起票先の設定の値と、起票を見送る理由（見送らないか、GitHub にしないと設定していれば None）。GitHub は呼ばない。
-    `filer.seen` があれば評価は 1 回で、公開し直すかの判定と起票の可否が同じ結果を使う。"""
-    target = store.repo_of(data)
-    if filer.seen is not None and target in filer.seen:
-        return filer.seen[target]
+    """起票先の設定の値と、起票を見送る理由（見送らないか、GitHub にしないと設定していれば None）。GitHub は呼ばない。"""
     main = filer.locate()
     primary, note = leftover.primary_of(main)
     if primary == leftover.GITHUB and main is not None:
         # 別のリポジトリの設定で起票を許可しない（許可する設定と起票先を同じリポジトリにする）
-        note = leftover.unconfirmed_target(main, target)
-    if filer.seen is not None:
-        filer.seen[target] = (primary, note)
+        note = leftover.unconfirmed_target(main, store.repo_of(data))
     return primary, note
 
 
@@ -557,15 +549,16 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
     rows = leftover.candidates(data) if hub.leftovers is not None else []
     if not rows:
         return []
-    primary, note = _filing_target(data, filer)
-    if primary != leftover.GITHUB or note is not None:
-        leftover.defer(data, rows, note)
-        # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
-        store.write_object(ref.path, data)
-        return [note] if note else []
-    data.pop(leftover.SKIPPED, None)
     origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
     with origin:
+        # 起票の許可は、ロックの待ちとスレッドの同期の後、書く直前に読む。公開し直すかの判定の結果は使い回さない
+        primary, note = _filing_target(data, filer)
+        if primary != leftover.GITHUB or note is not None:
+            leftover.defer(data, rows, note)
+            # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
+            store.write_object(ref.path, data)
+            return [note] if note else []
+        data.pop(leftover.SKIPPED, None)
         save = lambda: store.write_object(ref.path, data)  # noqa: E731
         filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, primary, manual=filer.manual)
     return filed
@@ -741,7 +734,7 @@ def _report(
     previous = data.get(report_decide.COMMENT_KEY)
     # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
     now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
-    filer = Filer(lambda: cfg.main, repo_arg, seen={})
+    filer = Filer(lambda: cfg.main, repo_arg)
     skipped = None
     published = got.reused and isinstance(previous, str) and data.get(report_decide.PUBLISHED_KEY) == now
     # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由か同じ設定
