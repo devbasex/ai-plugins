@@ -476,11 +476,11 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `sort` | `journal.py` | 新設 | `sort(self, touched: leftover_decide.Touched, unconfirmed: Collection[str] = ()) -> frozenset[str]` | このラウンドで出た指摘のうち分け直すものに線引きを当て、残した指摘のキーを返す |
+| `sort` | `journal.py` | 新設 | `sort(self, touched: leftover_decide.Touched, unconfirmed: Collection[str] = (), clean: Optional[Callable[[Sequence[str]], Sequence[str]]] = None) -> frozenset[str]` | このラウンドで出た指摘のうち分け直すものに線引きを当て、残した指摘のキーを返す |
 | `passed` | `journal.py` | 新設 | `passed(self, fid: str, touched: leftover_decide.Touched, *, unconfirmed: bool = False) -> list[dict[str, Any]]` | このラウンドの出し直しの位置のうち、修正へ進むものを返す（`sort` と `_wants_tracks` が使う） |
 | `unpark` | `journal.py` | 新設 | `unpark(self, touched: leftover_decide.Touched) -> None` | 線引きをしないラウンドで、出し直された指摘の `parked` を外して位置を置き換え、投稿できる行かを確かめる |
 | `enter` | `journal.py` | 変更 | シグネチャは変えない | このラウンドで出た指摘の番号を `self.raised_ids` に残し、`self.returned`（直した後に戻った指摘の番号）を呼び出しごとに空にする |
-| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文から URL への対応 `self.filed` に残す。`issue` を持つほかの項目は指摘の行へ移す |
+| `carry` | `journal.py` | 変更 | シグネチャは変えない | 記録のコメントの `parked` の項目は指摘の行にせず、本文から URL への対応 `self.filed` に残す。記録の本文は伏せてあるので、`sort` はそのままの本文で引けなければ `clean` で伏せた本文でも引く。`issue` を持つほかの項目は指摘の行へ移す |
 | `_revive` | `journal.py` | 変更 | シグネチャは変えない | 直した（`fixed`）指摘が戻ったときに、番号を `self.returned` に足す |
 | `handable` | `journal.py` | 変更 | シグネチャは変えない | `parked` の指摘を返さない |
 | `_classify` | `journal.py` | 変更 | シグネチャは変えない | 必ず人の承認が要る操作と分かった指摘の `parked` を外す |

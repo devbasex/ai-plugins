@@ -690,7 +690,8 @@ def _sort_leftovers(
     if touched is None:
         run.journal.unpark(_commentable(run, prep, got))
         return frozenset()
-    return run.journal.sort(touched, checked.unconfirmed)
+    # 伏せ字の照会に失敗しても、レビューは止めない（`publish.Once`）
+    return run.journal.sort(touched, checked.unconfirmed, publish.Once(run.clean))
 
 
 def _verdict(run: _Run, open_: Sequence[dict[str, Any]], handed: Sequence[fin.Handed]) -> str:

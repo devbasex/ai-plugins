@@ -478,6 +478,23 @@ def test_issue_3780_2_a_left_finding_is_not_carried_and_its_issue_comes_back() -
     assert (row["parked"], row["prior_issue"]) == (True, url) and "issue" not in row
 
 
+def test_issue_3780_the_issue_of_a_finding_redacted_in_the_record_comes_back() -> None:
+    """記録のコメントの本文は伏せてあるので、再び出た指摘の本文を同じ伏せ字に通して起票の URL を引く。"""
+    url = "https://github.com/o/r/issues/100"
+    raw = "作り物の値 hidden-word で処理が止まる"
+
+    def clean(texts):
+        return [t.replace("hidden-word", "<伏せた>") for t in texts]
+
+    left = {**_OPEN_NO_THREAD, "text": raw, "parked": True, "issue": url}
+    body = report_decide.comment(PR, {"findings": [left], "threads": {}}, None, clean=clean)
+    journal = FindingJournal()
+    journal.carry(prior_decide.recorded([prior_decide.Remark("comment", "ndf", body, at="2026-11-20T00:00:00Z", trusted=True)])[0])
+    journal.enter(2, [{"text": raw, "severity": "major", "impact": "処理が止まる", "path": "a.py", "line": 5, "by": "codex"}])
+    journal.sort(leftover_decide.Touched(), clean=clean)
+    assert journal.rows["r2-1"]["prior_issue"] == url
+
+
 def test_issue_3780_an_unconfirmed_url_is_published_and_restored_apart_from_a_confirmed_one() -> None:
     url = "https://github.com/o/r/issues/100"
     row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url}
