@@ -258,6 +258,7 @@
 | `ndf progress show` | `machine_id`（string・必須・位置）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress units guard` | `--issue`（array of integer・必須）: プランの課題の番号（繰り返せる）<br>`--base`（string・必須）: 単位の PR のマージ先のブランチ<br>`--branch`（string・必須）: 作業のブランチ<br>`--unit-file`（string・必須）: 担当への指示を書いたファイルのパス。指示がない場合は `--unit-file=` を指定する<br>`--criteria`（array of string・任意）: 受け付けるが使わない（受け入れ条件の確かめの引数）<br>`--no-criteria`（boolean・任意）: 受け付けるが使わない（受け入れ条件の確かめの引数）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 | `ndf progress units run` | `machine_id`（string・必須・位置）<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
+| `ndf progress units sync` | `machine_id`（string・任意・位置）: 省けば環境変数 NDF_MACHINE_ID<br>`--cwd`（string・任意）: 対象のリポジトリの中の位置（既定はカレントディレクトリ） |
 
 結果の `metrics`: `answer`（string）・`behavior_docs_in_diff`（integer）・`cancelled_rows`（integer）・`code_in_diff`（integer）・`current_id`（string）・`disabled`（array of string）・`docs_only_diff`（integer）・`history`（array of object）・`machine_id`（string）・`mode`（string）・`move`（string）・`outputs`（array of string）・`rev`（integer）・`rows`（integer）・`seq`（integer）・`seqs`（array of integer）・`stage`（string）・`state`（string か null）・`step`（string）。`items` の要素: `at`（string か null）・`changed`（boolean）・`error`（string）・`from`（string）・`gates`（array of string）・`key`（string）・`kind`（string）・`label`（string）・`number`（integer）・`outputs`（array of string）・`path`（string）・`phase`（string）・`reason`（string か null）・`restored`（string）・`retired`（string）・`source`（string か null）・`stage`（string）・`state`（string か null）
 

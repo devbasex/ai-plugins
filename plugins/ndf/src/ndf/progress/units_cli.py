@@ -1,12 +1,16 @@
 """`ndf progress units`: レビューの単位を扱うサブコマンド（#3702 の決定 12）。
 
 ndf progress units run <ステートマシンの ID> [--cwd <作業場所>]
+ndf progress units sync [<ステートマシンの ID>] [--cwd <作業場所>]
 ndf progress units guard --issue <N>... --base <ブランチ> --branch <ブランチ> --unit-file=<ファイルか空>
     [--criteria <課題>:<番号>]... [--no-criteria] [--cwd <作業場所>]
 
 `run` は工程「実装」だけを、`ndf progress next` と同じ処理（`run.decide`・`run.play_move`）で流し、同じ工程のイベントを書く。
 別の流し方を持つと、失敗や回答の待ちが記録に残らず、開始前の検査も抜ける。`next` との違いは、別のプロセスを起動せず
 その場で流すことと、工程「実装」の外へ進まないことの 2 つである。承認した HEAD や、承認が要らないという指定は引数で受けない。
+
+`sync` は承認した文書をスプリントブランチへ反映する（`units_sync`。決定 1・11）。ID を省けば環境変数 `NDF_MACHINE_ID` を読む
+（工程のステップが打つ形）。
 
 `guard` は実装のプランが実装の前に打つ確かめ（`units_guard`。決定 12）で、人は打たない。
 
@@ -21,11 +25,15 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ndf import identity
+from ndf.adapters import github
 from ndf.contracts import result
 from ndf.core import route
-from ndf.progress import command, design_record, model, run, store, units_guard, units_invoke
+from ndf.progress import command, design_record, model, run, store, units_guard, units_invoke, units_sync
 from ndf.progress.run_view import completion_warnings
 
+# `sync` の ID を省いたときに読む環境変数（工程の script のステップへ `run` が渡す）
+MACHINE_ID_ENV = identity.env_name("machine-id")
 _PLAYABLE = (run.Action.START, run.Action.RESUME)
 
 
@@ -33,6 +41,8 @@ def add_parsers(sub: Any) -> None:
     """`ndf progress` のサブコマンドの並び `sub` へ `units` とその下のサブコマンドを足す。"""
     units = sub.add_parser("units", help="レビューの単位を扱う").add_subparsers(dest="units_action", required=True)
     units.add_parser("run", help="工程「実装」だけを next と同じ処理で流す").add_argument("machine_id")
+    take = units.add_parser("sync", help="承認した文書をスプリントブランチへ反映する")
+    take.add_argument("machine_id", nargs="?", help=f"省けば環境変数 {MACHINE_ID_ENV}")
     check = units.add_parser("guard", help="実装のプランを通すかを確かめる（実装のプランが打つ）")
     check.add_argument("--issue", action="append", type=int, required=True, help="プランの課題の番号（繰り返せる）")
     check.add_argument("--base", required=True, help="単位の PR のマージ先のブランチ")
@@ -59,6 +69,8 @@ def dispatch(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any
     """`a.env` は `ndf progress next` と同じ外との接点（`run` だけが使う）。"""
     if a.units_action == "guard":
         return check_plan(st, a, cwd)
+    if a.units_action == "sync":
+        return sync_documents(st, a.machine_id or os.environ.get(MACHINE_ID_ENV), cwd)
     return run_implement(st, a.machine_id, cwd, a.env)
 
 
@@ -76,6 +88,13 @@ def check_plan(st: store.Store, a: argparse.Namespace, cwd: Path) -> dict[str, A
     if reasons:
         return result.stopped(run.TOOL, "refused", "; ".join(reasons))
     return result.result(run.TOOL, result.OK, f"実装のプラン（{a.branch} → {a.base}）を通す")
+
+
+def sync_documents(st: store.Store, machine_id: str | None, cwd: Path) -> dict[str, Any]:
+    """承認した文書を反映する。工程のステップから打つときは呼び手がステートマシンの排他を持つので、ここでは取らない。"""
+    if not machine_id:
+        return result.stopped(run.TOOL, "invalid", f"ステートマシンの ID を引数か環境変数 {MACHINE_ID_ENV} で渡す")
+    return units_sync.sync_approved(st, machine_id, cwd, lambda repo: github.GitHub(repo, github.client()))
 
 
 def run_implement(st: store.Store, machine_id: str, cwd: Path, env: run.Env) -> dict[str, Any]:
