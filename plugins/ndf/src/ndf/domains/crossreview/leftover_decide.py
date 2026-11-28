@@ -216,7 +216,7 @@ def trusted(author_id: int, me: int, account_ids: Collection[int]) -> bool:
     return author_id > 0 and (author_id == me or author_id in account_ids)
 
 
-def _prose(text: str) -> str:
+def prose(text: str) -> str:
     """引用とコードブロックを除いた本文。"""
     lines = _lines_of(text)
     quoted: set[int] = set()
@@ -237,32 +237,28 @@ def matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool:
     URL は伏せ字が変えない末尾の `/pull/<番号>` で見る。"""
     if listed.is_pull or _final_line(listed.body) != issue_mark(ident):
         return False
-    return re.search(rf"/pull/{int(origin_pr)}(?!\d)", _prose(listed.body)) is not None
+    return re.search(rf"/pull/{int(origin_pr)}(?!\d)", prose(listed.body)) is not None
 
 
-def issue_prs(body: str) -> tuple[int, ...]:
-    """引用とコードブロックを除いた本文にある PR の URL の番号。"""
-    return tuple(dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", _prose(body))))
-
-
-def _has_mark(body: str, ident: str) -> bool:
+def _has_mark(body: str, ident: str, prose_of: Callable[[str], str]) -> bool:
     """引用とコードブロックの外に、目印だけの行があるか。目印の文字列を含まない本文は解析しない。"""
     mark = issue_mark(ident)
-    return mark in body and any(line.strip() == mark for line in _lines_of(_prose(body)))
+    return mark in body and any(line.strip() == mark for line in _lines_of(prose_of(body)))
 
 
-def names_finding(listed: Listed, ident: str, text: str, prs_of: Callable[[str], Sequence[int]] = issue_prs) -> bool:
+def names_finding(listed: Listed, ident: str, text: str, prose_of: Callable[[str], str] = prose) -> bool:
     """起票の記録か引き継ぎの URL の Issue が、この指摘のものか。起票の後に本文へ書き足されることがあるので、目印の位置は問わない。
     引用かコードブロックに転載した目印は数えない。
 
     目印は、今の識別値 `ident` か、本文の PR の URL の番号（起票時の元の PR）と指摘の本文 `text` の識別値を受ける。PR を
     巻き直して別の保存先から始めると元の番号が変わり、`ident` は巻き直し前に起票した Issue の目印と違うためである。
-    本文の解析（`prs_of`）は `ident` の目印が無いときだけする。"""
+    目印の照合と PR の番号の抽出は、本文の解析（`prose_of`）の結果を共有する。呼び手は本文ごとの結果を使い回す。"""
     if listed.is_pull:
         return False
-    if _has_mark(listed.body, ident):
+    if _has_mark(listed.body, ident, prose_of):
         return True
-    return any(_has_mark(listed.body, identity(pr, text)) for pr in prs_of(listed.body))
+    prs = dict.fromkeys(int(n) for n in re.findall(r"/pull/(\d+)", prose_of(listed.body)))
+    return any(_has_mark(listed.body, identity(pr, text), prose_of) for pr in prs)
 
 
 def _issue_number(url: str, issues_url: str) -> Optional[int]:

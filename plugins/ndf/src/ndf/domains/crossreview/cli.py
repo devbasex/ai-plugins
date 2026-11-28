@@ -98,6 +98,15 @@ class Hub(NamedTuple):
     repo: str = ""  # 接続先のリポジトリ（`<所有者>/<リポジトリ>`）
 
 
+def _target_slug(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> str:
+    """接続先のリポジトリ（認証も GitHub クライアントの用意もしない）。"""
+    return repo.resolve_target_repo(repo_arg, state_repo, cwd).slug
+
+
+# 接続先を決める口（テストは偽物に差し替える）
+TARGET: Callable[[Optional[str], Optional[str], Path], str] = _target_slug
+
+
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
     """対象のリポジトリ（`repo.resolve_target_repo` の順で決める）の GitHub へ書く口。書く本文は `publish.Publisher` を通す。"""
     slug = repo.resolve_target_repo(repo_arg, state_repo, cwd).slug
@@ -708,21 +717,21 @@ def cmd_run(args: argparse.Namespace) -> int:
             f"--repo の {args.repo} と状態ファイルの対象 {state_repo} が違う。別のリポジトリのレビューは別の --state-dir を指定する",
         )
     made: list[Hub] = []
+    slugs: list[str] = []
 
     def hub_once() -> Hub:
         # 読む口と書く口で同じクライアントを使う（`gh auth token` の起動などの認証を 1 回の run で 1 回にする）
         if not made:
-            made.append(HUB(args.repo, state_repo, cfg.worktree))
+            if not slugs:
+                # 認証に失敗しても接続先は残す（PR を読めない起動が照らし先に使う。#3780）
+                slugs.append(TARGET(args.repo, state_repo, cfg.worktree))
+            made.append(HUB(slugs[0], state_repo, cfg.worktree))
         return made[0]
 
-    def target_of() -> Optional[str]:
-        try:
-            return hub_once().repo or None
-        except Exception:  # noqa: BLE001,NDF401 ネットワーク: 接続先が分からなければ照らし先を残さない（読めないことは注意に出ている）
-            return None
-
     try:
-        got = drive.drive(cfg, LAUNCH, lambda pr: hub_once().reader(pr), lambda texts: hub_once().clean(texts), target_of)
+        got = drive.drive(
+            cfg, LAUNCH, lambda pr: hub_once().reader(pr), lambda texts: hub_once().clean(texts), lambda: next(iter(slugs), None)
+        )
     except worktree.WorktreeUnregistered as exc:
         return _unregistered(exc, str(exc.worktree))
     except worktree.SyncRefused as exc:

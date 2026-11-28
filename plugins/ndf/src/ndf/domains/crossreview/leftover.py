@@ -350,7 +350,7 @@ class _Filing:
         return str(entry["url"]) if "url" in entry else None
 
     def _named(
-        self, ident: str, urls: Sequence[Optional[str]], read: Mapping[str, Optional[Listed]], prs_of: Callable[[str], Sequence[int]]
+        self, ident: str, urls: Sequence[Optional[str]], read: Mapping[str, Optional[Listed]], prose_of: Callable[[str], str]
     ) -> Optional[str]:
         """`urls` のうち、指す Issue が信用する作者のこの指摘の Issue である最初の URL。"""
         text = self.rows[ident][0]["text"]
@@ -358,7 +358,7 @@ class _Filing:
             issue = read[url] if url else None
             if (
                 issue
-                and leftover_decide.names_finding(issue, ident, text, prs_of)
+                and leftover_decide.names_finding(issue, ident, text, prose_of)
                 and self._trusts(issue.author, issue.author_id, issue.association)
             ):
                 return url
@@ -376,10 +376,10 @@ class _Filing:
         if not wanted:
             return False
         # 引き継いだ Issue の本文の解析は、候補の数によらず本文ごとに 1 回にする
-        prs_of = functools.cache(leftover_decide.issue_prs)
+        prose_of = functools.cache(leftover_decide.prose)
         try:
             read = self.port.issues(wanted)
-            usable = {ident: url for ident in self.rows if (url := self._named(ident, [urls.get(ident), *pool], read, prs_of))}
+            usable = {ident: url for ident in self.rows if (url := self._named(ident, [urls.get(ident), *pool], read, prose_of))}
         except Exception as exc:  # noqa: BLE001 ネットワーク: 確かめられない URL は使わず、打ち直しで確かめる
             # 状態の引き継ぎの URL は、どの候補の Issue かが読むまで分からないので、全部の候補を保留する
             for ident in self.rows if pool else urls:
