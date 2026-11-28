@@ -162,6 +162,7 @@ class _Run:
     fixer_growth: int = 0
     documents: bool = False  # PR の全差分に Markdown のファイルがあるか（文書の基準を指示に入れる。#4285）
     distinction: bool = False  # 設計書か要求仕様のコピーを変えるか（偽なら書き分けの小見出しを外す。#4543）
+    requirements_copy: bool = False  # 要求仕様のコピーを変えるか（修正担当への指示に扱いを足す。#4543）
     # 今の席・この実行で座っている埋めた席・この実行の資料のディレクトリ（#3955）
     seats: list[str] = field(default_factory=list)
     filled: list[Filled] = field(default_factory=list)
@@ -776,6 +777,7 @@ def _prepare_round(run: _Run, round_no: int) -> _Prepared:
     _oversized_docs(run, changed.docs)
     run.documents = any(p.endswith(".md") for p in changed.files)
     run.distinction = any(issue_docs.design_issues(p) or issue_docs.requirements_issues(p) for p in changed.files)
+    run.requirements_copy = any(issue_docs.requirements_issues(p) for p in changed.files)
     reviewed = scope_decide.reviewed_of(run.data, run.mvv)
     sections = changes.sections(changed.docs)
     head = run.g.rev_parse("HEAD")

@@ -217,3 +217,11 @@ def test_issue_4543_the_distinction_goes_only_with_design_documents(
     assert {out for _, out, _ in fake.prompts} >= {"round1-codex.out", "round1-fix.out"}
     assert all((full in p) is distinction for _, _, p in fake.prompts)
     assert all((_stripped() in p) is not distinction for _, _, p in fake.prompts)
+    # 要求仕様のコピーを変える PR だけが、修正担当へコピーへの指摘の扱いを、基準の全文より前に渡す（決定 7）
+    handling = criteria_decide.fixer_requirements_copy()
+    copy = path.endswith("-requirements.md")
+    for _, out, prompt in fake.prompts:
+        assert (handling in prompt) is (copy and "-fix" in out)
+    if copy:
+        fix = _prompt(fake, "round1-fix.out")
+        assert fix.index(handling) < fix.index(full)
