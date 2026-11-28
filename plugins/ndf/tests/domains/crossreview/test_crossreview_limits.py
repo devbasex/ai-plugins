@@ -140,6 +140,35 @@ def test_issue_2468_declared_limits_replace_the_defaults(tmp_path: Path) -> None
     assert settings.read_settings(tmp_path / "main", tmp_path / "wt").limits == criteria_decide.ProjectLimits(2, 3600, 50)
 
 
+@pytest.mark.parametrize("link", ["dir", "file"])
+@pytest.mark.parametrize("limits", [{"rounds": 999, "usd": 999}, {}])
+def test_issue_2468_limits_inside_the_reviewed_worktree_are_invalid(
+    repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch, link: str, limits: dict
+) -> None:
+    """メインディレクトリの `.ndf` か `review.json` の実体が worktree の中なら、`limits` キーのある設定は起動の前に止める。
+    キーが無ければ重点を読む。"""
+    _declare(wt, {"version": 1, "focus": [], "limits": limits})
+    if link == "dir":
+        (repos.main / ".ndf").symlink_to(wt / ".ndf")
+    else:
+        (repos.main / ".ndf").mkdir()
+        (repos.main / ".ndf" / "review.json").symlink_to(wt / ".ndf" / "review.json")
+    with pytest.raises(criteria_decide.ReviewDeclInvalid, match="limits"):
+        settings.read_settings(repos.main, wt)
+    fake = Fake(tmp_path / "st", {})
+    _, got = _run(capsys, monkeypatch, fake, wt)
+    assert (got["status"], got["cause"]["kind"]) == ("stopped", "invalid")
+    assert fake.calls == []
+    _declare(wt, {"version": 1, "focus": ["重点"]})
+    assert settings.read_settings(repos.main, wt).focus == ("重点",)
+
+
+def test_issue_2468_limits_in_a_link_outside_the_reviewed_worktree_are_read(repos: Repos, wt: Path, tmp_path: Path) -> None:
+    _declare(tmp_path / "outside", {"version": 1, "focus": [], "limits": {"rounds": 2}})
+    (repos.main / ".ndf").symlink_to(tmp_path / "outside" / ".ndf")
+    assert settings.read_settings(repos.main, wt).limits.rounds == 2
+
+
 def test_issue_2468_wrong_limits_stop_the_run_before_any_launch(repos: Repos, wt: Path, tmp_path: Path, capsys, monkeypatch) -> None:
     _declare(repos.main, {"version": 1, "focus": [], "limits": {"seconds": -1}})
     fake = Fake(tmp_path / "st", {})
