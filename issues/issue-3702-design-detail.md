@@ -399,7 +399,7 @@ contracts/
 | `design-pr-review`（新設） | `repo`・`worktree`・`branch`・`remote`・`review` | `review`（`{{review}} --follow-base --findings {state_dir}/findings.json`。`{state_dir}` はプランの実行器が置き換える保存先で、差し込みではない。`incomplete` は `push` へ）・`push` |
 | `docs-ci`（新設） | `repo`・`reviewed_repo`・`reviewed_pr`・`reviewed_head`・`required`・`tests`・`ci_budget` | `ci`（`ndf ci watch --repo {{reviewed_repo}} --pr {{reviewed_pr}} --head {{reviewed_head}} --required={{required}} --test={{tests}} --budget {{ci_budget}}`）。CI の失敗は直さずに工程を止める |
 | `design-merge-approved`（新設） | `repo`・`approved_repo`・`approved_pr`・`approved_head`・`approved_base`・`merge_method`・`production_gate` | `merge`（`ndf ci merge --repo --pr --approved-head --approved-base --method --production-gate --verify-merged`）。`probe` を置かない |
-| `impl`（変更） | 変えない | `done-check` の次に `guard`（`ndf progress units guard --issue {{issue}} {{acceptance}} --base {{base}} --branch {{branch}} --unit-file={{unit_file}}`）を足す。`done-check` を先にするのは、マージ済みのプランの打ち直しを、終わったスプリントを探さない `guard` で止めないためである |
+| `impl`（変更） | 変えない | `done-check` の次に `guard`（`ndf progress units guard --issue {{issue}} {{acceptance}} --base {{base}} --branch {{branch}} --unit-file={{unit_file}}`）を足す。`done-check` を先にするのは、マージ済みのプランの打ち直しを、終わったスプリントを探さない `guard` で止めないためである。この順では、`guard` が止めるプランでも先に GitHub を 1 回照会する。`guard` を先にする案は採らない。止める起動の照会は省けるが、マージ済みかを調べずに止めるので、打ち直しが失敗になる。この照会は `guard` を足す前の `done-check` と同じもので、通るプランの照会の回数はどちらの順でも変わらない |
 | `implementation-plan`（変更） | 変えない | 変えない（指示は `kinds.json` が持つ） |
 | `implementation-plan-convert`（新設） | `implementation-plan` の差し込みと `convert` | `work`（`implementation-plan` の作業）だけ。push のステップを持たない |
 
@@ -607,7 +607,7 @@ contracts/
 
 再送の記録は、単位ごとの保存先の `queue.json`（`{"pr": <番号>, "resent": <真偽>, "queued_at": <時刻>}`）に持つ。`queued_at` は、その PR が最初にキューの待ちになった時刻で、書いた後は打ち直しでも再送でも変えない。`resend` では、`ndf ci merge` を打つ前に `resent` を真にして書く。打つ途中で中断しても回数が戻らない。起動のたびにこのファイルを読み、PR の番号が同じなら値を引き継ぐ。
 
-**代表の課題**は、単位のタスクの所属の課題のうち番号が最も小さいものにする。`ndf plan units` の結果の `issues` の最小値で、課題全体を 1 単位にしたものはその課題である。実装のフェーズの手順書の決まり（`issue` には単位の課題のうち番号の最も小さいもの）と、#4369 の決定 9（番号の最小）に合わせるためである。実装計画のファイル名の番号から選ぶと、単位にタスクの無い課題の題が単位の PR に付くことがある。ブランチ名、PR の題と本文、`guard` の照合がこの値を使う。
+**代表の課題**は、単位のタスクの所属の課題のうち番号が最も小さいものにする。`ndf plan units` の結果の `issues` の最小値で、課題全体を 1 単位にしたものはその課題である。実装のフェーズの手順書の決まり（`issue` には単位の課題のうち番号の最も小さいもの）と、#4369 の決定 9（番号の最小）に合わせるためである。実装計画のファイル名の番号から選ぶと、単位にタスクの無い課題の題が単位の PR に付くことがある。ブランチ名、PR の題と本文がこの値を使う。`guard` の照合は、この値と `acceptance` の `--issue` の番号を合わせた集合（重複を除く）を使う。
 
 ### 始める前
 
@@ -935,7 +935,7 @@ push は、手元の HEAD までのコミットをすべて公開する。その
 | `read_sprint_definitions` | `store.py` | 新設 | `(conn, repo) -> dict[str, tuple[int, dict]]` | そのリポジトリのスプリントと最新の定義。SQL は 1 回 |
 | `read_events_of_kind` | 同上 | 新設 | `(conn, machine_ids, kind) -> dict[str, list[Event]]` | 指定した種類の事象。SQL は 1 回 |
 
-- 対象のスプリントは、終わっていないもののうち、文脈の `issues` に `--issue` のどれかがあるか、文脈の `branch` が `--base` のものである。全事象は当たるスプリントの分だけ読む。出力の事象（`branch` を書く）は、`--base` がスプリントブランチのときだけ読む
+- 対象のスプリントは、終わっていないもののうち、文脈の `issues` に `--issue` のどれかがあるか、文脈の `branch` が `--base` のものである。全事象は、定義の文脈で絞った候補のスプリントの分だけ読む。出力の事象（`branch` を書く）は、`--base` がスプリントブランチのときだけ読む。候補は、全事象を読んだ今の文脈でもう一度照らす。設計の承認で外した課題は定義の文脈の `issues` に残るので、照らし直さないと、外した課題の単発の実装まで止まるためである
 - 承認が要るスプリントでは、環境変数 `NDF_UNIT_FILE`（cross-review が読む指示）の中身が `--unit-file` の中身と違えば止める
 - 承認は、承認した HEAD に加えて承認の回答の事象の番号で照合する。同じ HEAD の承認し直しの後は、起動し直すまで通さない
 - 対象のスプリントを見つけた後の照合でも、`--base` を記録の `base` と比べる。課題・作業ブランチ・指示が起動の記録と同じでも、宛先が違うプランは通さない。承認した単位を、承認していない宛先へマージさせないためである

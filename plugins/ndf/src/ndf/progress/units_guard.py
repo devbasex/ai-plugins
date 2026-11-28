@@ -83,8 +83,9 @@ def _covers(context: Mapping[str, Any], issues: Collection[int], base: str) -> b
 def _sprints(st: store.Store, repo: str, issues: Collection[int], base: str) -> list[run_view.View]:
     """リポジトリの、終わっていないスプリントのうちプランに当たるもの。
 
-    全事象は当たるスプリントの分だけ読む（過去のスプリントが増えても、無関係なプランの読み込みを増やさない）。当たりは
-    定義の文脈で決め、後から書かれるスプリントブランチは、マージ先がスプリントブランチのときだけ出力の事象を読んで足す。
+    全事象は候補のスプリントの分だけ読む（過去のスプリントが増えても、無関係なプランの読み込みを増やさない）。候補は
+    定義の文脈で絞り、後から書かれるスプリントブランチは、マージ先がスプリントブランチのときだけ出力の事象を読んで足す。
+    当たりは全事象を読んだ今の文脈で決め直す（承認で外した課題は定義の文脈に残る）。
     """
     with store.transaction(st) as conn:
         definitions = store.read_sprint_definitions(conn, repo)
@@ -99,7 +100,7 @@ def _sprints(st: store.Store, repo: str, issues: Collection[int], base: str) -> 
                 continue
             c = command.read_current(conn, mid)
             views.append(run_view.View(mid, c.rev, c.snapshot, c.raw, c.events))
-    return [v for v in views if not model.is_terminal(v.whole)]
+    return [v for v in views if not model.is_terminal(v.whole) and _covers(v.context(), issues, base)]
 
 
 def _matches_launch(st: store.Store, view: run_view.View, branch: str, base: str, issues: Collection[int], digest: str) -> bool:

@@ -155,6 +155,17 @@ def test_a_sprint_branch_written_after_the_creation_is_found(repo, st, make, mon
     assert _guard(repo, st)
 
 
+def test_an_issue_dropped_at_the_approval_is_implemented_on_its_own(repo, st, make, monkeypatch):
+    make(approval=True, issues=(ISSUE, 4))
+    payload = {"outputs": {"issues": [ISSUE]}}
+    dropped = model.Event(99, None, model.EventDraft(stages.OUTPUTS_EVENT, run_view.ACTOR, rev=1, payload=payload))
+    read = store.read_events
+    monkeypatch.setattr(store, "read_events", lambda *a: [*read(*a), dropped])
+
+    assert _guard(repo, st, issues=(4,), base="main", branch="feat/x") == []
+    assert _guard(repo, st, base="main", branch="feat/x")
+
+
 def test_a_sprint_the_plan_does_not_touch_has_no_events_read(repo, st, make, monkeypatch):
     make(approval=True, issues=(1,), branch="sprint/other")
     monkeypatch.setattr(command, "read_current", lambda *_a: pytest.fail("当たらないスプリントの事象を読んだ"))
