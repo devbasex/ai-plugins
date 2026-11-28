@@ -28,7 +28,7 @@ import argparse
 import contextlib
 import importlib
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Callable, ContextManager, NamedTuple, Optional, TypeVar
 
@@ -42,6 +42,8 @@ from ndf.domains.crossreview import (
     fixer,
     fixgate_decide,
     journal,
+    leftover,
+    leftover_decide,
     local_scope,
     push,
     repo,
@@ -83,13 +85,15 @@ class Hub(NamedTuple):
     `reader` は PR のコメントとスレッドを読む口（#3941）。`threads` と `reader` は同じ PR に同じ口を返す（読んだスレッドの
     一覧を書く側で使い回す。PR 3944 の r6-8）。`clean` は書き先に応じた伏せ字（値の並びを 1 回で受ける。記録のコメントの
     末尾の一覧の値を JSON にする前に通す。PR 3944 の r6-4）。`publishing` は同じ PR の公開のロック（`write_gate.pr_lock`。
-    同じ PR へ並んだ公開が同じ指摘を二重に書かない。#4016 の不変条件 I4）。"""
+    同じ PR へ並んだ公開が同じ指摘を二重に書かない。#4016 の不変条件 I4）。`leftovers` は直さずに残した指摘を起票する口を
+    作る（無ければ起票しない。#3780）。"""
 
     comment: Callable[[int, str, Optional[str]], str]
     threads: Callable[[int], threads.Port]
     reader: Callable[[int], threads.Reader]
     clean: Callable[[Sequence[str]], Sequence[str]] = _redacted
     publishing: Callable[[int], ContextManager[Any]] = lambda pr: contextlib.nullcontext()
+    leftovers: Optional[Callable[[int], leftover.Port]] = None
 
 
 def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -> Hub:
@@ -125,7 +129,11 @@ def _github_hub(repo_arg: Optional[str], state_repo: Optional[str], cwd: Path) -
     def publishing(pr: int) -> ContextManager[Any]:
         return write_gate.pr_lock(slug, pr)
 
-    return Hub(comment, port, port, clean, publishing)
+    def leftovers(pr: int) -> leftover.Port:
+        # 利用者の読み取りはスレッドの書き手の確認と同じ `GitHub.viewer` を使う（1 回だけ読む）
+        return leftover.GitHubIssues(hub, publisher, gh.GitHubError, hub.viewer, block=gate.block)
+
+    return Hub(comment, port, port, clean, publishing, leftovers)
 
 
 # PR へ書く口を作る（テストは偽物に差し替える。#3939）
@@ -473,17 +481,31 @@ class ReportFailed(Exception):
     """記録のコメントを書けなかった。"""
 
 
+class Filer(NamedTuple):
+    """直さずに残した指摘の起票の前提。起票先は `main`（メインディレクトリ）の `.ndf/project.json` で決め、`manual` は利用者が
+    打った公開（上限を超えた一覧も読み直す）。"""
+
+    main: Optional[Path] = None
+    manual: bool = False
+
+
 def _mvv_notices(warnings: Sequence[str]) -> list[str]:
     """コメントに載せる注意のうち、公開済みかの比較に使うもの（MVV の記録の失敗）。"""
     return [w for w in drive.MVV_NOTICES if w in warnings]
 
 
 def _post_report(
-    state_dir: Path, pr: int, final: Optional[str], warnings: Optional[Sequence[str]], hub_of: Callable[[], Hub]
+    state_dir: Path,
+    pr: int,
+    final: Optional[str],
+    warnings: Optional[Sequence[str]],
+    hub_of: Callable[[], Hub],
+    filer: Filer = Filer(),
 ) -> tuple[str, list[str]]:
     """指摘をインラインのスレッドにして閉じた指摘を resolve し、記録を今の PR 番号へコメントする（#3939）。
 
-    返すのはコメントの URL とスレッドの注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
+    直さずに残した指摘は、記録の前に起票する（`filer`）。
+    返すのはコメントの URL とスレッドと起票の注意。コメントを書けなければ `ReportFailed`。済んだスレッドとコメントの URL は状態ファイルへ書く。
     `warnings` はコメントに載せる注意（None なら、公開のロックの中で読み直した状態ファイルから作る）。
     `hub_of` は PR へ書く口を返す（`run` は読むのに作った口を使い回し、認証を取り直さない）。
     """
@@ -494,12 +516,26 @@ def _post_report(
         hub = hub_of()
         # 同じ PR の公開のロックの中で状態ファイルを読み直す（後から取った公開は先の記録を見て二重に書かない。#4016）
         with hub.publishing(ref.current_pr):
-            return _publish(ref, final, warnings, hub)
+            return _publish(ref, final, warnings, hub, filer)
     except Exception as exc:
         raise ReportFailed(f"PR #{ref.current_pr} へ cross-review の記録を書けなかった: {type(exc).__name__}: {exc}") from exc
 
 
-def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub) -> tuple[str, list[str]]:
+def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: Filer) -> list[str]:
+    """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
+    if hub.leftovers is None or not leftover.candidates(data):
+        return []
+    primary, note = leftover.primary_of(filer.main)
+    origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
+    with origin:
+        save = lambda: store.write_object(ref.path, data)  # noqa: E731
+        filed = leftover.file_issues(data, ref, hub.leftovers(ref.current_pr), save, primary, manual=filer.manual)
+    return ([note] if note else []) + filed
+
+
+def _publish(
+    ref: store.StateRef, final: Optional[str], warnings: Optional[Sequence[str]], hub: Hub, filer: Filer
+) -> tuple[str, list[str]]:
     """同じ PR の公開のロックの中で、状態ファイルの読み取りから記録のコメントと状態の保存までを行う。"""
     data = store.read_state(ref)
     if warnings is None:
@@ -512,7 +548,8 @@ def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Seque
         store.write_object(ref.path, data)
     notes = threads.sync(data, hub.threads(ref.current_pr))
     store.write_object(ref.path, data)
-    body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes), hub.clean)
+    filing = _file_leftovers(ref, data, hub, filer)
+    body = report_decide.comment(ref.current_pr, data, final, (*warnings, *notes, *filing), hub.clean)
     previous = data.get(report_decide.COMMENT_KEY)
     url = hub.comment(ref.current_pr, body, previous if isinstance(previous, str) else None)
     # 1 つの PR の記録は 1 つのコメントに保つ（打ち直し・次の起動は同じコメントを書き換える）
@@ -523,7 +560,7 @@ def _publish(ref: store.StateRef, final: Optional[str], warnings: Optional[Seque
     else:
         data[report_decide.PUBLISHED_KEY] = report_decide.published_state(ref.current_pr, data, final, _mvv_notices(warnings))
     store.write_object(ref.path, data)
-    return url, notes
+    return url, [*notes, *filing]
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -532,8 +569,18 @@ def cmd_report(args: argparse.Namespace) -> int:
     ref = store.state_pr(state_dir, args.pr)
     data = store.read_state(ref)
     try:
+        main = location.main_worktree(git.Git(Path.cwd()))
+    except (git.GitError, OSError):
+        # リポジトリの外から打った。起票先の設定を読めないので起票しない
+        main = None
+    try:
         url, notes = _post_report(
-            state_dir, args.pr, report_decide.final_of(data), None, lambda: HUB(args.repo, store.state_repo(ref), Path.cwd())
+            state_dir,
+            args.pr,
+            report_decide.final_of(data),
+            None,
+            lambda: HUB(args.repo, store.state_repo(ref), Path.cwd()),
+            Filer(main, manual=True),
         )
     except ReportFailed as exc:
         return _stop("precondition", str(exc))
@@ -631,6 +678,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     if refused is not None:
         return refused
     items, warnings = _report(cfg, got, hub_once)
+    verdict = _with_leftovers(verdict, items, store.read_state(store.state_pr(cfg.state_dir, cfg.pr)))
     metrics = {"rounds": got.review.rounds, "findings": len(got.review.findings)}
     return _emit_verdict(verdict, got.mvv, items=items, metrics=metrics, warnings=warnings, process=list(got.process))
 
@@ -652,18 +700,35 @@ def _report(cfg: RunConfig, got: drive.Outcome, hub_of: Callable[[], Hub]) -> tu
     previous = data.get(report_decide.COMMENT_KEY)
     # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
     now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
-    published = data.get(report_decide.PUBLISHED_KEY) == now
+    # 起票に失敗した指摘があれば、同じ状態でも公開し直して起票を打ち直す（#3780）
+    retry = any(leftover_decide.Filed.ERROR in row for row in leftover.candidates(data))
+    published = data.get(report_decide.PUBLISHED_KEY) == now and not retry
     if got.reused and isinstance(previous, str) and published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings
     try:
         # 状態ファイルは消える作業場所にあるため、記録を PR へ残す。書けなくても終わり方は変えず、注意に残す（#3939）
-        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of)
+        url, notes = _post_report(cfg.state_dir, cfg.pr, got.review.final, got.warnings, hub_of, Filer(cfg.main))
         items.append({"kind": "comment", "number": cfg.pr, "url": url})
         warnings += notes
     except ReportFailed as exc:
         warnings.append(f"{exc}（ndf cross-review report --state-dir {cfg.state_dir} --pr {cfg.pr} で書き足す）")
     return items, warnings
+
+
+def _with_leftovers(verdict: fin.Verdict, items: list[dict[str, Any]], data: Mapping[str, Any]) -> fin.Verdict:
+    """直さずに残した指摘の残し方を結果の `items` に足し、要約の行と MVV の判断を足した終わり方を返す。起票の URL は公開が行に
+    書くので、記録の公開（`_report`）の後に呼ぶ。"""
+    rows = {str(r.get("id")): r for r in store.list_of(data, store.FINDINGS) if isinstance(r, Mapping)}
+    comment_url = next((i["url"] for i in items if i["kind"] == "comment"), None)
+    for item in items:
+        if item["kind"] == "finding" and item["id"] in rows:
+            item.update(leftover_decide.result_fields(rows[item["id"]], comment_url))
+    line = leftover_decide.summary_line(list(rows.values()))
+    if line is None:
+        return verdict
+    decided = (*verdict.decisions, *leftover_decide.decisions(list(rows.values()), comment_url))
+    return verdict._replace(summary=f"{verdict.summary}。{line}", decisions=decided)
 
 
 # --- 引数 --------------------------------------------------------------------------------

@@ -18,7 +18,7 @@ import re
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from typing import Any, NamedTuple, Optional
 
-from ndf.domains.crossreview import criteria_decide, report_decide
+from ndf.domains.crossreview import criteria_decide, leftover_decide, report_decide
 
 # スレッドの最初のコメント（`threads.opening`）の見出しと本文
 _OPENING = re.compile(
@@ -62,7 +62,7 @@ class Carried(NamedTuple):
     """前の実行から引き継ぐ未解決の指摘 1 件。`comment` は開いたままのスレッドの最初のコメントの id（記録のコメントから
     戻した指摘は None）。`mvv` から `unpinned_severity` までは、記録のコメントにある MVV の判定（欄の意味は `report_decide.MARKS`）。
     `thread` は、記録のコメントから戻した指摘が持っていたスレッドの最初のコメントの id。`protect` は記録のコメントにある
-    保護の種類（#4363）。"""
+    保護の種類（#4363）。`parked` は直さずに残した指摘、`issue` は起票した Issue の URL（#3780）。"""
 
     id: str
     comment: Optional[int]
@@ -79,6 +79,8 @@ class Carried(NamedTuple):
     unpinned_severity: Optional[str] = None
     thread: Optional[int] = None
     protect: Sequence[str] = ()
+    parked: bool = False
+    issue: Optional[str] = None
 
 
 # 記録のコメントから戻した指摘の id の頭（`p-<元の id>`。新しい実行の `r<ラウンド>-<n>` と重ねない）
@@ -188,7 +190,15 @@ def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optiona
         _opt_text(item.get("section")),
         **judged,
         thread=thread if type(thread) is int else None,
+        parked=item.get(leftover_decide.PARKED) is True,
+        issue=_issue_url(item.get(leftover_decide.Filed.URL)),
     )
+
+
+def _issue_url(value: object) -> Optional[str]:
+    """一覧の起票の URL（`https://` で始まる 1 語でなければ None）。"""
+    url = _opt_text(value)
+    return url if url and url.startswith("https://") and len(url.split()) == 1 else None
 
 
 def recorded(
@@ -211,7 +221,7 @@ def recorded(
         if one is None:
             continue
         if one.thread is not None:
-            marks[one.thread] = judged
+            marks[one.thread] = judged | ({"issue": one.issue} if one.issue else {})
             if one.by != report_decide.BY_NDF:
                 continue
         if _opt_text(item.get("id")) not in known:

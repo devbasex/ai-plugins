@@ -149,6 +149,8 @@ class FakeHub:
         self.port = FakePort()
         self.slug = ""
         self.made = 0
+        # 起票の口を作る関数（None なら起票しない。テストは偽の GitHub の起票の口に差し替える。#3780）
+        self.leftovers: Any = None
         self.clean: Any = cli._redacted
 
     def make(self, repo_arg, state_repo, cwd):
@@ -162,7 +164,7 @@ class FakeHub:
             self.comments.append((slug, pr, body, previous))
             return previous or f"https://github.com/{slug}/pull/{pr}#issuecomment-{len(self.comments)}"
 
-        return cli.Hub(comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext())
+        return cli.Hub(comment, self.port.at, self.port.at, lambda texts: self.clean(texts), lambda pr: contextlib.nullcontext(), self.leftovers)
 
 
 @pytest.fixture(autouse=True)

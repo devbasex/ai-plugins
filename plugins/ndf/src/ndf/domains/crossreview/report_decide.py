@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Optional
 
 from ndf import identity
-from ndf.domains.crossreview import criteria_decide, scope_decide, store
+from ndf.domains.crossreview import criteria_decide, leftover_decide, scope_decide, store
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.records import mvv_decide
 
@@ -219,6 +219,12 @@ def _light(f: Mapping[str, Any]) -> bool:
     return not criteria_decide.blocking(criteria_decide.severity_of(f.get("severity")))
 
 
+def _left_label(f: Mapping[str, Any]) -> str:
+    """直さずに残した指摘の終わり方（起票の URL か、記録のみ）。"""
+    url = f.get(leftover_decide.Filed.URL)
+    return f"直さずに残した（起票: {url}）" if url else "直さずに残した（記録のみ）"
+
+
 def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
     """指摘の表。判定役の確認で下げた指摘は、元の重要度と定型の理由を出す（`check` の自由記述は写さない。#4363）。"""
     rows = ["| 番号 | 担当 | 重要度 | 場所 | 指摘 | 終わり方 | 見送った理由 |", "| --- | --- | --- | --- | --- | --- | --- |"]
@@ -227,6 +233,8 @@ def _finding_rows(findings: Sequence[Mapping[str, Any]]) -> list[str]:
         shown = OUTCOME_LABEL[outcome] if outcome in OUTCOME_LABEL else outcome
         if outcome == fin.UNRESOLVED and (f.get(fin.REDLINE) or _light(f)):
             shown = REDLINE_LABEL if f.get(fin.REDLINE) else LIGHT_LABEL
+        elif outcome == fin.UNRESOLVED and f.get(leftover_decide.PARKED):
+            shown = _left_label(f)
         severity, reason = _cell(criteria_decide.severity_of(f.get("severity"))), f.get("reason")
         check = f.get(criteria_decide.CHECK)
         if isinstance(check, Mapping) and check.get(criteria_decide.LOWERED):
@@ -246,7 +254,13 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
     findings = [f for f in store.list_of(data, store.FINDINGS) if isinstance(f, Mapping)]
     waiting = sum(1 for f in findings if f.get("outcome") == fin.UNRESOLVED and f.get(fin.REDLINE))
     rest = [f for f in findings if f.get("outcome") != fin.UNRESOLVED or not f.get(fin.REDLINE)]
-    counts = {key: sum(1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not _light(f))) for key in OUTCOME_LABEL}
+    counts = {
+        key: sum(
+            1 for f in rest if f.get("outcome") == key and (key != fin.UNRESOLVED or not (_light(f) or f.get(leftover_decide.PARKED)))
+        )
+        for key in OUTCOME_LABEL
+    }
+    parked = sum(1 for f in rest if f.get("outcome") == fin.UNRESOLVED and f.get(leftover_decide.PARKED) and not _light(f))
     light = sum(1 for f in rest if f.get("outcome") == fin.UNRESOLVED and _light(f))
     label = FINAL_LABEL[final] if final in FINAL_LABEL else "途中（終わり方の記録が無い）"
     lines = [
@@ -255,6 +269,7 @@ def comment(pr: int, data: Mapping[str, Any], final: Optional[str], warnings: Se
         "",
         f"終わり方: {label}。ラウンド {len(rounds)}・指摘 {len(findings)}"
         f"（直した {counts[fin.FIXED]}・見送った {counts[fin.SKIPPED]}・未解決 {counts[fin.UNRESOLVED]}"
+        + (f"・直さずに残した {parked}" if parked else "")
         + (f"・軽い {light}" if light else "")
         + (f"・人の承認を待つ {waiting}" if waiting else "")
         + "）",
@@ -301,6 +316,11 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
         # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
         if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
             keep[criteria_decide.PROTECT] = list(kinds)
+        # 直さずに残した指摘と起票の URL（次の実行は残した指摘を引き継がず、URL だけを戻す。#3780）
+        if f.get(leftover_decide.PARKED):
+            keep[leftover_decide.PARKED] = True
+        if url := f.get(leftover_decide.Filed.URL):
+            keep[leftover_decide.Filed.URL] = url
         items.append({**keep, "thread": thread if type(thread) is int else None})
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):

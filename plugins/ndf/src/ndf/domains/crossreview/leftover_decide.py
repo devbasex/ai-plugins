@@ -271,3 +271,46 @@ def record_entries(body: str, issues_url: str) -> dict[str, dict[str, Any]]:
     if not isinstance(raw, dict):
         return {}
     return {ident: _entry(stored, issues_url) for ident, stored in raw.items() if isinstance(stored, dict)}
+
+
+# --- 結果への載せ方（#3780） -------------------------------------------------------------
+
+
+def _left(row: Mapping[str, Any]) -> bool:
+    """直さずに残して未解決の指摘か。"""
+    return bool(row.get(PARKED)) and row.get("outcome") == mvv_decide.REVIEW_UNRESOLVED
+
+
+def result_fields(row: Mapping[str, Any], comment_url: Optional[str]) -> dict[str, str]:
+    """結果の `items` に足す残し方（`disposition` と `url`。残していない指摘は空）。起票できていなければ記録のコメント
+    `comment_url` を指し、それも書けていなければ `url` を足さない。"""
+    if not _left(row):
+        return {}
+    if url := row.get(Filed.URL):
+        return {"disposition": "issue", "url": url}
+    return {"disposition": "comment", **({"url": comment_url} if comment_url else {})}
+
+
+def summary_line(rows: Sequence[Mapping[str, Any]]) -> Optional[str]:
+    """要約に足す残した指摘の数（無ければ None）。"""
+    left = [r for r in rows if _left(r)]
+    if not left:
+        return None
+    return f"残した指摘 {len(left)}（起票 {sum(1 for r in left if r.get(Filed.URL))}）"
+
+
+def decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> list[dict[str, str]]:
+    """プロジェクト MVV に反する残した指摘を、承認する人が確かめる判断にする。"""
+    out = []
+    for row in rows:
+        item = row.get(mvv_decide.REVIEW_ITEM)
+        if not _left(row) or not item:
+            continue
+        where = result_fields(row, comment_url)
+        out.append(
+            {
+                "decision": f"指摘 {row.get('id')} は {item} に反するが、直さずに残した",
+                "basis": f"2 ラウンド目以降の、変えていない行への major（{where['url'] if 'url' in where else '記録のコメントを書けていない'}）",
+            }
+        )
+    return out

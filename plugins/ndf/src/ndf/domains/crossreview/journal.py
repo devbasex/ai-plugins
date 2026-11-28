@@ -370,6 +370,9 @@ class FindingJournal:
         # 最後の `enter` で出た指摘の id、そのうち直した後に戻った指摘の id（`sort` が使う。#3780）
         self.raised_ids: list[str] = []
         self.returned: list[str] = []
+        # 前の実行が直さずに残して起票した指摘の、本文（`leftover_decide.normalized`）から Issue の URL（`carry` が読み、
+        # `sort` が残すときに戻す。#3780）
+        self.filed: dict[str, str] = {}
         # 最後の `enter` が `parked` を外して位置を置き換えた指摘と、その位置の候補（`sort` が投稿できる位置かを確かめる）
         self._moved: dict[str, list[dict[str, Any]]] = {}
         # 最後の `enter` で新しく出たか戻った指摘の id（`fresh` と違い、判定役へ渡さないものも含む）と、指摘ごとの出し直し、
@@ -545,6 +548,8 @@ class FindingJournal:
             passed = self.passed(fid, touched, unconfirmed=fid in unconfirmed)
             if not passed:
                 row[PARKED] = True
+                if url := self.filed.get(leftover_decide.normalized(row["text"])):
+                    row.setdefault(leftover_decide.Filed.URL, url)
                 parked.add(row["key"])
             else:
                 row.pop(PARKED, None)
@@ -649,7 +654,8 @@ class FindingJournal:
         同じスレッドの行（id が `t<コメントの id>`）があれば入れず（スレッドと記録のコメントの両方から来た指摘・状態ファイルが既に持つ指摘を重ねない）、MVV の判定と保護の種類
         だけをその行へ重ねる（`merge_marks`）。`items` は承認済みの MVV の項目、`mvv` はその識別子で、同じ MVV での判定だけを戻す。
 
-        スレッドの無い指摘の id が本文の違う行と重なれば、空いている id で別の指摘として入れる（指摘と保護の種類を失わない）。"""
+        スレッドの無い指摘の id が本文の違う行と重なれば、空いている id で別の指摘として入れる（指摘と保護の種類を失わない）。
+        直さずに残した指摘（`parked`）は行にせず、起票の URL を `filed` に残す（#3780）。"""
         added = []
         unknown = []
         self.merged = []
@@ -663,11 +669,17 @@ class FindingJournal:
                 if self.merge_marks(str(known["id"]), c._asdict(), items, mvv, place):
                     self.merged.append(str(known["id"]))
                 continue
+            if c.parked:
+                if c.issue:
+                    self.filed[leftover_decide.normalized(c.text)] = c.issue
+                continue
             fid = self._free_id(c.id)
             row = _journal_row(fid, 0, c.text, _text(c.by), key, _text(c.section))
             located = _located({"severity": c.severity, "path": c.path, "line": c.line})
             row = self.rows[fid] = by_key[key] = row | located
             _protect(row, c.protect)
+            if c.issue:
+                row[leftover_decide.Filed.URL] = c.issue
             if not _restore(row, c, items, mvv):
                 unknown.append(fid)
             added.append(fid)

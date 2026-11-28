@@ -167,7 +167,15 @@
           },
           "url": {
             "type": "string",
-            "description": "PR へ残した記録のコメントの URL（comment。#3939）"
+            "description": "PR へ残した記録のコメントの URL（comment。#3939）か、直さずに残した指摘の残し先の URL（finding。disposition が issue なら起票した Issue、comment なら記録のコメント。記録を書けなければ無い）"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "issue",
+              "comment"
+            ],
+            "description": "直さずに残した指摘の残し方（finding。残していない指摘は持たない。#3780）"
           }
         },
         "required": [

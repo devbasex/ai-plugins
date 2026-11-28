@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from ndf.core.converge import oscillation
-from ndf.domains.crossreview import carry, cli, drive, prior_decide, report_decide, store, threads
+from ndf.domains.crossreview import carry, cli, drive, leftover_decide, prior_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
 from ndf.domains.crossreview.journal import FindingJournal
 
@@ -458,3 +458,24 @@ def test_finding_that_comes_back_after_its_thread_was_resolved_is_detached(wt: P
     _run(capsys, monkeypatch, second, wt, "--max-rounds", "1")
     [finding] = _state(state_dir)["findings"]
     assert finding["outcome"] == fin.UNRESOLVED and finding["reason"] != carry.RESOLVED_ELSEWHERE
+
+
+def test_issue_3780_2_a_left_finding_is_not_carried_and_its_issue_comes_back() -> None:
+    """別の保存先の実行は、直さずに残した指摘を未解決として引き継がず、同じ指摘が残ると起票の URL を戻す。"""
+    url = "https://github.com/o/r/issues/100"
+    left = {**_OPEN_NO_THREAD, "path": "a.py", "line": 5, "parked": True}
+    filed = {**_OPEN_NO_THREAD, "id": "r1-2", "text": "起票済みで未解決", "issue": url}
+    remark = _record([{**left, "issue": url}, filed], {}, "2026-11-20T00:00:00Z")
+    journal = FindingJournal()
+    assert journal.carry(prior_decide.recorded([remark])[0]) == ["p-r1-2"]
+    assert journal.rows["p-r1-2"]["issue"] == url
+    journal.enter(2, [{"text": left["text"], "severity": "major", "impact": "処理が止まる", "path": "a.py", "line": 5, "by": "codex"}])
+    journal.sort(leftover_decide.Touched())
+    row = journal.rows["r2-1"]
+    assert (row["parked"], row["issue"]) == (True, url)
+
+
+def test_broken_leftover_fields_in_the_record_are_ignored() -> None:
+    body = report_decide.OPEN_MARK + '[{"id": "r1-1", "text": "A", "parked": "yes", "issue": "秘密の文"}] -->'
+    [got] = prior_decide.recorded([prior_decide.Remark("comment", "ndf", report_decide.MARKER + "\n" + body, trusted=True)])[0]
+    assert (got.parked, got.issue) == (False, None)
