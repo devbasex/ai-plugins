@@ -528,6 +528,11 @@ class GitHub:
         """Issue（か PR）のコメントを古い順にすべて読む（`github.list-pages` ページまで。超えたら `GitHubError`）。"""
         return [Authored.from_rest(c) for c in self._pages(f"/repos/{self.repo}/issues/{int(number)}/comments")]
 
+    def comment_pages(self, number: int) -> Iterator[list[Authored]]:
+        """`comments` と同じ一覧を 1 ページ（100 件）ずつ返す。呼び手がやめれば、後のページは読まない。"""
+        for page in self._each_page(f"/repos/{self.repo}/issues/{int(number)}/comments"):
+            yield [Authored.from_rest(c) for c in page]
+
     def commit_parents(self, sha: str) -> list[str]:
         """コミット `sha` の親の SHA（第 1 親から順）。"""
         body = self.rest("GET", f"/repos/{self.repo}/git/commits/{quote(sha, safe='')}")
@@ -566,14 +571,17 @@ class GitHub:
     def _pages(self, path: str, query: Optional[dict] = None) -> list[dict]:
         """配列を返す REST の一覧を、短いページが来るまで読む。`github.list-pages` ページを超えたら途中で切らずに止まる。
         `query` はページの指定に足す絞り込み。"""
+        return [row for page in self._each_page(path, query) for row in page]
+
+    def _each_page(self, path: str, query: Optional[dict] = None) -> Iterator[list[dict]]:
+        """`_pages` の一覧を 1 ページずつ読む。"""
         pages = _page_cap("github.list-pages")
-        rows: list[dict] = []
         narrow = dict(query) if query is not None else {}
         for page in range(1, pages + 1):
             body = self.rest("GET", path, params={**narrow, "per_page": PER_PAGE, "page": page})
-            rows.extend(body)
+            yield body
             if len(body) < PER_PAGE:
-                return rows
+                return
         raise _too_many_pages(f"{path} が", pages, "github.list-pages")
 
     def branch_rules(self, branch: str) -> list[dict]:

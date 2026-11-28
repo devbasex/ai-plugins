@@ -611,12 +611,14 @@ def _note_key(hub: GitHub, number: int, outcome: Mapping[str, Any], where: Mappi
 
 
 def _posted_note(hub: GitHub, number: int, marker: str) -> Optional[str]:
-    """識別子の行 `marker` を持つ、token の利用者と同じアカウントが書いた、編集されていないコメントの URL。無ければ None。"""
-    found = [c for c in hub.comments(number) if not c.edited and marker in c.body]
-    if not found:
-        return None
-    viewer = hub.viewer()
-    return next((c.url for c in found if merge_approval.same_writer(c, viewer)), None)
+    """識別子の行 `marker` を持つ、token の利用者と同じアカウントが書いた、編集されていないコメントの URL。無ければ None。
+
+    見つけたページで読むのをやめる。利用者は `marker` を持つコメントがあるときだけ読む。"""
+    for page in hub.comment_pages(number):
+        for c in page:
+            if not c.edited and marker in c.body and merge_approval.same_writer(c, hub.viewer()):
+                return c.url
+    return None
 
 
 def has_gate(mode: Any, gate_name: str) -> bool:

@@ -151,6 +151,12 @@ class Hub:
     def comments(self, number: int) -> list[Authored]:
         return list(self.case.get("comments", []))
 
+    def comment_pages(self, number: int):
+        """1 ページ目は `comments`。`case["next_page"]` は、次のページを読むと投げる例外。"""
+        yield self.comments(number)
+        if "next_page" in self.case:
+            raise self.case["next_page"]
+
     def branch_file(self, base: str, path: str) -> FileAt:
         """マージ先 main の設定（自動反映の本番チャネル。#4409）。"""
         section = {
@@ -698,7 +704,7 @@ def _as_posted(notes: list[tuple[int, str]], author_id: int = 1, edited: bool = 
 
 def test_the_same_judgement_reuses_its_comment(repo: Path, notes: list[tuple[int, str]]) -> None:
     first = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
-    posted = {**DOCS, "comments": _as_posted(notes)}
+    posted = {**DOCS, "comments": _as_posted(notes), "next_page": AssertionError("記録を見つけた後のページを読んだ")}
     # 理由の文だけが違う（進め方が違う）打ち直しは、前のコメントを使う
     again = mvv_gate.gate(repo, "design", {**_inputs(), mvv_gate.NO_SKIP: False}, _hub(5, posted), Ask(FOLLOW))
     assert len(notes) == 1 and again["note_url"] == first["note_url"] and again["noted"] is True
