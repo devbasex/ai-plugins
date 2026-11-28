@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Optional
@@ -32,6 +32,8 @@ STEP_EVENT = _event_kind("step_recorded")
 ANSWERED = _event_kind("answered")
 FAILED = _event_kind("failed")
 FINISHED = _event_kind("finished")
+# 工程を終えたときに出した警告（打ち直した `units run` が同じ警告を返すために読む）
+COMPLETION_WARNED = _event_kind("completion_warned")
 # 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
 RETRY_EVENT = _event_kind("retry")
 # 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）
@@ -92,6 +94,29 @@ class View:
 def event_payload(ev: model.Event) -> dict[str, Any]:
     """事象の payload。無ければ空。"""
     return ev.draft.payload if ev.draft.payload is not None else {}
+
+
+def last_event(events: Iterable[model.Event], kind: str) -> Optional[model.Event]:
+    """種類 `kind` の最後の事象。無ければ None。"""
+    found = None
+    for ev in events:
+        if ev.draft.kind == kind:
+            found = ev
+    return found
+
+
+def completion_warning_drafts(v: View, stage: str, warnings: Sequence[str]) -> list[model.EventDraft]:
+    """終えた工程の警告を残す事象の下書き。警告が無いか、工程が終了でなければ空。"""
+    rows = v.rows
+    if not warnings or stage not in rows or rows[stage].state != FINISHED:
+        return []
+    return [model.EventDraft(COMPLETION_WARNED, ACTOR, stage, payload={"warnings": list(warnings)}, rev=v.rev)]
+
+
+def completion_warnings(v: View, stage: str) -> list[str]:
+    """工程を終えたときに残した警告。"""
+    found = last_event(v.row_events(stage), COMPLETION_WARNED)
+    return list(event_payload(found)["warnings"]) if found is not None else []
 
 
 def migrated_order(snap: stages.Snapshot, events: Sequence[model.Event]) -> stages.Snapshot:

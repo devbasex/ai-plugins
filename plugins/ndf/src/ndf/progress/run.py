@@ -23,7 +23,7 @@ import hashlib
 import json
 import subprocess
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
@@ -48,6 +48,8 @@ from ndf.progress.run_view import (
     STARTED,
     STEP_EVENT,
     View,
+    completion_warning_drafts,
+    last_event,
     migrated_order,
     migration_drafts,
     event_payload,
@@ -134,14 +136,6 @@ class Move:
     event: Optional[model.Event] = None
 
 
-def _last(events: Iterable[model.Event], kind: str) -> Optional[model.Event]:
-    found = None
-    for ev in events:
-        if ev.draft.kind == kind:
-            found = ev
-    return found
-
-
 def _void_answer(v: View, ev: Optional[model.Event], gate: Optional[str]) -> bool:
     """回答 `ev` が、回答として数えない MVV 判定の回答か（`model.mvv_answer_void`）。"""
     return ev is not None and model.mvv_answer_void(event_payload(ev), gate)
@@ -189,7 +183,7 @@ def decide(v: View) -> Move:
         if model.is_terminal(state):
             continue
         if state == "failed":
-            return Move(Action.FAILED, s, event=_last(v.row_events(s.name), FAILED))
+            return Move(Action.FAILED, s, event=last_event(v.row_events(s.name), FAILED))
         if state == "running":
             return _running_move(v, s)
         return Move(Action.START, s)
@@ -538,12 +532,14 @@ def _resume(d: Drive, v: View, m: Move) -> Optional[dict[str, Any]]:
     assert m.stage is not None
     if not d.inline:
         return _launched(d, v, m)
+    mark = len(d.warnings)
     if m.step is None:
         _finish_stage(d, v, m.stage)
     else:
         d.write(*_run_step(d, v, m.stage, m.step))
     if decide(read(d.st, d.machine_id)).stage != m.stage:
         d.synced()
+        d.write(*completion_warning_drafts(read(d.st, d.machine_id), m.stage.name, d.warnings[mark:]))
     return None
 
 

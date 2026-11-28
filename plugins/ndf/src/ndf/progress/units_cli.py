@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from ndf.contracts import result
-from ndf.progress import command, design_record, model, run, stages, store
-from ndf.progress.folding import step_progress
+from ndf.progress import command, design_record, model, run, store
+from ndf.progress.run_view import completion_warnings
 
 _PLAYABLE = (run.Action.START, run.Action.RESUME)
 
@@ -75,24 +75,9 @@ def _flow(d: run.Drive) -> dict[str, Any]:
     ended = _ended_stage(v)
     if ended is None:
         return _not_next(v, m)
-    _restore_warnings(d, v, ended)
+    # 打ち直しは記録を読むだけで、進捗記録（課題と PR の本文）を読み書きしない。今の状態は `ndf progress resync` で揃える
+    d.warnings.extend(completion_warnings(v, ended))
     return _done(v, ended)
-
-
-def _restore_warnings(d: run.Drive, v: run.View, name: str) -> None:
-    """前の実行が工程を終えたときの警告を、工程を流さずに `d.warnings` へ戻す。
-
-    捨てた出力のキーは保存したステップの結果から求める。進捗記録は書き直し（何度打っても同じ本文になる）を打ち直し、
-    今も書けなければ理由を警告に載せる。飛ばした工程は初回も進捗記録を書かないので、何もしない。
-    """
-    last = _end_event(v, name)
-    assert last is not None
-    if last.kind != run.FINISHED:
-        return
-    s = next(s for s in v.snap.stages if s.name == name)
-    merged = stages.step_outputs(s, step_progress(v, name).done)
-    d.warnings.extend(stages.outputs_draft(s, v.rev, merged, run.ACTOR)[1])
-    d.synced()
 
 
 def _end_event(v: run.View, stage: str) -> model.EventDraft | None:

@@ -852,18 +852,25 @@ def test_the_target_repository_is_added_only_to_the_commands_that_take_it(tmp_pa
     assert gate.entry.parser().parse_args(given).cwd == tmp_path.resolve()
 
 
-def test_units_run_repeated_after_success_returns_the_same_result_without_running(repo, st, flow, capsys, tmp_path):
+@pytest.mark.parametrize("writable", [True, False])
+def test_units_run_repeated_after_success_returns_the_first_result_without_touching_the_records(repo, st, flow, capsys, tmp_path, writable):
     tid = _ready(capsys, repo, tmp_path)
+    opened = []
 
-    def unwritable(cwd):
-        raise github.GitHubError("届かない")
+    def records(cwd):
+        opened.append(cwd)
+        if not writable:
+            raise github.GitHubError("届かない")
+        return lanes._NoRecords()
 
-    env = replace(flow.env, records=unwritable)
-    first = units_cli.run_implement(st, tid, repo, env)
-    again = units_cli.run_implement(st, tid, repo, env)
+    first = units_cli.run_implement(st, tid, repo, replace(flow.env, records=records))
+    assert any("届かない" in w for w in first.get("warnings", [])) is not writable, first
+    synced = len(opened)
+    # 打ち直しの時点では書けても、返すのは初回の警告である
+    writable = True
+    again = units_cli.run_implement(st, tid, repo, replace(flow.env, records=records))
     assert again == first and again["status"] == "ok", again
-    assert any("届かない" in w for w in again["warnings"]), again
-    assert [step for step, _ in flow.calls] == ["implement", "gathered"]
+    assert len(opened) == synced and [step for step, _ in flow.calls] == ["implement", "gathered"]
 
 
 def test_a_waiting_answer_of_units_run_is_carried_over_to_next(repo, st, flow, capsys, tmp_path):
