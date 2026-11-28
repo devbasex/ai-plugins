@@ -260,12 +260,19 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
         raise model.Refused(refused)
     held = _standing_answer(v, read, cwd, st.root) is None
     drafts, dropped = _finish_drafts(a, v, read, held)
-    if held:
-        # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す。回答待ちを書けない状態なら、取り消す前に断る
-        model.check_event("sprint", model.rows_for("sprint", v.events, drafts[0]), v.whole, drafts[0])
+
+    def append() -> tuple[bool, list[int], list[str]]:
+        with store.transaction(st) as conn:
+            return held, store.append_events(conn, a.machine_id, drafts, v.events[-1].seq), dropped
+
+    if not held:
+        return append()
+    # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す。回答待ちを書けない状態なら、取り消す前に断る
+    model.check_event("sprint", model.rows_for("sprint", v.events, drafts[0]), v.whole, drafts[0])
+    # 取り消してから追記するまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
+    with store.approval_lock(st, a.machine_id):
         revoker(shared_hub(cwd), "回答待ちを書かない")(approval_decide.stage_revocations(v, a.stage))
-    with store.transaction(st) as conn:
-        return held, store.append_events(conn, a.machine_id, drafts, v.events[-1].seq), dropped
+        return append()
 
 
 def _cmd_finish(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:

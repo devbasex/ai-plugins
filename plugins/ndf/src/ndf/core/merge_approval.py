@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from typing import Iterable, Iterator, NamedTuple, Sequence
+from typing import Callable, Iterable, Iterator, NamedTuple, Sequence
 
 from ndf import identity
 from ndf.adapters.github import Authored, GitHub, Viewer, same_repo
@@ -246,25 +246,25 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
             row = MergeRow(REJECTED, REOPEN_BY, target, True, record_id, voids=voids)
             publisher.comment(target.number, render_merge_row(row))
     for number in leaving:
-        if not _queued_on_another(hub, viewer, read[number], [r.target for r in revocations if r.target.number == number]):
-            hub.dequeue(number)
+        revoked = [r.target for r in revocations if r.target.number == number]
+        hub.dequeue(number, keep=_queued_on_another(hub.repo, number, viewer, read[number], revoked))
     if others:
         names = "・".join(others)
         raise TrailError(f"取り消す承認の証跡を別のアカウント（{names}）が書いている。承認を書いたアカウントで打ち直す")
 
 
-def _queued_on_another(hub: GitHub, viewer: Viewer, found: Sequence[tuple[Authored, MergeRow]], revoked: Sequence[MergeTarget]) -> bool:
-    """PR の今の対象（マージ先と HEAD。キューに入っている PR はこれが対象）が、取り消す対象 `revoked` のどれとも違い、
-    token の利用者の有効な承認を持つか。そうならキューから外さない。PR は、別の対象の有効な承認があるときだけ読む。"""
+def _queued_on_another(
+    repo: str, number: int, viewer: Viewer, found: Sequence[tuple[Authored, MergeRow]], revoked: Sequence[MergeTarget]
+) -> Callable[[str, str], bool]:
+    """PR をキューに残すかを、今のマージ先と HEAD（キューに入っている PR はこれが対象）から決める関数（`GitHub.dequeue` の `keep`）。
+    その組が取り消す対象 `revoked` のどれとも一致せず、token の利用者の有効な承認を持つなら残す。"""
     mine = [row for c, row in found if same_writer(c, viewer)]
 
-    def kept(target: MergeTarget) -> bool:
-        return not any(target.same(r) for r in revoked) and bool(_live_approvals(mine, target))
+    def keep(base: str, head: str) -> bool:
+        now = MergeTarget(repo, number, base, head)
+        return not any(now.same(r) for r in revoked) and bool(_live_approvals(mine, now))
 
-    if not any(kept(row.target) for row in mine):
-        return False
-    pull = hub.pull(revoked[0].number)
-    return kept(MergeTarget(hub.repo, revoked[0].number, pull.base_ref, pull.head_sha))
+    return keep
 
 
 def _not_voided(rows: Sequence[MergeRow], target: MergeTarget, approvals: frozenset[str]) -> bool:

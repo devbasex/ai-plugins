@@ -87,7 +87,7 @@ MERGE_QUEUE_VERIFY_QUERY = (
 )
 IN_MERGE_QUEUE_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) {"
-    " pullRequest(number: $number) { id isInMergeQueue } } }"
+    " pullRequest(number: $number) { id isInMergeQueue baseRefName headRefOid } } }"
 )
 # `jump` は版上げの PR をキューの先頭へ入れる指定（#3672 の決定 18。承認の範囲を版上げの PR の head に固定する）
 ENQUEUE_MUTATION = (

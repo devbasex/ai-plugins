@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from ndf.adapters import github_merge
 from ndf.adapters.github import Authored, FileAt, MergeExpect, MergeOutcome, Pull, Viewer
@@ -111,7 +111,10 @@ class MergeHub:
             return {"html_url": f"https://example.invalid/{number}"}
         return {}
 
-    def dequeue(self, number: int) -> None:
+    def dequeue(self, number: int, keep: Optional[Callable[[str, str], bool]] = None) -> None:
+        now = self.pulls_of.get(number)
+        if keep is not None and now is not None and keep(now.base_ref, now.head_sha):
+            return
         self.dequeued.append(number)
 
     def merge(

@@ -663,7 +663,7 @@ def _pg_run_lock(store: Store, machine_id: str) -> Iterator[None]:
 
 @contextmanager
 def approval_lock(store: Store, machine_id: str) -> Iterator[None]:
-    """承認を書く操作（`ndf answer` の回答と、工程の開き直し）を 1 つに限る。取れなければ待たずに `Refused`。
+    """承認を書く操作（`ndf answer` の回答）と取り消す操作（工程の開き直し・承認の待ちへの戻し・手で終える回答待ち）を 1 つに限る。取れなければ待たずに `Refused`。
 
     回答は PR へ証跡を書いてから DB へ追記するので、間に開き直しが確定すると、記録の無い承認が PR に残る。
     工程を流す作業の排他（`run_lock`）とは別のキーなので、作業が流れていても回答できる。"""

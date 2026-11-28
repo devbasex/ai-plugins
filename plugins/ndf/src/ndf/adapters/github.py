@@ -930,11 +930,15 @@ class GitHub:
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
         return isinstance(node, dict) and node["isInMergeQueue"] is True
 
-    def dequeue(self, number: int) -> None:
-        """PR `number` をマージキューから外す（入っていなければ何もしない）。"""
+    def dequeue(self, number: int, keep: Optional[Callable[[str, str], bool]] = None) -> None:
+        """PR `number` をマージキューから外す（入っていなければ何もしない）。`keep` があれば、キューの状態と同じ 1 回の
+        問い合わせで読んだ今のマージ先と HEAD を渡し、真なら外さない。"""
         node = self.repository(github_merge.IN_MERGE_QUEUE_QUERY, {"number": int(number)})["pullRequest"]
-        if isinstance(node, dict) and node["isInMergeQueue"]:
-            self._leave_queue(node["id"])
+        if not (isinstance(node, dict) and node["isInMergeQueue"]):
+            return
+        if keep is not None and keep(text_of(node["baseRefName"]), text_of(node["headRefOid"])):
+            return
+        self._leave_queue(node["id"])
 
 
 def _issue_filter(labels: Sequence[str], state: str) -> dict[str, Any]:

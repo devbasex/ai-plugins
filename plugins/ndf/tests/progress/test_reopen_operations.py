@@ -541,7 +541,7 @@ def test_a_pr_that_cannot_leave_the_merge_queue_records_nothing_and_a_retry_dequ
     tid, target = _approved_design(capsys, repo, st, env)
     before = _events(st, tid)
 
-    def fail(number: int) -> None:
+    def fail(number: int, keep: object = None) -> None:
         raise GitHubError("キューを読めない", 502)
 
     with monkeypatch.context() as m:

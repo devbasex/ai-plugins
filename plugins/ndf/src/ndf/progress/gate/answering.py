@@ -499,7 +499,7 @@ def recheck(
     """回答を読む前に、回答した者が見た対象と今の対象を比べる。違えば待ちへ戻し（質問は新しい id）、理由を返す（3364-2）。
     承認の対象を持つ回答は、人の回答も MVV の回答も、マージ先と本番へ反映されるかを比べる（#4520 の懸念 1）。
     待ちへ戻す前に、`revoke` で PR の証跡の承認を取り消す（取り消せなければ何も書かない）。取り消しと書き込みは、回答を読む
-    操作と同じ排他（`_driving`）の中で行う。工程を進めない呼び出し（`advancing` が偽。`show` など）は、何も取り消さず書かずに、
+    操作と同じ排他（`_driving`）と、回答と共有する排他（`store.approval_lock`）の中で行う。工程を進めない呼び出し（`advancing` が偽。`show` など）は、何も取り消さず書かずに、
     違いと次の操作を返す。
 
     `ndf answer` が書いた回答（質問の id と見た対象を持つ）だけを比べる。どのサブコマンドでも、回答が読まれる前に打つ。待ちへ戻すのは承認ゲートのステップの
@@ -585,7 +585,8 @@ def _send_back(st: store.Store, v: run.View, m: run.Move, why: str, revoke: Call
         if undo:
             _uncarry(conn, v.machine_id, p.get("carried_row"), why)
 
-    with _driving(st, v.machine_id):
+    # 取り消してから境界を進めるまでの間に回答を送り直されると、取り消した承認が PR に戻るので、回答側も止める
+    with store.approval_lock(st, v.machine_id), _driving(st, v.machine_id):
         latest = run.read(st, v.machine_id)
         if not _still(latest, answered):
             return False
@@ -671,7 +672,7 @@ def _reopen_unbound(st: store.Store, machine_id: str, revoke: Callable[[list[mer
         if held:
             _uncarry(conn, machine_id, run.event_payload(held[0].answered).get("carried_row"), UNBOUND_REASON)
 
-    with _driving(st, machine_id):
+    with store.approval_lock(st, machine_id), _driving(st, machine_id):
         v = run.read(st, machine_id)
         found = _unbound_approval(v)
         if found is not None:

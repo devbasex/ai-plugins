@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional, Protocol
 
 from ndf.contracts import result
-from ndf.progress import approval_decide, invoke, model, stages
+from ndf.progress import approval_decide, invoke, model, stages, store
 from ndf.progress.folding import Action, Move
 from ndf.progress.run_view import (
     ACTOR,
@@ -37,6 +37,7 @@ class Hands(Protocol):
 
     machine_id: str
     env: Any  # `run.Env`
+    st: store.Store
 
     def warn(self, text: str) -> None: ...
 
@@ -150,9 +151,11 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
         why = "承認の後に対象が変わった: " + " / ".join(got.differences)
         if got.merged:
             why = f"{why}（承認と違う内容がマージされた。今の head {got.head}）"
-        d.env.revoke(approval_decide.stage_revocations(v, m.stage.name))
         wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
-        d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
+        # 取り消してから境界を進めるまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
+        with store.approval_lock(d.st, v.machine_id):
+            d.env.revoke(approval_decide.stage_revocations(v, m.stage.name))
+            d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
         d.warn(why)
         return None
     if m.step.gate == approval_decide.DESIGN_GATE and not got.merged:
