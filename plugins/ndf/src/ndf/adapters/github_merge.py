@@ -69,7 +69,7 @@ MERGE_QUEUE_REFUSED_STATUS = 405
 MERGE_QUEUE_PENDING = "ci_pending"
 MERGE_QUEUE_STATE_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!, $branch: String!) { repository(owner: $owner, name: $name) {"
-    " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue }"
+    " pullRequest(number: $number) { id isMergeQueueEnabled isInMergeQueue mergeQueueEntry { id } }"
     " mergeQueue(branch: $branch) { configuration { mergeMethod } } } }"
 )
 # 確かめの項目（PR のマージ先・HEAD・ベースリポジトリと、マージ先の設定の blob の oid と本文。#4409 の決定 8）
@@ -82,7 +82,7 @@ VERIFY_QUERY = (
 # キューの状態の問い合わせに確かめの項目を足したもの（要求を増やさずに照らす）
 MERGE_QUEUE_VERIFY_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!, $branch: String!, $expr: String!) { repository(owner: $owner, name: $name) { "
-    + _VERIFY_FIELDS.format(extra=" id isMergeQueueEnabled isInMergeQueue")
+    + _VERIFY_FIELDS.format(extra=" id isMergeQueueEnabled isInMergeQueue mergeQueueEntry { id }")
     + " mergeQueue(branch: $branch) { configuration { mergeMethod } } } }"
 )
 IN_MERGE_QUEUE_QUERY = (
@@ -122,6 +122,7 @@ class MergeOutcome(NamedTuple):
 
     `merge_sha` はマージで本流へ入ったコミット（GitHub がマージの応答か PR の欄で返したときだけ。ほかは空）。
     `added_to_queue` は、待ち（`MERGE_QUEUE_PENDING`）のうち、この呼び出しが PR をキューへ入れたときだけ真。
+    `queue_entry` は、入れ直さずに見つけたキューの項目の ID（#4520）。
     """
 
     merged: bool
@@ -130,6 +131,7 @@ class MergeOutcome(NamedTuple):
     head_sha: str
     merge_sha: str = ""
     added_to_queue: bool = False
+    queue_entry: str = ""
 
 
 class FileAt(NamedTuple):

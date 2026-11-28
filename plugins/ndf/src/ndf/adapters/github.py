@@ -39,7 +39,17 @@ from ndf.adapters.github_merge import MERGE_QUEUE_PENDING, FileAt, MergeOutcome,
 from ndf.adapters.github_merge import MERGE_COMMIT as MERGE_COMMIT
 
 # `Pull`・`Authored`・`text_of` は呼び手が github から読む名前でもある
-from ndf.adapters.github_pulls import PER_PAGE, PULL_FIELDS, Authored, Pull, account_id_of, graphql_string, target_of, text_of
+from ndf.adapters.github_pulls import (
+    PER_PAGE,
+    PULL_FIELDS,
+    Authored,
+    Pull,
+    account_id_of,
+    graphql_string,
+    queue_entry_of,
+    target_of,
+    text_of,
+)
 from ndf.adapters.github_rules import NO_RULES, RuleFacts, classic_facts_of, merge_facts, rule_facts_of
 from ndf.contracts import limits
 
@@ -892,7 +902,8 @@ class GitHub:
         if stop is not None:
             return stop
         detail = f"#{pull.number} をマージキューへ入れた（マージキューの待ち）"
-        return MergeOutcome(False, MERGE_QUEUE_PENDING, detail, pull.head_sha, added_to_queue=added)
+        found = "" if added else queue_entry_of(node)
+        return MergeOutcome(False, MERGE_QUEUE_PENDING, detail, pull.head_sha, added_to_queue=added, queue_entry=found)
 
     def _queue_state(self, pull: Pull, expect: Optional[MergeExpect]) -> dict[str, Any]:
         """マージキューの状態の問い合わせ。`expect` があれば確かめの項目を足して同じ 1 回で読む。"""

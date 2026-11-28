@@ -570,8 +570,8 @@ def _merge(args: argparse.Namespace) -> dict:
     マージし、無ければ `--production-gate` の形で終える。
     `--required` を受けたら、承認した対象を今の PR と照らした後に、マージする HEAD のチェックを待つ。マージ済みの PR は待たない。
     待つ間に HEAD かマージ先が変われば、`GitHub.merge` の直前の確かめが止める。
-    承認が要る PR がマージキューの待ちになったら、証跡を読み直す（`_withdrawn_in_queue`）。証跡を読む前から PR がキューにあり、
-    この呼び出しが入れ直してもいなければ読み直さない（読んだ後の開き直しは、キューから外せる）。
+    承認が要る PR がマージキューの待ちになったら、証跡を読み直す（`_withdrawn_in_queue`）。読み直さないのは、証跡を読む前と
+    キューの待ちを確かめた時の項目の ID が同じ場合だけ（間に外れて別の呼び出しが入れ直すと、ID が変わる）。
     """
     invalid = _invalid_args(args)
     if invalid is not None:
@@ -600,9 +600,9 @@ def _merge(args: argparse.Namespace) -> dict:
     rejudge = _Rejudge(hub, pull, target, verdict, approved_by)
     expect = MergeExpect(pull, pull.base_ref, pull.head_sha, PROJECT_FILE, oid, rejudge)
     outcome = hub.merge(pull.number, expect_head=head if head is not None else pull.head_sha, method=args.method, expect=expect)
-    # 初めは PR がキューに無かったのに今あるなら、別の呼び出しが開き直しの後に入れた場合がある
-    entered = outcome.kind == MERGE_QUEUE_PENDING and (outcome.added_to_queue or not pull.queued)
-    if entered and rejudge.approved_by is not None:
+    # 項目の ID が違えば、開き直しが外した後に別の呼び出しが古い承認で入れ直した場合がある（入れ直した呼び出しは ID が空）
+    same_entry = bool(outcome.queue_entry) and outcome.queue_entry == pull.queue_entry
+    if outcome.kind == MERGE_QUEUE_PENDING and not same_entry and rejudge.approved_by is not None:
         withdrawn = _withdrawn_in_queue(args, hub, target, rejudge.verdict)
         if withdrawn is not None:
             return withdrawn

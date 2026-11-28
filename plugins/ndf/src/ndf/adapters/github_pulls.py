@@ -12,7 +12,7 @@ PER_PAGE = 100
 
 PULL_FIELDS = (  # PR を読むときの GraphQL の選択（`Pull.from_graphql` が読む項目）
     "number state merged headRefOid headRefName baseRefName body mergeStateStatus author { login } authorAssociation mergeCommit { oid }"
-    " title isInMergeQueue isCrossRepository"
+    " title isInMergeQueue mergeQueueEntry { id } isCrossRepository"
 )
 
 
@@ -32,6 +32,12 @@ def account_id_of(raw: Any) -> int:
         return 0
     got = raw["id"] if "id" in raw else raw["databaseId"] if "databaseId" in raw else None
     return got if isinstance(got, int) and not isinstance(got, bool) and got > 0 else 0
+
+
+def queue_entry_of(node: dict) -> str:
+    """GraphQL の PR の節点のマージキューの項目の ID（キューに無い・読んでいなければ空文字）。入れ直すと別の ID になる。"""
+    entry = node.get("mergeQueueEntry")
+    return text_of(entry.get("id")) if isinstance(entry, dict) else ""
 
 
 def target_of(node: dict) -> tuple[str, str]:
@@ -100,6 +106,7 @@ class Pull(NamedTuple):
     queued: bool = False  # マージキューに入っているか（GraphQL で読んだときだけ分かる。REST では偽。#4409 の決定 8）
     title: str = ""  # PR の題（承認の質問の文を作る。#4446）
     cross_repository: bool = False  # head のブランチがフォークにあるか
+    queue_entry: str = ""  # マージキューの項目の ID（`queue_entry_of`。#4520）
 
     @property
     def authored(self) -> Authored:
@@ -125,7 +132,7 @@ class Pull(NamedTuple):
             body=text_of(raw["body"]), title=text_of(raw.get("title")), merge_state=text_of(raw["mergeStateStatus"]).lower(),
             author=_login(raw["author"]), association=text_of(raw["authorAssociation"]).upper(), queued=raw.get("isInMergeQueue") is True,
             merge_sha=text_of(raw["mergeCommit"].get("oid")) if isinstance(raw.get("mergeCommit"), dict) else "",
-            cross_repository=bool(raw.get("isCrossRepository")),
+            cross_repository=bool(raw.get("isCrossRepository")), queue_entry=queue_entry_of(raw),
         )  # fmt: skip
 
 

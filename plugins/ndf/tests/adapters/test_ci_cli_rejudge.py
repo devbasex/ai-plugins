@@ -172,15 +172,36 @@ def test_an_approval_revoked_while_entering_the_queue_leaves_the_queue(monkeypat
         assert hub.dequeued == [] and found["cause"]["kind"] == github.MERGE_QUEUE_PENDING
 
 
-@pytest.mark.parametrize(("added", "reads"), [(False, 1), (True, 2)])
-def test_a_pr_queued_before_the_approval_read_is_read_again_only_when_put_back(monkeypatch, capsys, last_result, added, reads):
-    """初めからキューにある PR の打ち直しは通信を増やさない。キューから出て入れ直したときは読み直す（#4520）。"""
-    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull(queued=True)})
+@pytest.mark.parametrize(("added", "found", "reads"), [(False, "e1", 1), (False, "e2", 2), (False, "", 2), (True, "", 2)])
+def test_a_queued_pr_is_not_read_again_only_for_the_same_queue_entry(monkeypatch, capsys, last_result, added, found, reads):
+    """同じキューの項目を待つ打ち直しは通信を増やさない。項目が変わったか確かめられなければ読み直す（#4520）。"""
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull(queued=True)._replace(queue_entry="e1")})
     _approve(hub)
-    waiting = github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューの待ち", merge_hub.HEAD, added_to_queue=added)
+    waiting = github.MergeOutcome(
+        False, github.MERGE_QUEUE_PENDING, "キューの待ち", merge_hub.HEAD, added_to_queue=added, queue_entry=found
+    )
     monkeypatch.setattr(hub, "merge", lambda number, **_kwargs: waiting)
 
-    _, found = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+    _, result = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
 
-    assert found["cause"]["kind"] == github.MERGE_QUEUE_PENDING
+    assert result["cause"]["kind"] == github.MERGE_QUEUE_PENDING
     assert hub.calls.count("comments") == reads and hub.dequeued == []
+
+
+def test_a_pr_put_back_by_another_call_after_a_reopen_leaves_the_queue(monkeypatch, capsys, last_result):
+    """2 つの呼び出しが同じ承認を読んだ後、開き直しが取り消して外し、一方が入れ直して止まる（#4520）。
+
+    もう一方は入れ直さずに別の項目を見つけるので、読み直してキューから外す。"""
+    hub = _hub(monkeypatch, AUTO, AUTO, pulls_of={7: merge_hub.pull(queued=True)._replace(queue_entry="e1")})
+    _approve(hub)
+    target = merge_approval.MergeTarget(merge_hub.REPO, 7, "main", merge_hub.HEAD)
+
+    def merge(number, **_kwargs):
+        merge_approval.write_revocations(hub, [merge_approval.Revocation(target, frozenset({"r0"}), "reopen:x")], hub.viewer())
+        hub.dequeued.clear()  # 開き直しが外した後に、別の呼び出しが項目 e2 として入れ直した
+        return github.MergeOutcome(False, github.MERGE_QUEUE_PENDING, "キューの待ち", merge_hub.HEAD, queue_entry="e2")
+
+    monkeypatch.setattr(hub, "merge", merge)
+    _, result = _run(capsys, last_result, "--production-gate", "stale", *APPROVED)
+
+    assert hub.dequeued == [7] and result["cause"]["kind"] == "approval_stale"

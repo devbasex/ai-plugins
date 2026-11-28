@@ -122,6 +122,7 @@ def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued:
     # キュー必須の基底は直接のマージを 405 で断る。HEAD のままキューへ入れ、実際のマージまでは ci_pending で待つ。
     # 版上げの PR（jump）は先頭へ入れる（#3672 の決定 18）
     state = {"data": {"repository": {"pullRequest": {"id": "PR_7", "isMergeQueueEnabled": True, "isInMergeQueue": in_queue}}}}
+    state["data"]["repository"]["pullRequest"]["mergeQueueEntry"] = {"id": "e1"} if in_queue else None
     server = Server({
         ("GET", f"/repos/{REPO}/pulls/7"): [httpx.Response(200, json=_pull())],
         ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(405, json={"message": "merge queue"})],
@@ -130,6 +131,7 @@ def test_merge_enqueues_when_base_requires_merge_queue(in_queue: bool, enqueued:
     out = _hub(server).merge(7, jump=jump)
     assert (out.merged, out.kind) == (False, "ci_pending")
     assert out.added_to_queue is (enqueued == 1)
+    assert out.queue_entry == ("e1" if in_queue else "")
     mutations = [json.loads(r.content) for r in server.sent("POST") if b"enqueuePullRequest" in r.content]
     assert len(mutations) == enqueued
     if enqueued:
