@@ -210,13 +210,15 @@ def test_trusted_authors(author: str, author_id: int, association: str, permissi
 
 
 def test_the_record_reads_back_what_it_writes_and_a_broken_body_is_empty() -> None:
-    entries = {"abc": {"at": "t", "url": f"{ISSUES}7"}, "def": {}}
-    assert leftover_decide.record_entries(leftover_decide.record_body(entries, ISSUES), ISSUES) == entries
+    entries = {"0123456789ab": {"at": "2026-11-27T00:00:01Z", "url": f"{ISSUES}7"}, "ba9876543210": {}}
+    body = leftover_decide.record_body(entries, ISSUES)
+    assert leftover_decide.record_entries(body, ISSUES) == entries and "github.com" not in body
     assert leftover_decide.record_entries(leftover_decide.record_body({}, ISSUES), ISSUES) == {}
     assert leftover_decide.record_entries(leftover_decide.RECORD_MARK + "\n壊れた本文", ISSUES) == {}
-    # 所有者名を伏せても、番号から URL を組み直せる
-    hidden = leftover_decide.record_body(entries, ISSUES, lambda text: text.replace("/o/", "/x/"))
-    assert leftover_decide.record_entries(hidden, ISSUES) == entries and "github.com" not in hidden
+    # 形の違う識別値・時刻・URL は書かない
+    odd = {"秘密の文": {}, "0123456789ab": {"at": "秘密の文", "url": "https://example.com/秘密の文"}}
+    written = leftover_decide.record_body(odd, ISSUES)
+    assert "秘密の文" not in written and leftover_decide.record_entries(written, ISSUES) == {"0123456789ab": {}}
 
 
 # --- 起票 ----------------------------------------------------------------------------------
@@ -276,6 +278,18 @@ def test_the_marks_survive_an_account_named_like_them() -> None:
     # 伏せないのは NDF が足した目印だけで、指摘の本文の同じ形は伏せる
     made = github.issues[0]
     assert "<!-- ndf:" not in made["title"] and made["body"].count("<!-- ndf:") == 1
+
+
+@pytest.mark.parametrize("account", [pytest.param("number", id="record-key"), pytest.param("100", id="issue-number")])
+def test_issue_3780_the_record_survives_an_account_named_like_its_content(account: str) -> None:
+    github = FakeGitHub()
+    for _ in range(2):
+        run = Run(github)
+        run.port.publisher = publish.Publisher(github, frozenset({account}))
+        assert run.go() == [] and run.row[Filed.URL] == f"{ISSUES}100"
+    ident = leftover_decide.identity(7, run.row["text"])
+    assert leftover_decide.record_entries(github.records[0]["body"], ISSUES)[ident]["url"] == f"{ISSUES}100"
+    assert github.created() == 1
 
 
 def test_recorded_issues_are_read_together() -> None:

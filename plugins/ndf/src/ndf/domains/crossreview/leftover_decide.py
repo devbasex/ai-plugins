@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from enum import StrEnum
 from typing import Any, NamedTuple, Optional
 
@@ -30,6 +30,9 @@ _ENTRY = ndf_identity.FIXED_WORDS["entrypoint"]
 # 起票の記録のコメントの先頭の目印と、記録の中身を埋める最後の行の前
 RECORD_MARK = f"<!-- {_ENTRY}:cross-review-leftover-record -->"
 _ENTRIES_MARK = f"<!-- {_ENTRY}:cross-review-leftover-entries "
+# 起票の記録に書く識別値（`identity`）と時刻（GitHub の ISO 8601）の形
+_IDENT = re.compile(r"[0-9a-f]{12}")
+_AT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})")
 # 本文の先頭の `<名前>:<行>`
 _LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
 
@@ -227,19 +230,23 @@ def _issue_number(url: str, issues_url: str) -> Optional[int]:
     return int(tail) if head.lower() == issues_url.lower() and tail.isdecimal() else None
 
 
-def record_body(entries: Mapping[str, Mapping[str, Any]], issues_url: str, redact: Callable[[str], str] = str) -> str:
-    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at` と Issue の番号 `number`）。URL は書かず番号にする
-    （URL の所有者名は手元のアカウント名と同じだと伏せられ、読み戻せない）。`redact`（伏せ字）は中身にだけ当て、
-    目印は当てた後に付ける。"""
+def record_body(entries: Mapping[str, Mapping[str, Any]], issues_url: str) -> str:
+    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at` と Issue の番号 `number`）。
+
+    伏せ字には通さない。通すと、手元のアカウント名が `number` や番号と同じ数字のときにキーや値が置き換わり、読み戻せない。
+    代わりに、固定の文とキーに、形を確かめた識別値・時刻・番号だけを足して組む（形の違う値は書かない）。URL は番号にする。"""
     stored: dict[str, dict[str, Any]] = {}
     for ident, entry in entries.items():
-        stored[ident] = {k: v for k, v in entry.items() if k != "url"}
+        if not _IDENT.fullmatch(ident):
+            continue
+        stored[ident] = {}
+        if "at" in entry and _AT.fullmatch(entry["at"]):
+            stored[ident]["at"] = entry["at"]
         number = _issue_number(entry["url"], issues_url) if "url" in entry else None
         if number is not None:
             stored[ident]["number"] = number
-    payload = redact(json.dumps(stored, sort_keys=True))
-    note = redact("cross-review が起票を試みた指摘の記録（同じ指摘を 2 件起票しないために読む。書き換えない）。")
-    return f"{RECORD_MARK}\n{note}\n\n{_ENTRIES_MARK}{payload} -->"
+    note = "cross-review が起票を試みた指摘の記録（同じ指摘を 2 件起票しないために読む。書き換えない）。"
+    return f"{RECORD_MARK}\n{note}\n\n{_ENTRIES_MARK}{json.dumps(stored, sort_keys=True)} -->"
 
 
 def _entry(stored: Mapping[str, Any], issues_url: str) -> dict[str, Any]:

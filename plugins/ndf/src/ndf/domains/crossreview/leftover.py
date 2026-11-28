@@ -311,7 +311,7 @@ class _Filing:
 
     def write(self) -> str:
         """起票の記録を書き、GitHub が記録した更新時刻を返す。"""
-        body = leftover_decide.record_body(self.entries, self.port.issues_url(), lambda text: self.port.redact(text)[0])
+        body = leftover_decide.record_body(self.entries, self.port.issues_url())
         if self.record_id is None:
             self.record_id, at = self.port.post(self.ref.origin_pr, body)
         else:
@@ -460,7 +460,7 @@ def _listed_node(node: Mapping[str, Any]) -> Listed:
 
 class GitHubIssues:
     """GitHub の API で起票を読み書きする `Port`。Issue は `publish.Publisher` の検査を通し、記録のコメントは呼び手が
-    中身を検査した本文を書く。書き込みは二次レート制限なら待って打ち直す（`threads.patient`）。"""
+    固定の文と形を確かめた値で組んだ本文を書く。書き込みは二次レート制限なら待って打ち直す（`threads.patient`）。"""
 
     def __init__(
         self,

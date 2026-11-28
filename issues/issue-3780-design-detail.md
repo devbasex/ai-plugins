@@ -322,7 +322,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `matches_finding` | `leftover_decide.py` | 新設 | `matches_finding(listed: Listed, ident: str, origin_pr: int) -> bool` | 検索か一覧で読んだ Issue がこの指摘を扱うものか（設計の「起票の形」の条件） |
 | `names_finding` | `leftover_decide.py` | 新設 | `names_finding(listed: Listed, ident: str) -> bool` | 起票の記録にある URL の Issue がこの指摘のものか（Pull Request でなく、本文に目印がある） |
 | `record_entries` | `leftover_decide.py` | 新設 | `record_entries(body: str, issues_url: str) -> dict[str, dict[str, Any]]` | 起票の記録の本文から、識別値ごとの `at` と `url`（どちらも無いことがある）を読む。`url` は `issues_url` と番号から組む |
-| `record_body` | `leftover_decide.py` | 新設 | `record_body(entries: Mapping[str, Mapping[str, Any]], issues_url: str, redact: Callable[[str], str] = str) -> str` | 起票の記録の本文を組む。`issues_url` で始まる `url` は番号にして書き、ほかの URL は書かない。伏せ字（`redact`）は中身にだけ当て、目印には当てない（マーカー `<!-- ndf:cross-review-leftover-record -->` で始める） |
+| `record_body` | `leftover_decide.py` | 新設 | `record_body(entries: Mapping[str, Mapping[str, Any]], issues_url: str) -> str` | 起票の記録の本文を組む。本文はマーカー `<!-- ndf:cross-review-leftover-record -->` で始める。固定の文とキーに、形を確かめた識別値（12 桁の 16 進数）・時刻（ISO 8601）・Issue の番号だけを足し、形の違う値は書かない。`issues_url` で始まる `url` は番号にして書き、ほかの URL は書かない。本文は伏せ字に通さない。手元のアカウント名が `number` や番号と同じ数字だと、キーや値が置き換わって読み戻せなくなるためである |
 | `result_fields` | `leftover_decide.py` | 新設 | `result_fields(row: Mapping[str, Any], comment_url: Optional[str]) -> dict[str, str]` | 結果の `items` に足す `disposition` と `url`（残さない行は空） |
 | `summary_line` | `leftover_decide.py` | 新設 | `summary_line(rows: Sequence[Mapping[str, Any]]) -> Optional[str]` | 「残した指摘 N（起票 M）」。残した指摘が無ければ None |
 | `decisions` | `leftover_decide.py` | 新設 | `decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> list[dict[str, str]]` | MVV に反する残した指摘を、番号・MVV の項目・URL の判断にする |
@@ -408,7 +408,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 | `issues_url()` | このリポジトリの Issue の URL の、番号より前 | 呼ばない（リポジトリ名から組む） |
 | `redact(*texts)` | 伏せた値の並び | `publish.Publisher.guarded` |
 | `comments(pr)`・`comment(id)` | コメント（番号・本文・投稿者とそのアカウント ID・更新時刻） | issue comments の GET。`comments` はページごとに読んで返し、呼び手が記録を見つけたら後のページを取らない |
-| `post(pr, body)`・`edit(id, body)` | 番号と応答の更新時刻 | POST・PATCH（`threads.patient` を通す）。`body` は `record_body` が中身を伏せた値 |
+| `post(pr, body)`・`edit(id, body)` | 番号と応答の更新時刻 | POST・PATCH（`threads.patient` を通す）。`body` は `record_body` が形を確かめた値だけで組んだ本文 |
 | `search(ident)` | `Listed` の並び | `GET search/issues` |
 | `recent(since)` | 作成時刻が `since` 以後（同じ時刻を含む）の `Listed` の並び（超えれば、読めた分を持つ `TooMany`） | `GET repos/{repo}/issues?sort=created`。上限は `github.list-pages` |
 | `issues(urls)` | URL ごとの、このリポジトリの Issue の `Listed`。別の場所の URL と無い Issue は None | GraphQL のまとめ読み（`GitHub.nodes`。`github.graphql-batch` 件ごとに 1 回） |
@@ -434,7 +434,7 @@ PR 1 件の大きさでは短縮はわずかで、効くのは変わったファ
 `file_issues` は、設計の「起票の形」の順で進む。指摘の行に `issue` があるものは起票しない。起票の記録は元の PR の専用のコメントで、本文に識別値ごとの `at`（試みた時刻）と `number`（Issue の番号）を持つ。読むときに番号から対象リポジトリの Issue の URL を組み立てる。以下の手順の `url` は、この組み立てた URL である。コメントの番号は状態ファイルの `issue_record_id` に置く。1 回の公開で記録を書くのは、作成の前の 1 回と結果の 1 回である。
 
 1. 記録を読む（本文とコメントの更新時刻）。`at` の無い識別値には、読んだ更新時刻を `at` として当てる
-2. `url` のある識別値は、指す Issue をまとめて読み、作者を信用できるかを確かめる。Issue の取得か作者の権限の照会に失敗した場合は、URL のある識別値をどれも起票せず、URL を記録に残したまま `issue_error` に理由を書いて保留する（順 3 の検索にも起票にも進まない）。どちらも成功した場合、URL が同じリポジトリの Issue を指し、作者を信用でき、本文に識別値の目印があれば、起票せずその URL を使う。目印の位置と元の PR の URL は問わない。満たさなければ `url` を捨て、順 3 で確かめる
+2. `url` のある識別値は、指す Issue をまとめて読み、作者を信用できるかを確かめる。Issue の取得か作者の権限の照会に失敗した場合（`GitHubError` が返る通信の失敗・5xx・利用上限など）は、URL のある識別値をどれも起票せず、URL を記録に残したまま `issue_error` に理由を書いて保留する（順 3 の検索にも起票にも進まない）。権限の照会の応答が利用上限によらない 403・404 の場合は、失敗に数えない。`GitHub.permission` がこの応答を権限なし（`none`）として返すので、その作者は信用しない。どちらも失敗しなかった場合、URL が同じリポジトリの Issue を指し、作者を信用でき、本文に識別値の目印があれば、起票せずその URL を使う。目印の位置と元の PR の URL は問わない。満たさなければ `url` を捨て、順 3 で確かめる
 3. `url` の無い識別値（作成の結果が分からないもの）は、識別値で検索し、無ければ作成時刻が `at` 以後の Issue の一覧を読む
 4. 1 回目の書き込み: 記録に無い識別値と、順 3 でどちらにも無いと確認できた識別値を、`at` と `url` の無い項目として書く。試みた時刻はこの書き込みの応答の更新時刻なので、この本文には入れられない。書けなければ作らない
 5. 順 4 で書いた識別値の Issue を作る
