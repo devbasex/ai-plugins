@@ -293,9 +293,7 @@ def test_issue_3780_2_run_fills_an_unconfirmed_repository(
     assert store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
 
 
-def test_issue_3780_2_run_does_not_bind_saved_rounds_to_the_read_repository(
-    wt: Path, tmp_path: Path, capsys, monkeypatch, hub
-) -> None:
+def test_issue_3780_2_run_does_not_bind_saved_rounds_to_the_read_repository(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """対象のリポジトリの無い保存済みのラウンドは、同じブランチと head でも別のリポジトリのものかもしれないので、結び直さずに止める。"""
     read = threads.ReadPr(f"other/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "other/r")
     monkeypatch.setattr(hub.port, "read_pr", lambda: read)
