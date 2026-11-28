@@ -719,6 +719,20 @@ def _fetched_tip(g: Git, remote: str, branch: str) -> Optional[tuple[str, str]]:
     )
 
 
+def fetched_has_headings(g: Git, remote: str, branch: str, issues: Sequence[int]) -> bool:
+    """手元の HEAD の実装計画に単位の欄が無いときの、取得先の確かめ。取得先の実装計画に欄があるか。
+
+    取得できなければ真を返し、開始前の確かめに理由を返して止めさせる（欄が無いと確かめずに、課題全体の実装を流さない）。
+    """
+    try:
+        fetched = _fetched_tip(g, remote, branch)
+    except UnitsStopped:
+        return True
+    if fetched is None or fetched[0] == fetched[1]:
+        return False
+    return seen_at(g, fetched[1], issues).has_headings()
+
+
 def read_start(
     g: Git,
     remote: str,
@@ -728,33 +742,21 @@ def read_start(
 ) -> Start:
     """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
 
-    `destination` があれば（変換するスプリント）、確かめた送り先の URL から取得する。送り先の確かめか URL からの取得に
-    失敗したときは、手元に単位の欄があれば止める。無ければリモート名で取得し直し、取得先に単位の欄があれば手元を進めずに、
-    その失敗で止める。
+    取得はリモート名で行う。`destination` があり（変換しうるスプリント）単位の欄が見つかったときだけ、確かめた送り先の
+    URL から HEAD を読む。手元に欄があればリモート名では取得せず、取得先にだけあれば送り先の HEAD で読み直す。
+    変換しないスプリントは送り先を使わないので、取得と push で認証の経路が違っても止まらず、通信も増えない。
     """
     here = None if destination is None else seen_at(g, "HEAD", issues)
-    checked_to = None
-    fetched = None
-    failed = None
-    by_name = branch is not None
-    if destination is not None and here is not None and branch is not None:
-        try:
-            url, found = destination(g, branch)
-        except UnitsStopped as exc:
-            # 変換しないスプリントは、送り先を使えなくても止めない（取得と push で認証の経路が違うことがある）
-            if here.has_headings():
-                raise
-            failed = exc
-        else:
-            by_name = False
-            checked_to = (url, found)
-            if found is not None:
-                fetched = (g.rev_parse("HEAD"), found)
-    if by_name and branch is not None:
-        fetched = _fetched_tip(g, remote, branch)
+    local_headings = here is not None and here.has_headings()
+    fetched = None if branch is None or local_headings else _fetched_tip(g, remote, branch)
     head, tip = fetched if fetched is not None else ("HEAD", None)
     at_head = here if here is not None else seen_at(g, head, issues)
     at_tip = at_head if tip is None or tip == head else seen_at(g, tip, issues)
-    if failed is not None and at_tip.has_headings():
-        raise failed
+    checked_to = None
+    if destination is not None and branch is not None and (local_headings or at_tip.has_headings()):
+        url, found = destination(g, branch)
+        checked_to = (url, found)
+        if found != tip:
+            head, tip = (g.rev_parse("HEAD"), found) if found is not None else ("HEAD", None)
+            at_tip = at_head if found is None or found == head else seen_at(g, found, issues)
     return Start(head, tip, at_head, at_tip, checked_to)

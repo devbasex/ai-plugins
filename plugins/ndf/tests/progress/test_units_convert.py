@@ -738,8 +738,8 @@ def test_a_behind_branch_moves_only_when_no_reapproval_is_asked(tmp_path, monkey
 @pytest.mark.parametrize(
     ("outcome", "by_name", "checked_to"),
     [
-        pytest.param(UNREADABLE, ["origin"], None, id="送り先を読めなければリモート名で取得する"),
-        pytest.param((URL, None), [], (URL, None), id="送り先にブランチが無いことを持ち回る"),
+        pytest.param(UNREADABLE, ["origin"], None, id="送り先を読めなくてもリモート名の取得で続ける"),
+        pytest.param((URL, "tip"), ["origin"], None, id="欄が無ければ送り先を読まない"),
     ],
 )
 def test_the_start_of_a_sprint_without_unit_headings(outcome, by_name, checked_to):

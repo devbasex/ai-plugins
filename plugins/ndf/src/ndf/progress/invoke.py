@@ -590,7 +590,10 @@ class PreparedPlan(NamedTuple):
 
 
 def by_units(run: StageRun, cwd: Path) -> bool:
-    """単位を流す処理へ渡すか。`per_unit` の無い定義のスプリントは、作業場所の実装計画に単位の欄があるとき（#3702 の決定 10）。"""
+    """単位を流す処理へ渡すか。`per_unit` の無い定義のスプリントは、実装計画に単位の欄があるとき（#3702 の決定 10）。
+
+    作業場所の実装計画に欄が無ければ、今いるブランチを取得して取得先の実装計画も確かめる。
+    """
     if run.per_unit or run.sprint is None or run.sprint.convert is None:
         return run.per_unit
     g = git.Git(work_location(run, cwd))
@@ -599,9 +602,12 @@ def by_units(run: StageRun, cwd: Path) -> bool:
         root = Path(g.run("rev-parse", "--show-toplevel").strip())
         changed = [p for p in g.status_paths() if units_flow.is_sprint_plan(p, issues)]
         plans = [*units_flow.plans_at(g, "HEAD", issues)[0], *units_flow.worktree_plans(root, changed)]
+        if any(has_units(p.text) for p in plans):
+            return True
+        branch = g.run("branch", "--show-current").strip()
+        return branch != "" and units_flow.fetched_has_headings(g, g.remote(), branch, issues)
     except GitError:  # noqa: NDF401 外部コマンド: 読めない作業場所は、単位に分けない経路が理由を返す
         return False
-    return any(has_units(p.text) for p in plans)
 
 
 def _add_registered_branch(run: StageRun) -> StageRun:

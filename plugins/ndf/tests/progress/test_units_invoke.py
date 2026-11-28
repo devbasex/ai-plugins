@@ -257,6 +257,24 @@ def test_a_lagging_worktree_is_moved_forward_and_reads_the_units_added_on_the_re
     assert _git(sprint, "rev-parse", "HEAD") == _git(other, "rev-parse", "HEAD")
 
 
+def test_units_only_on_the_remote_send_an_older_definition_to_the_conversion(sprint, tmp_path):
+    other = _clone(sprint, tmp_path)
+    _commit_plan(other, PLAN_WITH_UNITS)
+    _git(other, "push", "-q", "origin", f"HEAD:refs/heads/{BRANCH}")
+    asked: list[str] = []
+
+    def destination(g, branch):
+        asked.append(branch)
+        return str(sprint.parent / "remote.git"), _remote_head(sprint)
+
+    plan = plan_runs.SprintPlan(convert=lambda *args: pytest.fail("起動の前は変換しない"), destination=destination, branch=BRANCH)
+    stage_run = replace(_run(sprint), per_unit=False, sprint=plan)
+
+    # 通常の入口の振り分け（by_units）を通り、単位に分けないプランは組まない
+    assert invoke.prepare_plan(stage_run, tmp_path / "w", sprint) is None
+    assert asked == [BRANCH]
+
+
 def test_a_worktree_diverged_from_the_remote_stops(sprint, tmp_path):
     other = _clone(sprint, tmp_path)
     _git(other, "commit", "-q", "--allow-empty", "-m", "elsewhere")
