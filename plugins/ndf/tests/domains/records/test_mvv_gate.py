@@ -17,7 +17,7 @@ import git_sandbox
 import pytest
 
 from ndf import contracts, identity
-from ndf.adapters.github import FileAt
+from ndf.adapters.github import Authored, FileAt, Viewer
 from ndf.adapters import git, github, llm
 from ndf.contracts import causes
 from ndf.contracts.internal import InternalError
@@ -144,6 +144,18 @@ class Hub:
         head = moved.get("head", self.case.get("head", HEAD))
         base = moved.get("base", "main")
         return SimpleNamespace(body=moved.get("body", self.case["body"]), head_sha=head, base_ref=base, number=number)
+
+    def viewer(self) -> Viewer:
+        return Viewer("octocat", 1)
+
+    def comments(self, number: int) -> list[Authored]:
+        return list(self.case.get("comments", []))
+
+    def comment_pages(self, number: int):
+        """1 ページ目は `comments`。`case["next_page"]` は、次のページを読むと投げる例外。"""
+        yield self.comments(number)
+        if "next_page" in self.case:
+            raise self.case["next_page"]
 
     def branch_file(self, base: str, path: str) -> FileAt:
         """マージ先 main の設定（自動反映の本番チャネル。#4409）。"""
@@ -677,3 +689,32 @@ def test_a_repository_without_an_approved_mvv_keeps_a_null_verdict(repo: Path, n
     inputs = invoke.resolve_inputs(definition.load_definition("standard").stage("設計"), full)
     out = mvv_gate.gate(repo, "design", inputs, _hub(5, DOCS), ask)
     assert out["skip"] is False and out["verdict"] is None and ask.calls == [] and notes == []
+
+
+# --- #4520 決定 7: 同じ入力と結論の打ち直しで、判定のコメントを増やさない ------------------------------------
+
+
+def _as_posted(notes: list[tuple[int, str]], author_id: int = 1, edited: bool = False) -> list[Authored]:
+    """投稿した判定の記録を、PR のコメントの一覧の形にする。"""
+    return [
+        Authored("octocat", "OWNER", body, author_id=author_id, edited=edited, url=f"https://github.com/o/r/pull/{n}#issuecomment-{i}")
+        for i, (n, body) in enumerate(notes, 1)
+    ]
+
+
+def test_the_same_judgement_reuses_its_comment(repo: Path, notes: list[tuple[int, str]]) -> None:
+    first = mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
+    posted = {**DOCS, "comments": _as_posted(notes), "next_page": AssertionError("記録を見つけた後のページを読んだ")}
+    # 理由の文だけが違う（進め方が違う）打ち直しは、前のコメントを使う
+    again = mvv_gate.gate(repo, "design", {**_inputs(), mvv_gate.NO_SKIP: False}, _hub(5, posted), Ask(FOLLOW))
+    assert len(notes) == 1 and again["note_url"] == first["note_url"] and again["noted"] is True
+
+
+@pytest.mark.parametrize("changed", ["head", "conclusion", "writer", "edited"])
+def test_a_different_judgement_posts_a_new_comment(repo: Path, notes: list[tuple[int, str]], changed: str) -> None:
+    mvv_gate.gate(repo, "design", _inputs(), _hub(5, DOCS), Ask(FOLLOW))
+    posted = _as_posted(notes, author_id=2 if changed == "writer" else 1, edited=changed == "edited")
+    case = {**DOCS, "comments": posted, **({"head": "i" * 40} if changed == "head" else {})}
+    inputs = {**_inputs(), mvv_gate.NO_SKIP: True} if changed == "conclusion" else _inputs()
+    mvv_gate.gate(repo, "design", inputs, _hub(5, case), Ask(FOLLOW))
+    assert len(notes) == 2

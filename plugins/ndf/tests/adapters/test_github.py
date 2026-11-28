@@ -502,6 +502,13 @@ def test_comments_read_every_page_and_stop_over_the_limit(monkeypatch: pytest.Mo
         _hub(full).comments(7)
 
 
+def test_comment_pages_requests_no_page_the_caller_does_not_take() -> None:
+    one = {"user": {"login": "a"}, "author_association": "OWNER", "body": "b"}
+    server = Server({("GET", f"/repos/{REPO}/issues/7/comments"): [httpx.Response(200, json=[one] * 100)]})
+    assert len(next(_hub(server).comment_pages(7))) == 100
+    assert [r.url.params["page"] for r in server.seen] == ["1"]
+
+
 def test_branch_rules_read_every_page_and_stop_over_the_limit() -> None:
     """#3506: 必須のチェックの規則が 2 ページ目にあっても落とさない。上限を超えたら途中で切らずに止まる。"""
     review = {"type": "pull_request", "parameters": {"required_approving_review_count": 1}}

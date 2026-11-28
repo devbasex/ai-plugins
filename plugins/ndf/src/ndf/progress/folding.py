@@ -47,6 +47,7 @@ class StepProgress:
     打つと、プランは終わった回のバックアップの結果を返すだけだからである）。`redo` は工程全体の出力が規約に合わずに行が失敗したか。
     真なら次の開始（`retry` の後）で終わったステップの記録を無効にし、ステップを初めから流し直す（同じ出力を照らし直すだけにしない）。
     `held_finish` は手で終えて承認を待つ記録（事象 `finish_held` の payload）。待つ間は次のステップを承認ゲートにする。
+    `hand_judged` は手の経路の `finish` が打った MVV 判定を持つステップ（`done` に置く）。流し直しには使わない。
     """
 
     generation: int = 0
@@ -64,6 +65,7 @@ class StepProgress:
     finished_at: dict[str, int] = field(default_factory=dict)
     again: list[dict[str, Any]] = field(default_factory=list)
     held_finish: Optional[dict[str, Any]] = None
+    hand_judged: Optional[str] = None
     # `answer` の後に却下か変更要求の投稿を試みた承認ゲートの区分（`approval_decide.rejection_posted_after` と同じ失効条件）
     rejecting: set[Optional[str]] = field(default_factory=set)
 
@@ -87,6 +89,9 @@ class StepProgress:
     def _started(self, ev: model.Event, _p: dict[str, Any]) -> None:
         """行の開始。数え始めをここへ移し、失敗の後の開始なら打ち直しを数える（出力の失敗なら済んだステップも捨てる）。"""
         self.anchor, self.answer, self.waiting, self.held_finish = ev.seq, None, None, None
+        if self.hand_judged is not None:
+            self.done.pop(self.hand_judged, None)
+            self.hand_judged = None
         if self.failed:
             self.retries += 1
             self.done = {} if self.redo else self.done
@@ -119,11 +124,20 @@ class StepProgress:
         self.retries, self.done, self.waiting, self.answer, self.anchor = 0, {}, None, None, ev.seq
         self.failed = self.redo = False
         self.held, self.resets, self.finished_at, self.again = set(), {}, {}, []
-        self.notes, self.held_finish = p.get("notes"), None
+        self.notes, self.held_finish, self.hand_judged = p.get("notes"), None, None
 
     def _finish_held(self, ev: model.Event, p: dict[str, Any]) -> None:
-        """手で終えた回答待ち。次のステップを承認ゲートにして、回答の数え始めをここへ移す。"""
+        """手で終えた回答待ち。次のステップを承認ゲートにして、回答の数え始めをここへ移す。
+
+        設計の工程は判定のステップの記録（`judged`）を持つ。前に流した判定は捨て、`finish` の判定があればそれに置き換える。"""
         self._void_gate(p["step"])
+        judged = p.get("judged")
+        if judged is not None:
+            self.done.pop(judged["step"], None)
+            self.hand_judged = None
+            if judged["report"] is not None:
+                self.done[judged["step"]], self.hand_judged = judged["report"], judged["step"]
+                self.finished_at[judged["step"]] = ev.seq
         self.held_finish, self.waiting, self.answer, self.anchor = p, None, None, ev.seq
 
     def _void_gate(self, gate: str) -> None:
@@ -147,7 +161,7 @@ class StepProgress:
         if p["answer"] == REQUEST_CHANGES and p["kind"] == invoke.LISTEN:
             self.generation += 1
             self.done, self.waiting, self.answer, self.anchor = {}, None, None, ev.seq
-            self.held, self.again, self.held_finish = set(), [], None
+            self.held, self.again, self.held_finish, self.hand_judged = set(), [], None, None
             self.notes = p["notes"]
         elif ev.seq > self.anchor:
             self.answer, self.rejecting = ev, set()

@@ -274,13 +274,11 @@ OTHER_PR = "判定する PR が承認する PR と違うので判定しない"
 
 
 def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    if args.expect_pr is not None and args.gate != mvv_gate.RELEASE:
-        return result.stopped(TOOL, "invalid", f"--expect-pr は --gate {mvv_gate.RELEASE} のときだけ渡せる")
     try:
         inputs = _mvv_inputs(args, root)
     except _InputError as exc:
         return exc.stopped if exc.stopped is not None else result.stopped(TOOL, exc.kind, exc.summary)
-    if args.expect_pr is not None:
+    if args.expect_pr is not None and args.gate == mvv_gate.RELEASE:
         # 判定に使う入力そのものと比べる（gate の中は変えない）。比べるだけなので GitHub へつながない
         try:
             judged: int | None = mvv_gate.release_pr(inputs)
@@ -291,7 +289,13 @@ def _mvv_gate(args: argparse.Namespace, root: Path) -> dict[str, Any]:
     warnings: list[dict[str, Any]] = []
     if args.no_skip:
         inputs = {**inputs, mvv_gate.NO_SKIP: True}
-    out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
+    if args.expect_pr is not None:
+        # 設計の判定する PR は作業場所のブランチで決まるので、gate の中で PR の中身を読む前に比べる
+        inputs = {**inputs, mvv_gate.EXPECT_PR: args.expect_pr}
+    try:
+        out = mvv_gate.gate(root, args.gate, inputs, _hub, warnings=warnings)
+    except mvv_gate.OtherPull:
+        return result.stopped(TOOL, "not_applicable", OTHER_PR)
     summary = "MVV 判定で承認ゲートを省く" if out["skip"] else "承認ゲートを人へ問う: " + " / ".join(out["why"])
     return result.result(TOOL, result.OK, summary, warnings, outputs={model.MVV_KEY: out})
 
@@ -493,8 +497,9 @@ def _add_mvv(sub: Any) -> None:
         "--expect-pr",
         type=int,
         default=None,
-        help="承認する PR の番号（--gate release のときだけ）。判定に使う入力の PR と違えば、PR を読まず判定もコメントもせずに"
-        " not_applicable で止まる",
+        help="承認する PR の番号。判定に使う PR（release は入力の pr。design は入力の worktree のブランチの開いた PR で、"
+        "worktree が無ければ対象のリポジトリのルートのブランチの開いた PR）と違えば、PR の中身を読まず判定もコメントもせずに "
+        "not_applicable で止まる",
     )
     gate.add_argument("--no-skip", action="store_true", help="承認ゲートを省かない（承認でない回答が残るとき）")
     gate.set_defaults(handler=_mvv_gate)

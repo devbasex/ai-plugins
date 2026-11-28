@@ -9,7 +9,7 @@ import argparse
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Optional
 
@@ -22,8 +22,20 @@ from ndf.progress.gate.answering import github_observe, shared_hub
 from ndf.progress.gate.asking import check_stage_pr, gate_result, gate_stage, off_wait_question, pr_url, question, show_question
 from ndf.progress.gate.rechecking import standing
 from ndf.progress.gate.targets import TargetReader
-from ndf.progress.run_view import FINISH_HELD
+from ndf.progress.run_view import FINISH_HELD, work_root
 from ndf.progress.records import github_records, sync_records
+
+# 手で終える操作が MVV 判定のステップを打つ口。テストは差し替える
+judge_invoker: run.Invoker = invoke.invoke
+
+
+@dataclass
+class _Judgement:
+    """手で終える工程の MVV 判定。追記の打ち直しでは打ち直さない（`done` が真なら `report` を使う）。"""
+
+    done: bool = False
+    report: Optional[dict[str, Any]] = None
+    warnings: tuple[str, ...] = ()
 
 
 def revoker(get_hub: Callable[[], GitHub], not_done: str) -> reopening.Revoke:
@@ -285,39 +297,95 @@ def _cmd_off_wait(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str
     return ask_question(st, a.machine_id, a.stage, a.pr, cwd)
 
 
-def _finish_drafts(a: argparse.Namespace, v: run.View, read: _StageOutput, held: bool) -> tuple[list[model.EventDraft], list[str]]:
+def _judge_step(stage: stages.StageDef) -> Optional[stages.StepDef]:
+    """工程の設計の MVV 判定のステップ。無ければ None（デプロイの判定は supervisor が打つ）。"""
+    found = model.MVV_GATE_STEPS[approval_decide.DESIGN_GATE]
+    return next((s for s in stage.steps if s.id == found), None)
+
+
+def _judge_design(st: store.Store, v: run.View, read: _StageOutput, cwd: Path) -> _Judgement:
+    """設計の工程の MVV 判定のステップを、自動の流れと同じく入力の作業場所で打つ（#4520 の決定 7）。承認の対象の PR を
+    `--expect-pr` で渡す。打てない・失敗した判定は結果を持たず、人へ問う。"""
+    step = _judge_step(read.stage)
+    assert step is not None
+    failed = "MVV 判定をできないので、承認は人へ問う: "
+    # 手で書いた出力の値を、文脈より先に判定の入力と対象にする
+    context = {**v.context(), **read.outputs}
+    pr = approval_decide.gate_pr(context, read.stage, {}, approval_decide.DESIGN_GATE, by_hand=True)
+    if pr is None:
+        return _Judgement(True, warnings=(failed + "設計 PR の番号が無い",))
+    try:
+        inputs = invoke.resolve_inputs(read.stage, context)
+    except invoke.StageInputError as exc:
+        return _Judgement(True, warnings=(failed + str(exc),))
+    made = invoke.stage_run(read.stage, step, inputs)
+    made = replace(made, args={**made.args, "argv": [*made.args["argv"], "--expect-pr", str(pr)]})
+    made = run.kept_by_objection(v, read.stage, step, made)
+    location = run.step_location(step.id, run.step_progress(v, read.stage.name))
+    got = judge_invoker(made, cwd, work_root(st.root, v.machine_id) / read.stage.id / location, None)
+    if got.status != result.OK:
+        why = got.cause["detail"] if got.cause is not None else "判定のステップが終わらない"
+        return _Judgement(True, warnings=(*got.warnings, failed + why))
+    errs = definition.validate_io(step.output_ref, got.report) if step.output_ref else []
+    if errs or model.MVV_KEY not in got.outputs:
+        return _Judgement(True, warnings=(*got.warnings, failed + "判定の結果が出力の規約に合わない " + "; ".join(errs)))
+    return _Judgement(True, got.report, tuple(got.warnings))
+
+
+def _finish_drafts(
+    a: argparse.Namespace, v: run.View, read: _StageOutput, held: bool, judged: Optional[_Judgement] = None
+) -> tuple[list[model.EventDraft], list[str]]:
     """手で終える事象（`held` なら回答待ちの `finish_held`）と、工程が流れたときと同じ形で出力を文脈へ書く事象
-    （後の工程と承認の対象が読む）。捨てた出力のキーの警告も返す。"""
+    （後の工程と承認の対象が読む）。捨てた出力のキーの警告も返す。
+
+    `judged` は回答待ちの工程の MVV 判定で、結果を回答待ちの事象に持たせ、出力にも書く。"""
     payload: dict[str, Any] = {"output": a.output}
+    outputs = read.outputs
     if held:
         payload["step"] = next(s.id for s in read.stage.steps if s.kind == stages.GATE_KIND)
+    step = _judge_step(read.stage) if held else None
+    if step is not None:
+        report = judged.report if judged is not None else None
+        payload["judged"] = {"step": step.id, "report": report}
+        if report is not None:
+            outputs = {**outputs, model.MVV_KEY: report["outputs"][model.MVV_KEY]}
     kind = FINISH_HELD if held else "manual_finished"
     done = model.EventDraft(kind, command.ACTOR, a.stage, reason=a.reason, payload=payload, rev=v.rev)
-    draft, dropped = stages.outputs_draft(read.stage, v.rev, read.outputs, command.ACTOR)
+    draft, dropped = stages.outputs_draft(read.stage, v.rev, outputs, command.ACTOR)
     return [done, *([draft] if draft is not None else [])], dropped
 
 
-def _hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput) -> tuple[bool, list[int], list[str]]:
+class _HandFinished(NamedTuple):
+    """承認ゲートを持つ工程を手で終えた結果。`held` は回答待ちを書いたか、`skips` は MVV 判定が承認を省くと決めたか。"""
+
+    held: bool
+    seqs: list[int]
+    dropped: list[str]
+    skips: bool = False
+
+
+def _hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput) -> _HandFinished:
     """承認ゲートを持つ工程を手で終える。有効な承認があれば終了、無ければ回答待ちを書く。
 
-    確かめから追記まで作業の排他を持つ。承認の回答は排他を取らないので、追記がぶつかれば読み直して決め直す。"""
+    確かめから MVV 判定、追記まで作業の排他を持つ。承認の回答は排他を取らないので、追記がぶつかれば読み直して決め直す。"""
     with reopening.work_stopped(st, a.machine_id):
         return _retried_hand_finish(a, cwd, st, read)
 
 
-def _retried_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput) -> tuple[bool, list[int], list[str]]:
-    """追記がぶつかる間（`command.append_attempts` 回まで）、読み直して決め直す。"""
+def _retried_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput) -> _HandFinished:
+    """追記がぶつかる間（`command.append_attempts` 回まで）、読み直して決め直す。MVV 判定は打ち直さない。"""
     attempts = command.append_attempts()
+    judged = _Judgement()
     for attempt in range(1, attempts + 1):
         try:
-            return _append_hand_finish(a, cwd, st, read)
+            return _append_hand_finish(a, cwd, st, read, judged)
         except store.Conflict:
             if attempt == attempts:
                 raise
     raise AssertionError("到達しない")
 
 
-def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput) -> tuple[bool, list[int], list[str]]:
+def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read: _StageOutput, judged: _Judgement) -> _HandFinished:
     """今の記録を読んで 1 回だけ決めて追記する。読んだ後に事象が増えていれば `store.Conflict`。"""
     v = run.read(st, a.machine_id)
     refused = _finish_refusal(v, a.stage)
@@ -326,14 +394,21 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
     held = _standing_answer(v, read, cwd, st.root) is None
     drafts, dropped = _finish_drafts(a, v, read, held)
 
-    def append() -> tuple[bool, list[int], list[str]]:
+    def append(skips: bool = False) -> _HandFinished:
         with store.transaction(st) as conn:
-            return held, store.append_events(conn, a.machine_id, drafts, v.events[-1].seq), dropped
+            return _HandFinished(held, store.append_events(conn, a.machine_id, drafts, v.events[-1].seq), dropped, skips)
 
     if not held:
         return append()
-    # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す。回答待ちを書けない状態なら、取り消す前に断る
+    # 回答待ちを書くと先の承認は境界の前になるので、PR の証跡も先に取り消す。回答待ちを書けない状態なら、判定と取り消しの前に断る
     model.check_event("sprint", model.rows_for("sprint", v.events, drafts[0]), v.whole, drafts[0])
+    skips = False
+    if _judge_step(read.stage) is not None:
+        if not judged.done:
+            got = _judge_design(st, v, read, cwd)
+            judged.done, judged.report, judged.warnings = got.done, got.report, got.warnings
+        drafts, dropped = _finish_drafts(a, v, read, held, judged)
+        skips = _skips(v, read.stage, judged)
     # 取り消してから追記するまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
     with store.approval_lock_after_answer(st, a.machine_id, time.sleep):
         with store.transaction(st) as conn:
@@ -341,16 +416,27 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
         if moved:
             raise store.Conflict("排他を待つ間に事象が増えた")  # 確定した回答を読み直して、取り消す前に決め直す
         revoker(shared_hub(cwd), "回答待ちを書かない")(approval_decide.stage_revocations(v, a.stage))
-        return append()
+        done = append(skips)
+    st.warnings.extend(judged.warnings)
+    return done
+
+
+def _skips(v: run.View, stage: stages.StageDef, judged: _Judgement) -> bool:
+    """次の `next` が MVV 判定で承認を省くか（`run.decide` が回答待ちで見る条件のうち、記録を書く前に分かるもの）。"""
+    step = _judge_step(stage)
+    gate = approval_decide.DESIGN_GATE
+    if step is None or judged.report is None or approval_decide.objection_remains(v.stage_events(stage.name), gate):
+        return False
+    return model.mvv_skip({step.id: judged.report}, step.id, gate) is not None
 
 
 def _cmd_finish(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
     read = _read_stage_output(a, st)
     if read.errors:
         raise model.Refused(f"{a.stage} の出力が規約に合わない: {'; '.join(read.errors)}")
-    held = False
+    held = skips = False
     if read.stage.gates:
-        held, seqs, dropped = _hand_finish(a, cwd, st, read)
+        held, seqs, dropped, skips = _hand_finish(a, cwd, st, read)
     else:
         dropped = []
 
@@ -369,6 +455,8 @@ def _cmd_finish(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, 
         summary = f"ステートマシン {a.machine_id} の {a.stage} に manual_finished を書いた"
         return result.result(command.TOOL, result.OK, summary, metrics=metrics)
     summary = f"工程 {a.stage} は承認の記録が無いので回答を待つ。ndf progress next {a.machine_id} で回答のコマンドを受け取る"
+    if skips:
+        summary = f"工程 {a.stage} は MVV 判定が承認を省くと決めた。承認は ndf progress next {a.machine_id} が記録する"
     return result.result(command.TOOL, result.OK, summary, metrics=metrics, next=result.command(command.TOOL, "next", a.machine_id))
 
 
