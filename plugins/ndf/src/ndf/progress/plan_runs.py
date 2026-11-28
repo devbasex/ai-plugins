@@ -29,8 +29,8 @@ class ConvertRequest(NamedTuple):
     omitted: tuple[int, ...]
     # 課題の受け入れ条件の数を数える
     count: Callable[[Sequence[int]], Mapping[int, int]]
-    # 開始前の確かめが確かめて読んだ（送り先の URL, スプリントブランチの HEAD）。無ければ変換が読む
-    destination: Optional[tuple[str, str]] = None
+    # 開始前の確かめが確かめて読んだ（送り先の URL, スプリントブランチの HEAD。ブランチが無ければ None）。無ければ変換が読む
+    destination: Optional[tuple[str, Optional[str]]] = None
 
 
 @dataclass(frozen=True)

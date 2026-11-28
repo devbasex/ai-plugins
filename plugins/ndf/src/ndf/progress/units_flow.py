@@ -685,14 +685,15 @@ def seen_at(g: Git, commit: str, issues: Sequence[int]) -> Seen:
 class Start(NamedTuple):
     """開始前の確かめが読む、手元と取得先の HEAD とその中身。取得先が無ければ `head` は "HEAD" で `tip` は None。
 
-    `checked_to` は、変換するスプリントで確かめて読んだ（送り先の URL, ブランチの HEAD）。
+    `checked_to` は、変換するスプリントで確かめて読んだ（送り先の URL, ブランチの HEAD）。送り先にブランチが無いと
+    確かめたときは HEAD が None で、変換は送り先を読み直さない。
     """
 
     head: str
     tip: Optional[str]
     at_head: Seen
     at_tip: Seen
-    checked_to: Optional[tuple[str, str]]
+    checked_to: Optional[tuple[str, Optional[str]]]
 
 
 def probe_branch(g: Git, source: str, branch: str) -> Completed:
@@ -727,32 +728,33 @@ def read_start(
 ) -> Start:
     """作業場所が今いるブランチの、手元と取得先の HEAD を読む。各コミットは 1 度だけ読む。
 
-    `destination` があれば（変換するスプリント）、取得は確かめた送り先の URL から 1 回だけ行う。送り先の確かめに通らない
-    ときは、手元に単位の欄があれば取得せずに止める。無ければリモート名で取得し、取得先に単位の欄があれば手元を進めずに止める。
+    `destination` があれば（変換するスプリント）、確かめた送り先の URL から取得する。送り先の確かめか URL からの取得に
+    失敗したときは、手元に単位の欄があれば止める。無ければリモート名で取得し直し、取得先に単位の欄があれば手元を進めずに、
+    その失敗で止める。
     """
     here = None if destination is None else seen_at(g, "HEAD", issues)
     checked_to = None
     fetched = None
-    refused = None
+    failed = None
     by_name = branch is not None
     if destination is not None and here is not None and branch is not None:
         try:
             url, found = destination(g, branch)
         except UnitsStopped as exc:
-            # 変換しないスプリントは、送り先の確かめに通らなくても止めない
-            if exc.kind != "refused" or here.has_headings():
+            # 変換しないスプリントは、送り先を使えなくても止めない（取得と push で認証の経路が違うことがある）
+            if here.has_headings():
                 raise
-            refused = exc
+            failed = exc
         else:
             by_name = False
+            checked_to = (url, found)
             if found is not None:
-                checked_to = (url, found)
                 fetched = (g.rev_parse("HEAD"), found)
     if by_name and branch is not None:
         fetched = _fetched_tip(g, remote, branch)
     head, tip = fetched if fetched is not None else ("HEAD", None)
     at_head = here if here is not None else seen_at(g, head, issues)
     at_tip = at_head if tip is None or tip == head else seen_at(g, tip, issues)
-    if refused is not None and at_tip.has_headings():
-        raise refused
+    if failed is not None and at_tip.has_headings():
+        raise failed
     return Start(head, tip, at_head, at_tip, checked_to)

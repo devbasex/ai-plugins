@@ -158,17 +158,15 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path, ports: Optional[Ports] = N
     seen = at_tip if behind else at_head
     if not (sprint.required or seen.has_units()):
         return _plain_route(work_dir)
+    converting = sprint.convert is not None and not sprint.new_definition and seen.has_headings()
+    if behind:
+        project, branch = _checked_ahead(run, root, branch, str(tip) if converting else None)
     source, bodies = "", None
     count = _counted_once(g, remote)
-    converting = sprint.convert is not None and not sprint.new_definition and seen.has_headings()
     request = ConvertRequest(run, root, branch, tuple(issues), sprint.omitted, count, checked_to)
     asked, seen = _converted(g, sprint, seen, request, ports)
     if asked is not None:
         return asked
-    if behind:
-        # 単位の経路を続けるときだけ、進めた先のコミットの設定でリリース先（I4）と単位の PR で待つチェックを決め直す
-        project = ndf_settings_in(root, PROJECT_FILE)
-        branch = _checked_branch(run, branch, project)
     if sprint.required or seen.unit_files:
         units, source, checked, bodies = _units_from_files(g, root, sprint, issues, seen.plans, count)
         # 送るのは記録との比較と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）。
@@ -357,6 +355,17 @@ def _checked_branch(run: StageRun, branch: Optional[str], project: Mapping[str, 
         )
         raise UnitsStopped("precondition", detail)
     return registered
+
+
+def _checked_ahead(run: StageRun, root: Path, branch: str, commit: Optional[str]) -> tuple[Mapping[str, Any], str]:
+    """手元が遅れていたときに取得先の設定でリリース先（I4）を確かめ直し、（設定, ブランチ）を返す。変換が push する前に呼ぶ。
+
+    設定は `commit` から読む（手元を進めていない変換の経路）。None なら進めた後の作業場所から読む。"""
+    try:
+        project = ndf_settings_in(root, PROJECT_FILE) if commit is None else units_files.project_of(units_files.Tree(root, commit))
+    except units_files.UnitsFileError as exc:
+        raise UnitsStopped("invalid", str(exc)) from None
+    return project, _checked_branch(run, branch, project)
 
 
 def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str, move: bool = True) -> bool:

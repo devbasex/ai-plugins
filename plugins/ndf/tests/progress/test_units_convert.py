@@ -12,6 +12,7 @@ import shutil
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import git_sandbox
 import pytest
@@ -21,7 +22,7 @@ from ndf.contracts import result, worker_kinds
 from ndf.core import route
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import units_files
-from ndf.core.plan.review_units_decide import Unit, unit_key
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, unit_key
 from ndf.progress import (
     definition,
     design_record,
@@ -33,6 +34,7 @@ from ndf.progress import (
     run_view,
     stages,
     units_convert,
+    units_flow,
     units_invoke,
 )
 from ndf.progress import gate
@@ -400,11 +402,8 @@ def test_files_written_before_an_interruption_are_committed_on_the_next_run(worl
     _pushed(world)
 
 
-@pytest.mark.parametrize("fetch_differs", [False, True], ids=["push の URL が別", "取得の URL が別"])
-def test_a_refused_remote_url_never_launches_the_worker(world, fetch_differs):
-    if fetch_differs:
-        _sh(world.work, "config", "remote.origin.url", "git@github.com:o/other.git")
-    _sh(world.work, "config", "remote.origin.pushurl", URL if fetch_differs else "git@github.com:o/other.git")
+def test_a_refused_push_url_never_launches_the_worker(world):
+    _sh(world.work, "config", "remote.origin.pushurl", "git@github.com:o/other.git")
 
     assert world.stopped().kind == "refused"
 
@@ -432,8 +431,6 @@ def test_an_advanced_tip_gets_the_held_commit_on_top(world):
     world.script = [lambda tree: world.convert_well(tree, merged=True)]
     got = world.convert()
     moved = world.push_remote({"README.md": "ほか\n"})
-    # 手元が遅れていても、回答の前は手元を進めない
-    assert world.convert().status == "gate" and world.local() == world.head
     world.reapproved(got)
 
     assert world.convert("approved") is None
@@ -679,3 +676,106 @@ def test_blank_lines_and_trailing_spaces_outside_the_sections_are_compared():
 
     assert rd.without_sections(body, titles) != rd.without_sections(body.replace("a\n\nb", "a\nb"), titles)
     assert rd.without_sections(body, titles) != rd.without_sections(body.replace("改行  ", "改行"), titles)
+
+
+# --- Git アダプターを差し替える確かめ -------------------------------------------------------------
+
+OTHER = "git@github.com:o/other.git"
+UNREADABLE = UnitsStopped("precondition", "送り先を読めない")
+
+
+@pytest.mark.parametrize(
+    ("fetch", "push", "accepted"),
+    [
+        pytest.param(URL, URL, True, id="同じ"),
+        pytest.param(URL, OTHER, False, id="push の URL が別"),
+        pytest.param(OTHER, URL, False, id="取得の URL が別"),
+    ],
+)
+def test_both_remote_urls_must_be_the_sprint_repository(fetch, push, accepted):
+    git = SimpleNamespace(
+        remote=lambda: "origin",
+        push_urls=lambda remote: [push],
+        rewrites_again=lambda url: False,
+        remote_url=lambda remote=None: fetch,
+    )
+    job = SimpleNamespace(machine_repo=lambda: URL)
+
+    if accepted:
+        assert units_convert.checked_url(job, git) == URL
+    else:
+        with pytest.raises(UnitsStopped) as raised:
+            units_convert.checked_url(job, git)
+        assert raised.value.kind == "refused"
+
+
+@pytest.mark.parametrize("asked", [StageResult({"status": "gate"}, {}), None], ids=["再承認を待つ", "実装へ進む"])
+def test_a_behind_branch_moves_only_when_no_reapproval_is_asked(tmp_path, monkeypatch, asked):
+    moved: list[str] = []
+
+    def merge_ff(commit):
+        moved.append(commit)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    git = SimpleNamespace(
+        run=lambda *args: str(tmp_path),
+        commit_or_none=lambda ref: None,
+        rev_parse=lambda ref: "local",
+        is_ancestor=lambda a, b: True,
+        merge_ff=merge_ff,
+    )
+    monkeypatch.setattr(units_convert, "Git", lambda path: git)
+    monkeypatch.setattr(units_convert, "_matches_conversion", lambda *args: False)
+    monkeypatch.setattr(units_convert, "_check_units", lambda r, commit: units_convert._Checked(object(), []))
+    monkeypatch.setattr(units_convert, "_published", lambda *args: asked)
+    job = units_convert.Job(SimpleNamespace(machine_id="m"), {}, lambda: URL, tmp_path, tmp_path)
+    request = plan_runs.ConvertRequest(None, tmp_path, SPRINT, (3,), (), lambda numbers: CRITERIA, (URL, "tip"))
+
+    assert units_convert.convert(job, request, None, None) is asked
+    assert moved == ([] if asked is not None else ["tip"])
+
+
+@pytest.mark.parametrize(
+    ("outcome", "by_name", "checked_to"),
+    [
+        pytest.param(UNREADABLE, ["origin"], None, id="送り先を読めなければリモート名で取得する"),
+        pytest.param((URL, None), [], (URL, None), id="送り先にブランチが無いことを持ち回る"),
+    ],
+)
+def test_the_start_of_a_sprint_without_unit_headings(outcome, by_name, checked_to):
+    fetched: list[str] = []
+
+    def destination(g, branch):
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def fetch_branch(remote, branch):
+        fetched.append(remote)
+        return SimpleNamespace(returncode=0, stderr="")
+
+    git = SimpleNamespace(run=lambda *args: "", fetch_branch=fetch_branch, commits_of=lambda *refs: ("local", "local"))
+
+    start = units_flow.read_start(git, "origin", SPRINT, [3], destination)
+
+    assert (fetched, start.checked_to) == (by_name, checked_to)
+
+
+def test_a_release_branch_declared_at_the_tip_stops_before_the_conversion(tmp_path, monkeypatch):
+    plan = units_flow.Seen([PlanDoc(PLAN, frozenset({3}), OLD_PLAN)], False)
+    empty = units_flow.Seen([], False)
+    git = SimpleNamespace(run=lambda *args: str(tmp_path), remote=lambda: "origin", is_ancestor=lambda a, b: a == "local")
+    monkeypatch.setattr(units_invoke, "Git", lambda path: git)
+    monkeypatch.setattr(units_invoke, "_current_branch", lambda g: SPRINT)
+    monkeypatch.setattr(units_invoke, "_uncommitted", lambda g, issues: [])
+    monkeypatch.setattr(units_flow, "read_start", lambda *args: units_flow.Start("local", "tip", empty, plan, None))
+    monkeypatch.setattr(units_flow, "worktree_plans", lambda root, paths: [])
+    monkeypatch.setattr(units_invoke, "ndf_settings_in", lambda root, name: {})
+    monkeypatch.setattr(units_files, "project_of", lambda tree: {"released": tree.commit})
+    monkeypatch.setattr(units_invoke.branch_strategy, "of_project", lambda project: SimpleNamespace(section=project))
+    monkeypatch.setattr(units_invoke, "released_branches", lambda section: {SPRINT} if section == {"released": "tip"} else set())
+    sprint = plan_runs.SprintPlan(convert=lambda *args: pytest.fail("変換しない"))
+    stage_run = StageRun("plan", "impl", {"issues": [3], "branch": SPRINT}, (), "s", "i", sprint=sprint)
+
+    with pytest.raises(UnitsStopped, match="リリース先"):
+        units_invoke.prepare(stage_run, tmp_path / "w", tmp_path, units_invoke.Ports(None, None))
