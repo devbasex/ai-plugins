@@ -212,7 +212,7 @@ Task 15 が使うので、番号の順でなくここに置く。
   - `plugins/ndf/src/ndf/progress/units_invoke.py`
   - `plugins/ndf/tests/progress/test_units_sync.py`
   - `plugins/ndf/docs/contracts/commands.md`
-- **変更内容:** `units_sync.push_url`・`destination_errors`・`outgoing_errors`・`sync` と `ndf progress units sync`。承認が要る場合の開始前の push（送り先に無いコミットは行数の記録のコミットだけを送る・`line_record_errors`・削除されたブランチの作り直し）、削除・改名元の取り込み、中断した取り込みの再開を含む。取得と push は照合した URL を相手にする。送り先が違うときと URL を拒否するときにコミットも push も起きないことを、偽の ssh で受ける手元のリモートの ref で縛る（先に要る: Task 8・11・20）
+- **変更内容:** `units_sync.push_url`・`destination_errors`・`outgoing_errors`・`sync` と `ndf progress units sync`。承認が要る場合の開始前の push（送り先に無いコミットは行数の記録のコミットだけを送る・`line_record_errors`・送り先も進んだ場合のマージ・打ち直しのたびに通す・削除されたブランチの作り直し）、削除・改名元の取り込み、中断した取り込みの再開を含む。取得と push は照合した URL を相手にする。送り先が違うときと URL を拒否するときにコミットも push も起きないことを、偽の ssh で受ける手元のリモートの ref で縛る（先に要る: Task 8・11・20）
 - **満たす受け入れ条件:** 無し（条件 1 の部品。条件 1 は Task 18 の単位で確かめる）
 - **進め方:** 失敗するテスト → 通す最小実装 → 整理
 
