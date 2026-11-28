@@ -195,7 +195,7 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
         units, source, checked, bodies = _units_from_files(
             g, root, sprint, issues, seen.plans, lambda ns: _count_sprint_criteria(g, remote, ns)
         )
-        # 送るのは照合と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）
+        # 送るのは記録との比較と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）
         _push_sprint(g, remote, branch, checked)
     else:
         if sprint.new_definition:
@@ -203,13 +203,18 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
             raise UnitsStopped("invalid", detail)
         units = _read_units(g, remote, seen.plans, issues)
         _push_sprint(g, remote, branch, "HEAD")
-    found = Lineup(units, _unit_ci(project, branch), source, bodies)
+    return _announced(work_dir, branch, Lineup(units, _unit_ci(project, branch), source, bodies))
+
+
+def _announced(work_dir: Path, branch: str, found: Lineup) -> Lineup:
+    """単位の経路の並びを知らせ、`work_dir/units.json` に書いて返す。"""
     print(
         f"ndf progress: 単位の PR のマージ先 {branch}、待つチェック {', '.join(found.unit_ci['required']) or '無し'}"
         f"（{found.unit_ci['key']}）",
         file=sys.stderr,
     )
-    held = {"route": "units", "units": [_unit_json(u) for u in units], "unit_ci": found.unit_ci, "source": source}
+    units = [_unit_json(u) for u in found.units]
+    held = {"route": "units", "units": units, "unit_ci": found.unit_ci, "source": found.source}
     plan_files.write_json(work_dir / UNITS_FILE, held)
     return found
 
