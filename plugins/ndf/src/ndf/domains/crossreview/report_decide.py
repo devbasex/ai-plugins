@@ -305,7 +305,8 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
     HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
     1 回で受けて同じ順に返す）へ値ごとに通し（保護の種類は許可した値だけなので通さない）、JSON にした後の本文全体の伏せ字が一覧の構造を壊さない形に escape する
-    （PR 3944 の r6-4）。"""
+    （PR 3944 の r6-4）。引き継いだ起票の URL のうち指摘の項目に無いものは、URL だけの項目で足す（その指摘が出ない実行を
+    挟んでも、次の保存先へ渡す。#3780）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     items = []
     for f in store.list_of(data, store.FINDINGS):
@@ -330,6 +331,11 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):
         item[k] = cleaned
+    held = {item.get(k) for item in items for k in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)}
+    for carried in store.list_of(data, leftover_decide.CARRIED_URLS):
+        url = leftover_decide.issue_url(carried, data.get(store.REPO_KEY))
+        if url and url not in held:
+            items.append({leftover_decide.PARKED: True, leftover_decide.Filed.URL: url})
     payload = "[" + ", ".join("{" + ", ".join(f"{_open_value(k)}: {_open_value(v)}" for k, v in item.items()) + "}" for item in items) + "]"
     return f"{OPEN_MARK}{payload} -->"
 

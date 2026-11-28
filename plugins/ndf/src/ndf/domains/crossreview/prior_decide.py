@@ -176,10 +176,14 @@ def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optional[Carried]:
-    """一覧の 1 件から戻した指摘（`judged` は `_marks_of` の MVV の判定。id か本文が無ければ None）。"""
+    """一覧の 1 件から戻した指摘（`judged` は `_marks_of` の MVV の判定。id か本文が無ければ None）。起票の URL だけの項目は、
+    本文の無い残した指摘にする（行にはならず、URL だけが引き継がれる。#3780）。"""
     fid, text = _opt_text(item.get("id")), _opt_text(item.get("text"))
     if fid is None or text is None:
-        return None
+        url = leftover_decide.issue_url(item.get(leftover_decide.Filed.URL))
+        if item.get(leftover_decide.PARKED) is not True or url is None:
+            return None
+        return Carried("", None, "", None, None, None, None, None, parked=True, issue=url)
     thread, line = item.get("thread"), item.get("line")
     return Carried(
         fid if fid.startswith(RECORDED_PREFIX) else RECORDED_PREFIX + fid,

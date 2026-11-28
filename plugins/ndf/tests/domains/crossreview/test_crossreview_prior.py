@@ -489,6 +489,17 @@ def test_issue_3780_the_filed_urls_of_left_findings_are_kept_in_the_state() -> N
     assert not carry.carry(run, carry.Prior(comments=[remark]))
 
 
+def test_issue_3780_a_carried_url_survives_a_run_without_the_finding() -> None:
+    """指摘の出ない実行の記録のコメントも、引き継いだ起票の URL を次の保存先へ渡す。"""
+    url = "https://github.com/o/r/issues/100"
+    body = report_decide.comment(PR, {"findings": [], "target_repo": "o/r", leftover.CARRIED_URLS: [url]}, None)
+    assert report_decide.open_items(body) == [{"parked": True, "issue": url}]
+    run = types.SimpleNamespace(data={}, journal=FindingJournal(), warnings=[], process=[], mvv=None, mvv_items=())
+    remark = prior_decide.Remark("comment", "ndf", body, at="2026-11-20T00:00:00Z", trusted=True)
+    assert carry.carry(run, carry.Prior(comments=[remark]))
+    assert run.data[leftover.CARRIED_URLS] == [url] and not run.journal.rows
+
+
 def test_issue_3780_the_urls_of_findings_redacted_to_the_same_text_are_all_kept() -> None:
     urls = ["https://github.com/o/r/issues/100", "https://github.com/o/r/issues/101"]
     rows = [{**_OPEN_NO_THREAD, "id": f"r1-{n}", "parked": True, "issue": url} for n, url in enumerate(urls, 1)]

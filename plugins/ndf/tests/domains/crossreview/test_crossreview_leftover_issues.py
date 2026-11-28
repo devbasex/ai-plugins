@@ -473,6 +473,20 @@ def test_issue_3780_a_carried_url_of_the_pr_before_a_rewind_is_used_from_another
     assert github.created() == 1
 
 
+def test_issue_3780_a_record_that_was_not_written_is_written_by_the_next_run() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    again = Run(github, _row(prior_issue=url))
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    github.fail[("POST", "issues/9/comments")] = 502
+    assert again.go() and again.row[Filed.URL] == url and again.data[leftover.UNRECORDED]
+    assert again.go() == [] and leftover.UNRECORDED not in again.data
+    later = Run(github)
+    later.ref = again.ref
+    assert later.go() == [] and later.row[Filed.URL] == url and github.created() == 1
+
+
 def test_issue_3780_the_body_of_a_carried_issue_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     github = FakeGitHub()
     Run(github).go()

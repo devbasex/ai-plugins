@@ -595,9 +595,10 @@ def _merge_base(run: _Run, head: str) -> str:
 def _basis(run: _Run, head: str, stand_in: bool = False) -> scope_decide.Basis:
     """前のラウンドを差分の起点や収束の再利用に使える条件（今回の値。席は今の席）。"""
     unit = scope_decide.unit_id(run.cfg.unit)
-    # 確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
-    pr = run.read_pr.ident if run.cfg.check_pr and run.read_pr is not None else None
-    return scope_decide.Basis(_merge_base(run, head), tuple(run.seats), run.cfg.settings.focus, run.mvv, stand_in, unit, pr)
+    # PR の巻き直しは確認の指定によらず見分ける。確認を求める起動は、読んだ PR が無ければラウンドの前に止まっている
+    pr = run.read_pr.ident if run.read_pr is not None else None
+    base, focus = _merge_base(run, head), run.cfg.settings.focus
+    return scope_decide.Basis(base, tuple(run.seats), focus, run.mvv, stand_in, unit, pr, run.cfg.check_pr)
 
 
 def _confirm_heavy(
@@ -815,7 +816,7 @@ def _reusable(run: _Run) -> bool:
     merge-base の SHA と同じで、今回の相手役が全員そのラウンドを読んでいて、未解決の指摘も決めていない足すべき内容も無い）。
     比較基点が違えば PR の全差分が変わっている（PR 3944 の r2-1）。読んでいない相手役がいれば全差分から読ませる（r2-2）。
     そのラウンドと今の重点が違えば、足した重点でまだ読んでいないので回し直す（r4-3）。単位の指示の中身が違えば、今の範囲で
-    まだ読んでいないので回し直す（#4369）。読んだ PR の確認を求める起動は、そのラウンドが読んだ PR が違えば回し直す（#4369）。MVV が違えば、今の MVV に反しないかを
+    まだ読んでいないので回し直す（#4369）。そのラウンドが読んだ PR と今読んだ PR が違えば回し直す（#4369）。MVV が違えば、今の MVV に反しないかを
     まだ確かめていないので回し直す（#4076）。"""
     if store.last_round(run.data).get("verdict") != fin.CONVERGED:
         return False

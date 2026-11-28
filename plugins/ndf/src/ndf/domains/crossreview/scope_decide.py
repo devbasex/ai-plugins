@@ -148,7 +148,8 @@ class Basis(NamedTuple):
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
     MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
     欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。`unit` は今回の
-    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。#4369）。"""
+    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読めなければ None。
+    #4369）。`pr_required` が偽（読んだ PR の確認を求めない起動）なら、読んだ PR の記録が無いラウンドは違うとみなさない。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
@@ -157,6 +158,14 @@ class Basis(NamedTuple):
     stand_in: bool = False
     unit: Optional[str] = None
     pr: Optional[str] = None
+    pr_required: bool = True
+
+
+def _same_pr(record: Mapping[str, Any], basis: Basis) -> bool:
+    """ラウンドが読んだ PR が `basis` と違わないか。"""
+    if basis.pr is None or (PR not in record and not basis.pr_required):
+        return True
+    return (record[PR] if PR in record else None) == basis.pr
 
 
 def _matches(record: Mapping[str, Any], basis: Basis, checked: bool = True) -> bool:
@@ -173,7 +182,7 @@ def _matches(record: Mapping[str, Any], basis: Basis, checked: bool = True) -> b
     # 単位の指示の無いラウンドはキーを持たず、指示の無い起動（`unit_id` は空）と合う
     if basis.unit is not None and (record[UNIT] if UNIT in record else "") != basis.unit:
         return False
-    if basis.pr is not None and (record[PR] if PR in record else None) != basis.pr:
+    if not _same_pr(record, basis):
         return False
     if basis.mvv is None:
         return True
@@ -213,7 +222,7 @@ def origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[st
         return None
     if basis.reviewers is not None and not _seated_read(record, basis):
         return None
-    return record if basis.pr is None or record.get(PR) == basis.pr else None
+    return record if _same_pr(record, basis) else None
 
 
 def read_by_all_head(state: Mapping[str, Any], basis: Basis = Basis()) -> Optional[str]:

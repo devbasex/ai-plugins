@@ -551,7 +551,7 @@ def _filing_target(data: Mapping[str, Any], main: Optional[Path]) -> tuple[Optio
 def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: Filer) -> list[str]:
     """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
     rows = leftover.candidates(data, manual=filer.manual) if hub.leftovers is not None else []
-    if not rows:
+    if not rows and (hub.leftovers is None or not leftover.unrecorded(data)):
         return []
     # 起票の前提は、公開のロックの待ちとスレッドの同期の後に読む。公開し直すかの判定の結果は使い回さない
     main = filer.locate()
@@ -752,7 +752,8 @@ def _report(
     # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由か同じ設定
     # （起票先が GitHub でない）で見送るだけなら、公開済みの記録を使う。リモートの確認は、起票先の設定が github で、
     # 前回の見送りが設定によるものでないときだけにする（ほかは公開の中で確認する。#3780）
-    if published and (rows := leftover.candidates(data)):
+    rows = leftover.candidates(data) if published else []
+    if published and (rows or leftover.unrecorded(data)):
         if leftover.SKIPPED not in data:
             published = not any(leftover_decide.Filed.ERROR in row for row in rows)
         else:

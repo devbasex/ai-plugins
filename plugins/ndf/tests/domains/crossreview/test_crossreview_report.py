@@ -828,6 +828,10 @@ def test_issue_3780_2_results_carry_how_each_finding_was_left() -> None:
     assert "残した指摘 2（起票 1）" in verdict.summary
     [decision] = verdict.decisions
     assert all(part in decision["decision"] + decision["basis"] for part in ("r2-1", "Value 6", url))
+    # 照らした位置の記録が無い行は、行で確かめたと言わない
+    assert "照らした位置の記録が無い" in decision["basis"] and "変えていない行" not in decision["basis"]
+    data["findings"][0]["parked_on_line"] = True
+    [decision] = leftover_decide.decisions(data["findings"], record)
     assert "変えていない行" in decision["basis"]
     # 理由は行に残った初出時の位置でなく、残すと決めたときに照らした位置から出す
     data["findings"][0]["parked_on_line"] = False

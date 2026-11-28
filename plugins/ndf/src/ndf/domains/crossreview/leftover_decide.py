@@ -24,6 +24,9 @@ PARKED = "parked"
 # 残すと決めたときに照らした出し直しに、行があったかの記録（結果の `decisions` の理由に使う）。行の `line` は初出時の位置が残る
 # ことがあるので、理由の元にしない
 PARKED_ON_LINE = "parked_on_line"
+# 状態ファイルのキー。前の実行の記録のコメントから引き継いだ、直さずに残した指摘の起票の URL の並び。記録の本文は伏せてあり、
+# 伏せる値は実行する環境で変わるので、本文でなく Issue の目印で指摘と照らす
+CARRIED_URLS = "issue_carried_urls"
 # 指摘の行番号が、その位置の基準のコミットの PR の差分に載らないことの記録。行番号は起票の場所に使うので行に残し、投稿の位置
 # （`location`）だけをファイルにする
 OFF_DIFF = "off_diff"
@@ -338,7 +341,11 @@ def decisions(rows: Sequence[Mapping[str, Any]], comment_url: Optional[str]) -> 
         if not _left(row) or not item:
             continue
         where = result_fields(row, comment_url)
-        if row.get(PARKED_ON_LINE, True):
+        on_line = row.get(PARKED_ON_LINE)
+        if on_line is None:
+            # 照らした位置の記録が無い行は、行とファイルのどちらで確かめたかを言わない
+            why = "2 ラウンド目以降の線引きで残した major（照らした位置の記録が無い）"
+        elif on_line:
             why = "2 ラウンド目以降の、変えていない行への major"
         else:
             # 照らした出し直しに行が無いので、指したファイルが変わっていないことだけを確かめた（`proceeds`）
