@@ -755,7 +755,8 @@ def _report(
     rows = leftover.candidates(data) if published else []
     if published and (rows or leftover.unrecorded(data)):
         if leftover.SKIPPED not in data:
-            published = not any(leftover_decide.Filed.ERROR in row for row in rows)
+            # 起票の記録へ書けていない URL があれば、行に失敗が無くても公開し直して書き直す
+            published = not (leftover.unrecorded(data) or any(leftover_decide.Filed.ERROR in row for row in rows))
         else:
             skipped = data[leftover.SKIPPED]
             main = filer.locate()

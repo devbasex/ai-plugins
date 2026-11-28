@@ -31,6 +31,17 @@ def _with_merge_base(data, sha: str):
     return data
 
 
+def test_issue_3780_1_a_round_before_the_pr_was_remade_is_not_an_origin() -> None:
+    """巻き直しは状態の今の番号で見分けるので、PR を読めなくても前の PR のラウンドを使わない。"""
+    record = {"round": 1, "head": "h1", scope_decide.PR_NUMBER: 7}
+    state = {"pr": 7, "current_pr": 9, "rounds": [record]}
+    now = scope_decide.Basis(number=scope_decide.current_number(state))
+    assert scope_decide.origin_record(state, now) is None and scope_decide.read_by_all_head(state, now) is None
+    del state["current_pr"]
+    same = scope_decide.Basis(number=scope_decide.current_number(state))
+    assert scope_decide.origin_record(state, same) == record
+
+
 def test_sections_skip_headings_inside_code_blocks() -> None:
     text = "# 題\n\n```\n# コメント\n```\n## セクション A\n"
     assert scope_decide.sections_of("d.md", text) == ["d.md#題", "d.md#セクション A"]
@@ -251,9 +262,8 @@ def test_round_some_reviewers_could_not_read_is_not_the_next_base() -> None:
 APPROVED = "approved:11:aaa:ccc"
 
 
-@pytest.mark.parametrize("requested", [pytest.param(True, id="reviewed-pr-out"), pytest.param(False, id="plain-run")])
 def test_converged_run_is_reused_only_for_the_same_unit_and_pr(
-    wt: Path, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, hub, requested: bool
+    wt: Path, tmp_path: Path, capsys, monkeypatch: pytest.MonkeyPatch, hub
 ) -> None:
     """#3780 の現状固定: 同じ head の打ち直しは、単位の指示と読んだ PR が同じなら前回の収束を返し、どちらかが変われば相手役を
     起動し直す。比較基点と相手役の変更は `test_crossreview_prior.py`、重点の変更は `test_crossreview_run.py` が確かめる。"""
@@ -266,8 +276,7 @@ def test_converged_run_is_reused_only_for_the_same_unit_and_pr(
 
     def launched() -> set[str]:
         fake = Recording(tmp_path / "st", {})
-        args = ("--reviewed-pr-out", str(tmp_path / "reviewed-pr")) if requested else ()
-        code, got = _run(capsys, monkeypatch, fake, wt, *args)
+        code, got = _run(capsys, monkeypatch, fake, wt, "--reviewed-pr-out", str(tmp_path / "reviewed-pr"))
         assert (code, got["status"]) == (0, "ok")
         return {agent for agent, _, _ in fake.prompts}
 

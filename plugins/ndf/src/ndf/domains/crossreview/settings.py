@@ -45,7 +45,7 @@ class RunConfig:
     名前の `base` は取得と表示にだけ使う。`reviewers` は起動の前に決めた席（`participants.review_seats`。書き換えない）、
     `may_fill` は席を埋めてよいか（名指しが 1 者なら偽）、`prefilled` は `allowed` のために起動の前に埋めた席（#3955）。
     `unit` はレビューの単位の指示の中身（単位の経路でなければ空。#4369）。`check_pr` は読んだ PR の確認を呼び手が求めるか
-    （`--reviewed-pr-out`。真なら、読んだ PR の記録が無いラウンドも差分の起点と収束の再利用に使わない。#4369）。"""
+    （`--reviewed-pr-out`。真なら同じ PR を読んだラウンドだけを差分の起点と収束の再利用に使う。#4369）。"""
 
     worktree: Path
     branch: str

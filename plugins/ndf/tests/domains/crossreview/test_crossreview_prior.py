@@ -295,6 +295,16 @@ def test_record_is_chosen_by_its_last_update() -> None:
     assert prior_decide.recorded([rewritten, other]) == ([], {})
 
 
+def test_issue_3780_a_filed_url_is_carried_from_an_older_record() -> None:
+    """後から書かれた記録のコメントに URL が無くても、古い記録の起票の URL を引き継ぐ。"""
+    url = "https://github.com/o/r/issues/100"
+    older = _record([{**_OPEN_NO_THREAD, "parked": True, "issue": url}], {}, "2026-11-20T00:00:00Z")
+    newer = _record([], {}, "2026-11-20T01:00:00Z")
+    journal = FindingJournal()
+    journal.carry(prior_decide.recorded([newer, older])[0])
+    assert [u for _, u in journal.filed] == [url] and not journal.rows
+
+
 def test_thread_resolved_by_another_run_is_not_fixed_again(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
     """PR 3944 の r2-6: 状態ファイルが追うスレッドを別の実行が resolve していたら、その指摘を修正担当へ渡し直さず、
     同じスレッドへ返信もし直さない。"""

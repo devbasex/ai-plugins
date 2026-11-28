@@ -487,6 +487,28 @@ def test_issue_3780_a_record_that_was_not_written_is_written_by_the_next_run() -
     assert later.go() == [] and later.row[Filed.URL] == url and github.created() == 1
 
 
+def test_issue_3780_a_url_found_beside_a_failed_announcement_is_recorded() -> None:
+    github = FakeGitHub()
+    Run(github).go()
+    url = github.issues[0]["html_url"]
+    again = Run(github, _row(prior_issue=url), _row("r2-2", text="別の指摘"))
+    again.ref = store.StateRef(9, 9, Path("unused"))
+    github.fail[("POST", "issues/9/comments")] = 502
+    assert again.go() and again.row[Filed.URL] == url and github.created() == 1
+    entries = leftover_decide.record_entries(github.records[-1]["body"], ISSUES)
+    assert entries == {leftover_decide.identity(9, again.row["text"]): {"url": url}}
+
+
+def test_issue_3780_a_url_already_in_the_record_is_not_written_again() -> None:
+    github = FakeGitHub()
+    run = Run(github)
+    run.go()
+    run.data[leftover.UNRECORDED] = {leftover_decide.identity(7, run.row["text"]): run.row[Filed.URL]}
+    writes = github.count("PATCH", "comments/500") + github.count("POST", "issues/7/comments")
+    assert run.go() == [] and leftover.UNRECORDED not in run.data
+    assert github.count("PATCH", "comments/500") + github.count("POST", "issues/7/comments") == writes
+
+
 def test_issue_3780_the_body_of_a_carried_issue_is_parsed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     github = FakeGitHub()
     Run(github).go()

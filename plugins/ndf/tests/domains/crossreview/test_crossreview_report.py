@@ -855,3 +855,15 @@ def test_issue_3780_2_run_results_point_a_left_finding_at_the_record(wt: Path, t
     written = len(hub.comments)
     code, again = _run(capsys, monkeypatch, Fake(fake.state_dir, {"codex": [], "kiro": []}), wt)
     assert code == 0 and len(hub.comments) == written + 1, again
+    # 起票の記録へ書けていない URL があれば、行に失敗が無くても公開し直す
+    state = store.read_object(path)
+    for row in state["findings"]:
+        row.pop("issue_error", None)
+        row.pop("check", None)
+    state.pop("issue_skipped", None)
+    state["issue_unrecorded"] = {"0123456789ab": "https://github.com/o/r/issues/100"}
+    state[report_decide.PUBLISHED_KEY] = report_decide.published_state(PR, state, fin.CONVERGED)
+    store.write_object(path, state)
+    written = len(hub.comments)
+    code, again = _run(capsys, monkeypatch, Fake(fake.state_dir, {"codex": [], "kiro": []}), wt)
+    assert code == 0 and len(hub.comments) == written + 1, again

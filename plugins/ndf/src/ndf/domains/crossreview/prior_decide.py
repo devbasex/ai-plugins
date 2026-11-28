@@ -175,6 +175,18 @@ def _marks_of(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _url_only(url: str) -> Carried:
+    """起票の URL だけを引き継ぐ、本文の無い残した指摘。"""
+    return Carried("", None, "", None, None, None, None, None, parked=True, issue=url)
+
+
+def _filed_urls(body: str) -> list[str]:
+    """記録のコメントの一覧の、直さずに残した指摘の起票の URL（確かめる前の URL を含む）。"""
+    keys = (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)
+    items = (i for i in report_decide.open_items(body) if i.get(leftover_decide.PARKED) is True)
+    return [url for item in items for key in keys if (url := leftover_decide.issue_url(item.get(key)))]
+
+
 def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optional[Carried]:
     """一覧の 1 件から戻した指摘（`judged` は `_marks_of` の MVV の判定。id か本文が無ければ None）。起票の URL だけの項目は、
     本文の無い残した指摘にする（行にはならず、URL だけが引き継がれる。#3780）。"""
@@ -183,7 +195,7 @@ def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optiona
         url = leftover_decide.issue_url(item.get(leftover_decide.Filed.URL))
         if item.get(leftover_decide.PARKED) is not True or url is None:
             return None
-        return Carried("", None, "", None, None, None, None, None, parked=True, issue=url)
+        return _url_only(url)
     thread, line = item.get("thread"), item.get("line")
     return Carried(
         fid if fid.startswith(RECORDED_PREFIX) else RECORDED_PREFIX + fid,
@@ -210,6 +222,9 @@ def recorded(
     スレッドのある指摘の MVV の判定と保護の種類と起票の URL（スレッドの最初のコメントの id → 値）。同じ保存先の打ち直しは記録の
     コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。
 
+    起票の URL だけは、より古い信頼できる記録のコメントからも引き継ぐ。古い状態ファイルの公開や同時に走った実行が後から書くと、
+    最新のコメントに URL が無いことがある（#3780）。
+
     それが今の保存先の書いたコメント（`own` の URL）なら、状態ファイルが持つ指摘（`held` の id）は戻さない。コメントの本文は秘密や
     手元のパスを伏せてあり、状態ファイルの本文と一致しないので、本文で比べると同じ指摘が 2 件になる。"""
     mine = sorted((r for r in remarks if r.kind == "comment" and r.trusted and _ours(r.body)), key=lambda r: r.updated or r.at)
@@ -228,4 +243,5 @@ def recorded(
                 continue
         if _opt_text(item.get("id")) not in known:
             out.append(one)
+    out += [_url_only(url) for url in dict.fromkeys(u for r in mine[:-1] for u in _filed_urls(r.body))]
     return out, marks

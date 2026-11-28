@@ -31,6 +31,8 @@ FOCUS = "focus"
 UNIT = "unit"
 # ラウンドの記録のキー（そのラウンドの起動が実際に読んだ PR。`<所有者>/<リポジトリ>#<番号>`。読めなければ書かない。#4369）
 PR = "pr"
+# ラウンドの記録のキー（そのラウンドを回したときの状態の今の PR 番号。巻き直し `state-file --current` の前後を見分ける。#3780）
+PR_NUMBER = "pr_number"
 # ラウンドの記録のキー（そのラウンドのレビューに使った MVV。#4076）と、その中身のキー。`MVV_ID` は MVV を見分ける値
 # （`mvv_decide.identity_of`）、`MVV_BRANCH` は MVV を読んだブランチ（`--base` がコミットのときに、`review-scope` が
 # GitHub へ問い合わせずに同じブランチの MVV を読むのに使う）
@@ -148,8 +150,8 @@ class Basis(NamedTuple):
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
     MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
     欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。`unit` は今回の
-    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読めなければ None。
-    #4369）。`pr_required` が偽（読んだ PR の確認を求めない起動）なら、読んだ PR の記録が無いラウンドは違うとみなさない。"""
+    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。
+    #4369）。`number` は状態の今の PR 番号（`current_number`。#3780）。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
@@ -158,14 +160,23 @@ class Basis(NamedTuple):
     stand_in: bool = False
     unit: Optional[str] = None
     pr: Optional[str] = None
-    pr_required: bool = True
+    number: Optional[int] = None
+
+
+def current_number(state: Mapping[str, Any]) -> Optional[int]:
+    """状態の今の PR 番号（巻き直していなければ元の番号）。無ければ None。"""
+    for key in (store.CURRENT_KEY, store.ORIGIN_KEY):
+        if type(state.get(key)) is int:
+            return state[key]
+    return None
 
 
 def _same_pr(record: Mapping[str, Any], basis: Basis) -> bool:
-    """ラウンドが読んだ PR が `basis` と違わないか。"""
-    if basis.pr is None or (PR not in record and not basis.pr_required):
-        return True
-    return (record[PR] if PR in record else None) == basis.pr
+    """ラウンドが今回と同じ PR のものか。巻き直しは今の番号で見分ける（PR を読めなくても分かる）。読んだ PR は、リポジトリ名の
+    大文字小文字を区別せずに照らす。"""
+    if basis.number is not None and PR_NUMBER in record and record[PR_NUMBER] != basis.number:
+        return False
+    return basis.pr is None or (PR in record and str(record[PR]).casefold() == basis.pr.casefold())
 
 
 def _matches(record: Mapping[str, Any], basis: Basis, checked: bool = True) -> bool:

@@ -385,14 +385,12 @@ def test_the_pull_request_read_before_a_resend_is_still_the_reviewed_one(read: s
 
 
 def test_a_round_of_another_pull_request_is_not_reused() -> None:
-    """違う PR を読んだラウンドは使わない。読んだ PR の記録が無いラウンドを使わないのは、確認を求める起動だけである。"""
+    """読んだ PR の確認を求める起動は、同じ PR を読んだラウンドだけを使う。リポジトリ名の大文字小文字は区別しない。"""
     state = {store.ROUNDS: [{"head": "h1", scope_decide.PR: "o/r#9"}]}
     for pr, want in (("o/r#9", "h1"), ("o/r#10", None), (None, "h1")):
         assert scope_decide.read_by_all_head(state, scope_decide.Basis(pr=pr)) == want
     assert scope_decide.read_by_all_head({store.ROUNDS: [{"head": "h1"}]}, scope_decide.Basis(pr="o/r#9")) is None
-    plain = scope_decide.Basis(pr="o/r#10", pr_required=False)
-    assert scope_decide.read_by_all_head({store.ROUNDS: [{"head": "h1"}]}, plain) == "h1"
-    assert scope_decide.read_by_all_head(state, plain) is None
+    assert scope_decide.read_by_all_head(state, scope_decide.Basis(pr="O/R#9")) == "h1"
 
 
 def test_without_the_request_the_push_targets_are_not_read() -> None:

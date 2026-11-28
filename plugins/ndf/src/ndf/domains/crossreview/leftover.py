@@ -243,6 +243,15 @@ class _Filing:
         self.entries = leftover_decide.record_entries(found.body, self.port.issues_url())
         for entry in self.entries.values():
             entry.setdefault("at", found.updated_at)
+        # 書き込みが届いて応答だけ失われた URL は、書き直さない
+        self.hold({i: url for i, url in unrecorded(self.data).items() if (self.url_of(i) or "").casefold() != url.casefold()})
+
+    def hold(self, pending: dict[str, str]) -> None:
+        """起票の記録へ書けていない URL を状態に残す（無ければ消す）。"""
+        if pending:
+            self.data[UNRECORDED] = pending
+        else:
+            self.data.pop(UNRECORDED, None)
 
     def _trusts(self, author: str, author_id: int, association: str) -> bool:
         return leftover_decide.trusted(author_id, self.me, self.account_ids()) or self.port.trusts(author, association)
@@ -413,6 +422,7 @@ class _Filing:
         書けなければ None（作らない）。"""
         self.data[ACCOUNT_IDS] = list(dict.fromkeys([*self.account_ids(), self.me]))
         self.save()
+        before = {ident: self.entries[ident] for ident in idents if ident in self.entries}
         for ident in idents:
             self.entries[ident] = {}
         try:
@@ -420,6 +430,9 @@ class _Filing:
         except Exception as exc:  # noqa: BLE001 ネットワーク: 記録を書けないまま作ると、打ち直しで 2 件になる
             for ident in idents:
                 self.fail(ident, f"起票の記録を書けない: {_reason(exc)}")
+                # 作っていない識別値は、結果の書き込みに試みた記録として残さない
+                del self.entries[ident]
+            self.entries.update(before)
             return None
         self.save()
         return at
@@ -460,9 +473,10 @@ class _Filing:
         at = self.announce(fresh) if fresh else None
         if at is not None:
             self.create(fresh, at)
-        # 結果の書き込み（作ったとき、または作るものが無く、引き継ぎ・検索・一覧で見つけた URL を記録へ足すとき）。引き継いだ URL も
-        # 書くのは、巻き直し後の PR の別の保存先が、この指摘の出ない記録のコメントの後でも引けるようにするためである
-        return self._close(at is not None or bool((found or adopted) and not fresh))
+        # 結果の書き込み（作ったとき、または引き継ぎ・検索・一覧で見つけた URL を記録へ足すとき。作る前の書き込みに失敗しても、
+        # 見つけた URL は書くか、書けなければ状態に残す）。引き継いだ URL も書くのは、巻き直し後の PR の別の保存先が、
+        # この指摘の出ない記録のコメントの後でも引けるようにするためである
+        return self._close(at is not None or bool(found or adopted))
 
     def _close(self, record: bool) -> list[str]:
         """`record` か、前に書けなかった URL があれば、起票の記録へ結果を書き、注意を返す。書けなければ URL を状態に残す
@@ -474,9 +488,9 @@ class _Filing:
             try:
                 self.write()
             except Exception as exc:  # noqa: BLE001 ネットワーク: 次の公開が書き直す
-                self.data[UNRECORDED] = {i: url for i in [*pending, *self.rows] if (url := self.url_of(i))}
+                self.hold({i: url for i in [*pending, *self.rows] if (url := self.url_of(i))})
                 return [*self._finish(), f"起票の記録に結果を書けなかった: {_reason(exc)}"]
-            self.data.pop(UNRECORDED, None)
+            self.hold({})
         return self._finish()
 
     def _finish(self) -> list[str]:
