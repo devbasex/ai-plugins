@@ -137,7 +137,7 @@ def _checked_value(text: str, urls: Sequence[str]) -> str:
     return hashlib.sha256(joined.encode()).hexdigest()[:12]
 
 
-def unrecorded(data: Mapping[str, Any]) -> dict[str, str]:
+def unrecorded_urls(data: Mapping[str, Any]) -> dict[str, str]:
     """起票の記録へ書けていない URL（識別値 → URL）。"""
     held = data.get(UNRECORDED)
     return {str(i): url for i, url in held.items() if isinstance(url, str)} if isinstance(held, Mapping) else {}
@@ -245,7 +245,13 @@ class _Filing:
         for entry in self.entries.values():
             entry.setdefault("at", found.updated_at)
         # 書き込みが届いて応答だけ失われた URL は、書き直さない
-        self.hold({i: url for i, url in unrecorded(self.data).items() if (self.url_of(i) or "").casefold() != url.casefold()})
+        self.hold(
+            {
+                i: url
+                for i, url in unrecorded_urls(self.data).items()
+                if not ((held := self.url_of(i)) and held.casefold() == url.casefold())
+            }
+        )
 
     def hold(self, pending: dict[str, str]) -> None:
         """起票の記録へ書けていない URL を状態に残す（無ければ消す）。"""
@@ -484,7 +490,7 @@ class _Filing:
         """`record` か、前に書けなかった URL があれば、起票の記録へ結果を書き、注意を返す。書けなければ URL を状態に残す
         （行は起票済みで候補から外れるので、次の公開はこれを見て書き直す）。記録の新規の POST の結果が分からないときは、もう一度
         POST すると記録が 2 つになりうるので書かず、URL を状態に残して、記録を読み直す次の公開に任せる。"""
-        pending = unrecorded(self.data)
+        pending = unrecorded_urls(self.data)
         for ident, url in pending.items():
             self.entries.setdefault(ident, {}).setdefault("url", url)
         if (record or pending) and self.unsure_post:
@@ -535,7 +541,7 @@ def file_issues(
     rows: dict[str, list[dict[str, Any]]] = {}
     for row in candidates(data, manual=manual):
         rows.setdefault(leftover_decide.identity(ref.origin_pr, row["text"]), []).append(row)
-    if not rows and not unrecorded(data):
+    if not rows and not unrecorded_urls(data):
         return []
     return _Filing(data, ref, port, save, rows).run(manual)
 

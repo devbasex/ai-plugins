@@ -351,7 +351,7 @@ cross-review は resolve されていないスレッドと、スレッドを作�
 | --- | --- |
 | `ndf ci merge --base <ブランチ>` | `--branch` を head、`<ブランチ>` を宛先とする対象のリポジトリの開いた PR（フォークを除く）を選ぶ。読み直した宛先が違えば要求を送らず `refused`。省けばこれまでと同じ |
 | `ndf ci merge --pr <番号>` | 番号の PR を読み、`--branch`・`--base`・head のリポジトリ・閉じていないことを確かめる。違えば `refused`。`--branch`・`--base` を両方省くとこの確かめを省き、マージ済みなら `ok` |
-| `ndf cross-review run --repo <所有者>/<リポジトリ>` | 対象のリポジトリ。保存済みの状態と作業場所のリモートより優先し、子の `gh` にも渡す |
+| `ndf cross-review run --repo <所有者>/<リポジトリ>` | 対象のリポジトリ。作業場所のリモートより優先し、子の `gh` にも渡す。保存済みの状態の対象（`target_repo`）と違えば、相手役を起動せず状態も書かずに `precondition` で止まる |
 | `ndf cross-review run --stop-on-hold` | 人の判断を待つ指摘が残れば `incomplete`、指摘ごとに `held_finding` の欠け |
 | `ndf cross-review run --reviewed-pr-out <ファイル>` | 始めに消し、`--reviewed-out` を書くときに読んだ `<所有者>/<リポジトリ>#<番号>` を書く |
 | `ndf loop acceptance check --no-criteria` | 確認の記録を調べず `ok`。`--criteria` とは一緒に受けない |

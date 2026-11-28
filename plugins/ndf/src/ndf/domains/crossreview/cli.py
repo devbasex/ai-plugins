@@ -551,7 +551,7 @@ def _filing_target(data: Mapping[str, Any], main: Optional[Path]) -> tuple[Optio
 def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: Filer) -> list[str]:
     """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
     rows = leftover.candidates(data, manual=filer.manual) if hub.leftovers is not None else []
-    if not rows and (hub.leftovers is None or not leftover.unrecorded(data)):
+    if not rows and (hub.leftovers is None or not leftover.unrecorded_urls(data)):
         return []
     # 起票の前提は、公開のロックの待ちとスレッドの同期の後に読む。公開し直すかの判定の結果は使い回さない
     main = filer.locate()
@@ -685,8 +685,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     修正のコミットはレビューを経ていないため、作業場所の HEAD でなくこの値を「レビューした HEAD」にする。始めに消すので、
     書けなかった起動の後に前の起動の値が残らない。
 
-    単位の経路の引数（#4369）: `--repo` は保存済みの状態と作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも
-    `GH_REPO` で渡す。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
+    単位の経路の引数（#4369）: `--repo` は作業場所のリモートより優先する対象のリポジトリで、子の `gh` にも `GH_REPO` で渡す。
+    状態ファイルの対象（`target_repo`）と違えば、状態を書く前に `precondition` で止まる（#3780）。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
     `--reviewed-out` を書くときに、実際に読めた PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。書くのは、レビューした
     HEAD が読んだ head か、この起動がその PR の head のリポジトリのブランチへ送った修正のコミットのときだけである。この引数を
     渡した起動は、始めに PR を読めないか head が取得した先頭と違えば、相手役を起動せずに `precondition` で止まる。
@@ -698,6 +698,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     if isinstance(ready, int):
         return ready
     cfg, state_repo = ready
+    if args.repo and state_repo and args.repo.casefold() != state_repo.casefold():
+        # 公開できないレビューに費用を使わず、別の PR の指摘とラウンドを状態へ混ぜない（#3780）
+        return _stop(
+            "precondition",
+            f"--repo の {args.repo} と状態ファイルの対象 {state_repo} が違う。別のリポジトリのレビューは別の --state-dir を指定する",
+        )
     made: list[Hub] = []
 
     def hub_once() -> Hub:
@@ -753,10 +759,10 @@ def _report(
     # （起票先が GitHub でない）で見送るだけなら、公開済みの記録を使う。リモートの確認は、起票先の設定が github で、
     # 前回の見送りが設定によるものでないときだけにする（ほかは公開の中で確認する。#3780）
     rows = leftover.candidates(data) if published else []
-    if published and (rows or leftover.unrecorded(data)):
+    if published and (rows or leftover.unrecorded_urls(data)):
         if leftover.SKIPPED not in data:
             # 起票の記録へ書けていない URL があれば、行に失敗が無くても公開し直して書き直す
-            published = not (leftover.unrecorded(data) or any(leftover_decide.Filed.ERROR in row for row in rows))
+            published = not (leftover.unrecorded_urls(data) or any(leftover_decide.Filed.ERROR in row for row in rows))
         else:
             skipped = data[leftover.SKIPPED]
             main = filer.locate()
@@ -839,7 +845,10 @@ def _run_parser(add: Callable[..., argparse.ArgumentParser]) -> None:
     r.add_argument("--max-rounds", type=int)
     r.add_argument("--findings")
     r.add_argument("--reviewed-out")
-    r.add_argument("--repo", help="対象のリポジトリ（<所有者>/<リポジトリ>）。保存済みの状態と作業場所のリモートより優先する")
+    r.add_argument(
+        "--repo",
+        help="対象のリポジトリ（<所有者>/<リポジトリ>）。作業場所のリモートより優先する。保存済みの状態の対象と違えば始めずに止まる",
+    )
     r.add_argument("--stop-on-hold", action="store_true", help="人の判断を待つ指摘が残れば incomplete で終える")
     r.add_argument(
         "--reviewed-pr-out",

@@ -301,6 +301,23 @@ def _open_value(value: Any) -> str:
     return encoded.replace("--", "-\\u002d")
 
 
+def _open_item(f: Mapping[str, Any], mark: Any, repo: Any) -> dict[str, Any]:
+    """`open_block` の一覧の、指摘 1 件の項目。`mark` はその指摘のスレッドの記録、`repo` は対象のリポジトリ。"""
+    thread = mark.get("comment") if isinstance(mark, Mapping) else None
+    keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
+    # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
+    if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
+        keep[criteria_decide.PROTECT] = list(kinds)
+    # 直さずに残した指摘と起票の URL（次の実行は残した指摘を引き継がず、URL だけを戻す。#3780）
+    if f.get(leftover_decide.PARKED):
+        keep[leftover_decide.PARKED] = True
+    # 確かめる前の URL は別の欄で残し、別の保存先でも確かめられるようにする。対象のリポジトリの Issue の URL だけを書く
+    for key in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR):
+        if url := leftover_decide.issue_url(f.get(key), repo):
+            keep[key] = url
+    return {**keep, "thread": thread if type(thread) is int else None}
+
+
 def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
     HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
@@ -308,32 +325,20 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     （PR 3944 の r6-4）。引き継いだ起票の URL のうち指摘の項目に無いものは、URL だけの項目で足す（その指摘が出ない実行を
     挟んでも、次の保存先へ渡す。#3780）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
-    items = []
-    for f in store.list_of(data, store.FINDINGS):
-        if not isinstance(f, Mapping) or f.get("outcome") != fin.UNRESOLVED:
-            continue
-        if _light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF:
-            continue
-        mark = done.get(f.get("id"))
-        thread = mark.get("comment") if isinstance(mark, Mapping) else None
-        keep = {k: f.get(k) for k in ("id", "text", "by", "severity", "path", "line", "section", *MARKS)}
-        # 保護の種類は許可した値だけを書く（持たない指摘は欄を足さない。#4363）
-        if kinds := criteria_decide.protect_of(f.get(criteria_decide.PROTECT)):
-            keep[criteria_decide.PROTECT] = list(kinds)
-        # 直さずに残した指摘と起票の URL（次の実行は残した指摘を引き継がず、URL だけを戻す。#3780）
-        if f.get(leftover_decide.PARKED):
-            keep[leftover_decide.PARKED] = True
-        # 確かめる前の URL は別の欄で残し、別の保存先でも確かめられるようにする。対象のリポジトリの Issue の URL だけを書く
-        for key in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR):
-            if url := leftover_decide.issue_url(f.get(key), data.get(store.REPO_KEY)):
-                keep[key] = url
-        items.append({**keep, "thread": thread if type(thread) is int else None})
+    repo = data.get(store.REPO_KEY)
+    items = [
+        _open_item(f, done.get(f.get("id")), repo)
+        for f in store.list_of(data, store.FINDINGS)
+        if isinstance(f, Mapping)
+        and f.get("outcome") == fin.UNRESOLVED
+        and not (_light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF)
+    ]
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):
         item[k] = cleaned
     held = {item.get(k) for item in items for k in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)}
     for carried in store.list_of(data, leftover_decide.CARRIED_URLS):
-        url = leftover_decide.issue_url(carried, data.get(store.REPO_KEY))
+        url = leftover_decide.issue_url(carried, repo)
         if url and url not in held:
             items.append({leftover_decide.PARKED: True, leftover_decide.Filed.URL: url})
     payload = "[" + ", ".join("{" + ", ".join(f"{_open_value(k)}: {_open_value(v)}" for k, v in item.items()) + "}" for item in items) + "]"

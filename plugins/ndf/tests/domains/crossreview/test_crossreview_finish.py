@@ -249,6 +249,7 @@ def _in_process_run(
     *extra: str,
     head: str | None = "a" * 40,
     read: str | None = "o/r#9",
+    saved: str | None = "saved/repo",
 ) -> tuple[int, dict, list]:
     """駆動と PR への記録を差し替えて `run` を打つ（git も相手役も起動しない）。HUB に渡った引数も返す。"""
     state = tmp_path / "state"
@@ -261,7 +262,7 @@ def _in_process_run(
         reader(7)
         return drive.Outcome(review, state / "summary.json", (), (), head, reviewed_pr=read)
 
-    monkeypatch.setattr(cli, "_ready", lambda args: (cfg, "saved/repo"))
+    monkeypatch.setattr(cli, "_ready", lambda args: (cfg, saved))
     monkeypatch.setattr(cli.drive, "drive", fake_drive)
     monkeypatch.setattr(cli, "_report", lambda *a: ([], []))
     monkeypatch.setattr(cli, "HUB", lambda *a: made.append(a) or cli.Hub(None, None, lambda pr: None))
@@ -270,10 +271,15 @@ def _in_process_run(
     return code, got, made
 
 
-def test_run_takes_the_given_repository_over_the_saved_state(
+def test_issue_3780_run_stops_before_the_review_when_the_repository_differs_from_the_saved_state(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`--repo` は保存済みの状態より優先して HUB と子の `gh` へ渡り、読んだ PR は駆動の結果の値で書く。"""
+    code, got, made = _in_process_run(monkeypatch, capsys, tmp_path, "--repo", "o/r")
+    assert got["cause"]["kind"] == "precondition" and "--state-dir" in got["summary"] and not made
+
+
+def test_run_takes_the_given_repository(tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--repo` は HUB と子の `gh` へ渡り（状態の対象は大文字小文字を区別せずに照らす）、読んだ PR は駆動の結果の値で書く。"""
     monkeypatch.setenv("GH_REPO", "before/repo")
     pr_out = tmp_path / "reviewed-pr"
     head_out = tmp_path / "reviewed-head"
@@ -288,9 +294,10 @@ def test_run_takes_the_given_repository_over_the_saved_state(
         str(pr_out),
         "--reviewed-out",
         str(head_out),
+        saved="O/R",
     )
     assert (code, got["cause"]["kind"]) == (6, "incomplete") and got["gaps"][0]["kind"] == fin.GAP_HELD
-    assert made == [("o/r", "saved/repo", tmp_path)] and os.environ["GH_REPO"] == "o/r"
+    assert made == [("o/r", "O/R", tmp_path)] and os.environ["GH_REPO"] == "o/r"
     assert pr_out.read_text(encoding="utf-8") == "o/r#9\n" and head_out.read_text(encoding="utf-8") == "a" * 40 + "\n"
 
 
@@ -332,6 +339,7 @@ def test_run_stops_when_the_reviewed_pr_cannot_be_written(
         str(tmp_path / "no-such-dir" / "reviewed-pr"),
         "--reviewed-out",
         str(tmp_path / "head"),
+        saved=None,
     )
     assert got["cause"]["kind"] == "precondition"
 
