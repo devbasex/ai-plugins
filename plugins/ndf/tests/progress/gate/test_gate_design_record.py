@@ -442,6 +442,48 @@ def test_only_the_recorded_move_of_the_carried_row_is_taken_back(st, machine, st
     assert run.read(st, machine.tid).context()["issues"] == [7, 8]
 
 
+def _empty_lane(conn, pid: str, name: str, **extra) -> None:
+    """未着手の行が無いレーンを足す（レーンの設定は行を 1 つ持つので、足してから中止にする）。"""
+    row = {"kind": "sprint", "issues": [99], "args": []}
+    plan.add_lane(conn, pid, {"name": name, "kind": "sprint", "touches": [f"{name}/"], "rows": [row], **extra})
+    first = lane.read_view(conn, pid)[1][name][0].key
+    lane.cancel_row(conn, pid, name, first, lane.RowChange("conductor", "整理"))
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_a_carried_row_moved_to_another_repository_is_left_as_it_is(st, machine, started):
+    pid, carried = _approved_with_a_drop(st, machine)
+    with store.transaction(st) as conn:
+        _empty_lane(conn, pid, "other", repo="example/other")
+        moved = plan.move_row(conn, pid, ("a", carried), "other", "移す")
+        if started:
+            lane.start_row(conn, pid, "other", moved, "other-sprint")
+
+    machine.turn()
+
+    with store.transaction(st) as conn:
+        rows = lane.read_view(conn, pid)[1]
+    assert {r.key: r.state for r in rows["other"]}[moved] == ("running" if started else "pending")
+    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
+
+
+def test_a_move_recorded_only_in_the_reason_is_followed(st, machine):
+    pid, carried = _approved_with_a_drop(st, machine)
+    with store.transaction(st) as conn:
+        _empty_lane(conn, pid, "b")
+        # `moved_from` を持たないバージョンの `ndf lanes move` が書いた事象と同じ形
+        lane.cancel_row(conn, pid, "a", carried, lane.RowChange("organizer", "レーン b へ移す: 移す"))
+        inp = {"kind": "sprint", "issues": [8], "args": []}
+        moved = lane.add_row(conn, pid, "b", inp, lane.RowChange("organizer", f"レーン a の行 {carried} から移した: 移す"))
+
+    machine.turn()
+
+    with store.transaction(st) as conn:
+        rows = lane.read_view(conn, pid)[1]
+    assert {r.key: r.state for r in rows["b"]}[moved] == "cancelled"
+    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
+
+
 # --- 入力の組み立て ------------------------------------------------------------------------------
 
 

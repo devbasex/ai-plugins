@@ -46,7 +46,7 @@ def _cancel_carried(conn: Any, machine_id: str, carried: str, reason: str) -> se
     """繰り越し行 `carried`（移していれば移した先）が未着手なら取り消し、開始済みで引き受けた課題を返す。
 
     追うのは移動の記録（`LaneRow.moved_from`）でつながる行だけで、入力が同じだけの別の行には触れない。
-    別のリポジトリのレーンの同じ番号は別の課題なので、引き受けた課題に数えない。
+    別のリポジトリのレーンの同じ番号は別の課題なので、そこへ移した行は取り消さず、引き受けた課題にも数えない。
     """
     found = lane.sprint_row(conn, machine_id)
     if found is None:
@@ -60,11 +60,11 @@ def _cancel_carried(conn: Any, machine_id: str, carried: str, reason: str) -> se
     while at in moved:
         at = moved[at]
     row = held.get(at)
-    if row is None or row.state == lane.CANCELLED:
-        return set()
     ln, key = at
+    if row is None or row.state == lane.CANCELLED or view.lane_repo(ln) != view.lane_repo(name):
+        return set()
     if row.state != lane.PENDING:
-        return row.issues() if view.lane_repo(ln) == view.lane_repo(name) else set()
+        return row.issues()
     try:
         lane.cancel_row(conn, plan_id, ln, key, lane.RowChange(run_view.CONDUCTOR, reason))
     except model.Refused as exc:
