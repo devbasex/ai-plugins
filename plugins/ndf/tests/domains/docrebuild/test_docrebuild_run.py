@@ -241,6 +241,19 @@ def test_requirements_follow_every_issue_in_the_design_name(tmp_path: Path) -> N
     }
 
 
+def test_requirements_pair_by_the_numbers_in_the_name(tmp_path: Path) -> None:
+    """#4735: 番号をまとめた要求仕様書も組にする。番号の一部（`78`）とリンクは組にしない。"""
+    for rel in ("issues/issue-7-8-requirements.md", "issues/issue-78-requirements.md"):
+        _write(tmp_path, rel)
+    (tmp_path / "issues/issue-7-requirements.md").symlink_to(tmp_path / "issues/issue-78-requirements.md")
+    targets = [Target("issues/issue-7-8-design.md", "design")]
+    assert drive.requirements_of(tmp_path, targets) == {"issues/issue-7-8-design.md": ["issues/issue-7-8-requirements.md"]}
+
+
+def test_requirements_without_the_issues_directory(tmp_path: Path) -> None:
+    assert drive.requirements_of(tmp_path, [Target(DESIGN, "design")]) == {}
+
+
 # --- 足すべき内容と確かめの記録 ---
 
 TARGETS = (Target(DESIGN, "design"), Target(PLAN, "plan"), Target("docs/a.md", "manuscript"))

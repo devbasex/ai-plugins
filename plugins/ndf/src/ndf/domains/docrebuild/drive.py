@@ -35,7 +35,6 @@ WORK_KIND = TOOL
 RESULT_SCHEMA = contracts.schema_path("io/document-rebuild.result")
 PROMPT_TEMPLATE = "contracts/worker/document-rebuild.md"
 SKILL = "skills/document-rebuild/SKILL.md"
-REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
@@ -151,15 +150,18 @@ def inspect(cwd: Path, found: Sequence[Target]) -> Inspection:
 def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]]:
     """設計書ごとの、組になる要求仕様のコピー（作業場所の通常ファイルのもの）。
 
-    組になるのは、設計書の名前に含まれる課題の番号すべての要求仕様である（`issue-7-8-design.md` なら課題 7 と 8）。
-    工程の `--issue` が課題 7 だけでも、課題 8 の要求仕様を落とさない。設計書でない対象と、コピーが 1 つも無い設計書は含めない。
+    組になるのは、名前の番号が設計書の名前の番号と重なる要求仕様である（`issue-7-8-design.md` なら課題 7 と 8 の
+    要求仕様と、番号をまとめた `issue-7-8-requirements.md`）。工程の `--issue` が課題 7 だけでも、課題 8 の要求仕様を
+    落とさない。設計書でない対象と、コピーが 1 つも無い設計書は含めない。
     """
+    names = (f"issues/{p.name}" for p in (cwd / "issues").glob("*-requirements.md"))
+    numbered = sorted((sorted(issue_docs.requirements_issues(rel)), rel) for rel in names)
     out: dict[str, list[str]] = {}
     for t in targets:
         if t.kind != "design":
             continue
-        paths = [REQUIREMENTS_FILE.format(number=n) for n in sorted(issue_docs.design_issues(t.path))]
-        found = [rel for rel in paths if _is_regular(cwd / rel)]
+        wanted = issue_docs.design_issues(t.path)
+        found = [rel for numbers, rel in numbered if wanted.intersection(numbers) and _is_regular(cwd / rel)]
         if found:
             out[t.path] = found
     return out

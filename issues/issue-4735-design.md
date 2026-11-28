@@ -1088,11 +1088,11 @@ NDF の更新より前に実装がマージされた Issue（以下、旧方式�
 
 ## 子の表の変更
 
-`checks/children.json` で変える行を次に示す。この節は設計の承認の後、実装（レビューの単位 `body-rewrite`）で足した。承認した設計書に無かったためである。
+`checks/children.json` で変える行を次に示す。この節は設計の承認の後、実装（レビューの単位 `body-rewrite`・`doc-parse`）で足した。承認した設計書に無かったためである。
 
 | 記号か表 | 項目 | 変更の前 | 変更の後 |
 | --- | --- | --- | --- |
-| `C3` | `packages` | `ndf.core.route`・`ndf.core.issue_docs`・`ndf.core.start_point` | `ndf.core.route`・`ndf.core.issue_docs`・`ndf.core.issue_body`・`ndf.core.start_point` |
+| `C3` | `packages` | `ndf.core.route`・`ndf.core.issue_docs`・`ndf.core.start_point` | `ndf.core.route`・`ndf.core.issue_docs`・`ndf.core.issue_body`・`ndf.core.requirements_decide`・`ndf.core.start_point` |
 
 ## 未確認のまま残ること
 
