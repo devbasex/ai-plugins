@@ -339,7 +339,7 @@ def _mvv_cite(args: argparse.Namespace, root: Path) -> dict[str, Any]:
 
 
 def _cleanup_stage(args: argparse.Namespace, root: Path) -> dict[str, Any]:
-    items = cleanup_stage.record_cleanup_stage(_hub(root), args.prs)
+    items = cleanup_stage.record_cleanup_stage(_hub(root), args.prs, root)
     failed = [i for i in items if i["result"] == cleanup_stage.FAILED]
     recorded = sum(1 for i in items if i["result"] == cleanup_stage.RECORDED)
     if failed:

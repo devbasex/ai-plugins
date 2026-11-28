@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import timedelta, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, Optional, Protocol
+
+from filelock import Timeout
 
 from ndf import identity
 from ndf.adapters.git import Git, GitError
 from ndf.adapters.github import GitHub, GitHubError, client
+from ndf.core import issue_body
 from ndf.progress import model, stages
 
 # 行を終えた状態（`ndf.progress.run.FINISHED` と同じ、コントラクト `workflow/progress.json` のスプリントの行の種類）
@@ -40,23 +43,9 @@ class View(Protocol):
     def context(self) -> dict[str, Any]: ...
 
 
-class Records(Protocol):
-    """課題と PR の本文の読み書き。"""
-
-    def read(self, number: int) -> str: ...
-
-    def write(self, number: int, body: str) -> None: ...
-
-
-@dataclass(frozen=True)
-class GitHubRecords:
-    hub: GitHub
-
-    def read(self, number: int) -> str:
-        return self.hub.issue_body(number).body
-
-    def write(self, number: int, body: str) -> None:
-        self.hub.rest("PATCH", f"/repos/{self.hub.repo}/issues/{int(number)}", {"body": body})
+# 課題と PR の本文の読み書きと、その GitHub の実装（書き換えの関数と同じ場所に置く）
+Records = issue_body.BodyStore
+GitHubRecords = issue_body.GitHubBodies
 
 
 def github_records(cwd: Path) -> Records:
@@ -113,13 +102,11 @@ def sync_records(v: View, cwd: Path, make: Callable[[Path], Records]) -> tuple[l
     except (GitError, GitHubError) as exc:
         return [], [f"進捗記録を書けない: {exc}"]
     items, errors = [], []
+    locks = issue_body.BodyLocks(cwd)
     for kind, number, heading, content in _targets(v):
         try:
-            body = records.read(number)
-            new = replace_section(body, heading, content)
-            if new != body:
-                records.write(number, new)
-            items.append({"kind": kind, "number": number, "changed": new != body})
-        except GitHubError as exc:
+            got = issue_body.rewrite(records, locks, number, partial(replace_section, heading=heading, content=content))
+            items.append({"kind": kind, "number": number, "changed": got.wrote})
+        except (GitError, GitHubError, Timeout, issue_body.LockError) as exc:
             errors.append(f"{kind} #{number} の進捗記録を書けない: {exc}")
     return items, errors
