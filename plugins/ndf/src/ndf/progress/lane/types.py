@@ -71,7 +71,10 @@ class PlanView:
 
 @dataclass(frozen=True)
 class LaneRow:
-    """レーンのステートマシンの行（スプリント 1 つ）。`answered_seq`・`resumed_seq` は回答と next のマーカーの事象の番号。"""
+    """レーンのステートマシンの行（スプリント 1 つ）。`answered_seq`・`resumed_seq` は回答と next のマーカーの事象の番号。
+
+    `moved_from` は、別のレーンから移した行（`ndf lanes move`）の元の（レーン, 行のキー）。
+    """
 
     key: str
     input: dict[str, Any]
@@ -81,6 +84,7 @@ class LaneRow:
     answered_seq: int = 0
     answered_at: Optional[datetime] = None
     resumed_seq: int = 0
+    moved_from: Optional[tuple[str, str]] = None
 
     @property
     def live(self) -> bool:

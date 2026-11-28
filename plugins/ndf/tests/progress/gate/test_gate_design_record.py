@@ -407,6 +407,40 @@ def test_a_carried_row_another_lane_waits_for_keeps_the_approval_until_released(
     assert "design-gate" in _done(st, machine.tid)
     assert "ndf lanes set" in run.report(v, run.decide(v))["summary"]
 
+    # after を外した後の retry と next は、止まったステップを打たずに承認を無効にしてレビューから流す
+    with store.transaction(st) as conn:
+        plan.change_lane(conn, pid, "b", {"after": []}, "指定を外す")
+    run.append(
+        st, machine.tid, lambda now: [model.EventDraft(run_view.RETRY_EVENT, run.CONDUCTOR, REVIEW, reason="approval_stale", rev=now.rev)]
+    )
+    machine.fake.calls.clear()
+    machine.turn()
+
+    assert machine.fake.calls[0].step == "design-pr-review"
+    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
+
+
+@pytest.mark.parametrize("started", [False, True])
+def test_only_the_recorded_move_of_the_carried_row_is_taken_back(st, machine, started):
+    pid, carried = _approved_with_a_drop(st, machine)
+    row = {"kind": "sprint", "issues": [8], "args": []}
+    # 別のリポジトリの、入力が同じだけの行
+    decl = {"name": "other", "kind": "sprint", "touches": ["o/"], "repo": "example/other", "rows": [row]}
+    with store.transaction(st) as conn:
+        plan.add_lane(conn, pid, decl)
+        plan.add_lane(conn, pid, {"name": "b", "kind": "sprint", "touches": ["b/"], "rows": [{**row, "issues": [99]}]})
+        moved = plan.move_row(conn, pid, ("a", carried), "b", "移す")
+        if started:
+            lane.start_row(conn, pid, "other", "r1", "other-sprint")
+
+    machine.turn()
+
+    with store.transaction(st) as conn:
+        rows = lane.read_view(conn, pid)[1]
+    assert {r.key: r.state for r in rows["b"]}[moved] == "cancelled"
+    assert rows["other"][0].state == ("running" if started else "pending")
+    assert run.read(st, machine.tid).context()["issues"] == [7, 8]
+
 
 # --- 入力の組み立て ------------------------------------------------------------------------------
 

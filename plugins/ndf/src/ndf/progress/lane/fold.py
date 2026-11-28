@@ -79,7 +79,9 @@ def _row_from(rows: dict[str, LaneRow], ev: model.Event) -> Optional[LaneRow]:
     d = ev.draft
     row = rows.get(d.row_key)
     if d.kind == "row_added":
-        return LaneRow(d.row_key, dict(d.payload["input"]), PENDING, reason=d.reason)
+        moved = d.payload.get("moved_from")
+        source = (moved["lane"], moved["row"]) if moved else None
+        return LaneRow(d.row_key, dict(d.payload["input"]), PENDING, reason=d.reason, moved_from=source)
     if row is None:
         return None
     if d.kind == "row_answered":

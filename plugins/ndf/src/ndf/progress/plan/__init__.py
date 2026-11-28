@@ -200,7 +200,8 @@ def move_row(conn: sa.Connection, pid: str, src: tuple[str, str], dest: str, rea
     if row is None:
         raise model.Refused(f"レーン {from_lane} に行 {key} は無い")
     lane.cancel_row(conn, pid, from_lane, key, lane.RowChange("organizer", f"レーン {dest} へ移す: {reason}"))
-    return lane.add_row(conn, pid, dest, row.input, lane.RowChange("organizer", f"レーン {from_lane} の行 {key} から移した: {reason}"))
+    change = lane.RowChange("organizer", f"レーン {from_lane} の行 {key} から移した: {reason}", moved_from=src)
+    return lane.add_row(conn, pid, dest, row.input, change)
 
 
 def pause_plan(conn: sa.Connection, pid: str, reason: str) -> list[str]:
