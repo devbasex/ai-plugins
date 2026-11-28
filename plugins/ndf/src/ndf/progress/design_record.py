@@ -126,16 +126,15 @@ def stale_step_drafts(v: run_view.View, stage: stages.StageDef, step: str, kind:
 
 
 def narrowed(record: Mapping[str, Any], drop: Sequence[int], root: Path) -> dict[str, Any]:
-    """課題を外す回答の記録。記録の HEAD の単位のファイルを `root` から読んで `without_issues` に渡す。"""
+    """課題を外す回答の記録。承認の記録の単位が持つファイルを記録の HEAD から読んで `without_issues` に渡す。"""
     head = record["review"]["head"]
     if not _fetched(Git(root), head):
         raise model.Refused(f"記録の HEAD {head} が手元に無く、取得もできないので課題を外せない")
-    tree = units_files.Tree(root, head)
+    # 実装計画を省いた課題の単位は `file` が空。記録に無いファイル（古い単位のファイルなど）は読まない
+    paths = sorted({u["file"] for u in record["units"] if u["file"]})
     try:
-        # 一覧は 1 回だけ取り、本文もまとめて読む（git の起動をファイル数に比例させない）
-        listing = tree.listing()
-        paths = sorted(set(units_files.find(tree, record["targets"]["issues"], sorted(listing)).values()))
-        texts = tree.read_all(paths, listing)
+        # 本文はまとめて読む（git の起動をファイル数に比例させない）
+        texts = units_files.Tree(root, head).read_all(paths)
         files = [units_files.parse_text(path, texts[path]) for path in paths]
     except (units_files.UnitsFileError, GitError) as exc:
         raise model.Refused(f"記録の HEAD の単位のファイルを読めないので課題を外せない: {exc}") from None
