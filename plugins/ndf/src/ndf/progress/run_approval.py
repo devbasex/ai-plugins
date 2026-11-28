@@ -160,7 +160,7 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     if got.differences:
         why = "承認の後に対象が変わった: " + " / ".join(got.differences)
         if got.merged:
-            why += approval_decide.merged_otherwise(got.head)
+            why += approval_decide.merged_otherwise(event_payload(m.event).get("seen"), got.head, got.base)
         wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
         # 取り消してから境界を進めるまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
         with store.approval_lock(d.st, v.machine_id):

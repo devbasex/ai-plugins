@@ -104,7 +104,7 @@ def standing(reader: TargetReader, root: Path) -> approval_decide.StandingOf:
         carried = read_accepted_head(run.work_root(root, v.machine_id), q.id) if seen.production is False else None
         found = approval_decide.differences(p, got.target.as_dict(), gate=gate, carried_head=carried)
         moved = _material_moved(root, q, seen)
-        return approval_decide.Standing([*found, *([moved] if moved else [])], got.merged, got.target.head)
+        return approval_decide.Standing([*found, *([moved] if moved else [])], got.merged, got.target.head, got.target.base)
 
     return of
 
@@ -177,7 +177,7 @@ def recheck(
     why = "回答した後に対象が変わった: " + " / ".join(changed)
     # 手で終えた工程はここで待ちへ戻り `consume_held` に届かないので、マージ済みの警告をここでも足す
     if m.progress.held_finish is not None and now.merged:
-        why += approval_decide.merged_otherwise(now.head)
+        why += approval_decide.merged_otherwise(p.get("seen"), now.head, now.base)
     if not how.advancing:
         return why + later
     return why if _send_back(st, v, m, why, revoke, how.locked) else None

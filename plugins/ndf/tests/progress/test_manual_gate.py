@@ -734,6 +734,25 @@ def test_a_posted_rejection_stops_the_merge_from_reading_the_earlier_approval(re
     v = run.read(st, tid)
     assert gate.approved_head(v, "design") is None
     assert run.approved_seen(run.StageAnswers(v, DESIGN), st.root) is None
+    _merge(env)
+    out = _next(st, tid, repo, env)
+    assert out["status"] == "gate" and _state(st, tid, DESIGN) == "running", out
+    assert _state(st, tid, DETAIL) == "pending" and env.calls == []
+
+
+def test_a_changed_material_alone_does_not_warn_of_another_merge(repo, st, env, capsys):
+    """承認したコミットをマージした後に承認資料だけが変われば、質問し直すが、違う内容のマージとは知らせない。"""
+    tid = _held_design(st, capsys, repo, env)
+    shown = _next(st, tid, repo, env)
+    q = gate.waiting(run.read(st, tid))
+    _answer(st, tid, repo, env, shown)
+    _merge(env)
+    asking.material_path(st.root, replace(q, target=gate.Target(merge_hub.HEAD))).write_text("変えた資料", encoding="utf-8")
+
+    out = _next(st, tid, repo, env)
+
+    assert out["status"] == "gate" and any("承認資料" in w for w in out["warnings"]), out
+    assert not any("マージされた" in w for w in out["warnings"]), out
 
 
 def test_an_approval_is_written_again_after_a_rejection_of_the_same_target(repo, st, env, capsys):

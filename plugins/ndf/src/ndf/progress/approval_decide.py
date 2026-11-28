@@ -24,11 +24,17 @@ class Standing(NamedTuple):
     differences: list[str]
     merged: bool
     head: Optional[str] = None
+    base: Optional[str] = None
 
 
-def merged_otherwise(head: Optional[str]) -> str:
-    """承認と違う対象になった PR がマージ済みのときに、質問し直す理由へ足す警告。"""
-    return f"（承認と違う内容がマージされた。今の head {head}）"
+def merged_otherwise(seen: Any, head: Optional[str], base: Optional[str]) -> str:
+    """マージ済みの PR のコミットかマージ先が、承認の見た対象 `seen`（事象の `seen`）と違うときに、質問し直す理由へ足す警告。
+
+    同じなら空（承認資料や本文だけが変わった場合）。どちらかの値が分からない項目は比べない。"""
+    held = seen if isinstance(seen, Mapping) else {}
+    if all(now is None or held.get(key) in (None, now) for key, now in (("head", head), ("base", base))):
+        return ""
+    return f"（承認と違う内容がマージされた。今の head {head}・マージ先 {base}）"
 
 
 # 照らす口（ステートマシン・承認ゲートの区分・対象の PR・承認の回答の事象）
