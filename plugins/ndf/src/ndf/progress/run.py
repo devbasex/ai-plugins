@@ -840,10 +840,8 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
 
 
 def _kept_by_objection(v: View, s: stages.StageDef, step: stages.StepDef, run: invoke.StageRun) -> invoke.StageRun:
-    """承認でない回答が残る設計の MVV 判定は `--no-skip` で打つ。判定は省くと決めた時点で承認の証跡を PR へ書くので、
-    後の承認ゲートで省かないだけでは、人の再承認の前にマージできてしまう（#4520）。"""
-    gate = approval_decide.DESIGN_GATE
-    if step.id != model.MVV_GATE_STEPS[gate] or not approval_decide.objection_remains(v.stage_events(s.name), gate):
+    """承認でない回答が残る設計の MVV 判定は `--no-skip` で打つ（`approval_decide.objection_bars_skip`）。"""
+    if not approval_decide.objection_bars_skip(v.stage_events(s.name), step.id):
         return run
     return replace(run, args={**run.args, "argv": [*run.args["argv"], "--no-skip"]})
 

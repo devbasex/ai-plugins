@@ -33,7 +33,7 @@ from ndf.domains.records import mvv_decide as md
 from ndf.domains.records import mvv_material_decide as mm
 from ndf.progress import definition
 from ndf.progress.gate.checks import MvvFacts, judgeable, may_skip, note, refusals
-from ndf.progress.model import MVV_GATE_STEPS, MVV_PACES, MVV_SKIP_GATES
+from ndf.progress.model import MVV_GATE_STEPS, MVV_PACES, MVV_SKIP_GATES, NO_SKIP
 
 # 判定の回答のスキーマ（contracts/schemas/mvv-verdict.schema.json）
 VERDICT_SCHEMA = "mvv-verdict"
@@ -45,8 +45,6 @@ DESIGN, RELEASE = "design", "release"
 GATE_STEPS = MVV_GATE_STEPS
 GATE_STAGES = {DESIGN: "design", RELEASE: "deploy"}
 # 省けない区分（リリース）の判定が why に足す理由（#3959 の決定 3）
-# 工程の入力に `ndf records mvv gate --no-skip` が足すキー（工程の定義の inputs ではない）
-NO_SKIP = "no_skip"
 OBJECTION_KEPT = "承認でない回答（変更要求か却下）が残るので、MVV 判定で省かない"
 RELEASE_KEPT = "リリース承認ゲートは、保留を読む PR の範囲が決まるまで（#4105）MVV 判定で省かない"
 # 手元のどの参照にも MVV の設定が無いときの理由（`mvv_declared_locally`。#3959）

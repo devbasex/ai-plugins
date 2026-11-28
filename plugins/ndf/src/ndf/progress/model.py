@@ -32,6 +32,8 @@ NDF_SCHEMA = "workflow/ndf.schema.json"
 # 承認ゲートを MVV 判定で省ける進め方（文脈の pace の一部）・省いた回答の回答した者・判定の結果を持つ文脈のキー
 MVV_PACES = contracts.schema_enum(CONTEXT, "/$defs/mvv_pace")
 MVV_SERVICE, MVV_KEY = "service:mvv", "mvv_gate"
+# 判定の入力に、省かない判定のときだけ足すキー（工程の定義の inputs ではない。`ndf records mvv gate` が読む）
+NO_SKIP = "no_skip"
 # 承認ゲートの区分 → その手前の MVV 判定のステップの id（工程の定義 stages/design.json・deploy.json の `<区分>-mvv`。表は 1 か所）
 MVV_GATE_STEPS = {gate: f"{gate}-mvv" for gate in contracts.schema_enum(CONTEXT, "/$defs/mvv_gate/properties/gate")}
 # MVV 判定で省いてよい承認ゲートの区分。リリース承認ゲートは保留を読む PR の範囲が決まるまで省かない（#3959 の決定 3。#4105 が足す）

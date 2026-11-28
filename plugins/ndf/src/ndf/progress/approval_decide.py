@@ -110,6 +110,14 @@ def objection_remains(rows: Sequence[model.Event], gate: Optional[str]) -> bool:
     return remains
 
 
+def objection_bars_skip(rows: Sequence[model.Event], step_id: str) -> bool:
+    """判定のステップ `step_id` の MVV 判定を、省かない指定で打つか。`rows` はその工程のすべての事象。
+
+    判定は省くと決めた時点で承認の証跡を PR へ書くので、後の承認ゲートで省かないだけでは、人の再承認の前にマージできてしまう。
+    工程を流す側（`next`）と `ndf records mvv gate --machine` の両方がここで決める（#4520）。"""
+    return step_id == model.MVV_GATE_STEPS[DESIGN_GATE] and objection_remains(rows, DESIGN_GATE)
+
+
 def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:
     """対象を読まずに決まる承認の候補。境界より後の最新の回答が、数える承認でなければ None。
 

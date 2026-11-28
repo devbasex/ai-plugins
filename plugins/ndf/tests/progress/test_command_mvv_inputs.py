@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from ndf.core import durable
-from ndf.progress import command, definition, invoke, model, stage_inputs, store
+from ndf.progress import command, definition, invoke, model, run, stage_inputs, store
 from ndf.progress.gate import finishing
 
 SHA = "a" * 64
@@ -61,6 +61,18 @@ def test_a_recorded_design_pr_is_not_added_to_the_inputs(repo, capsys, last_resu
     _run(capsys, last_result, "finish", tid, "設計", "--output", str(out_file), "--reason", "手で")
     assert _context(tid)["design_pr"] == 4
     assert "design_pr" not in stage_inputs.stage_inputs_of(repo, tid, "design-mvv")
+
+
+@pytest.mark.parametrize("value", ["request_changes", "rejected"])
+def test_a_remaining_objection_keeps_the_design_gate(repo, capsys, last_result, tmp_path, value):
+    # #4520: --no-skip を付けずに --machine で打っても、否定の回答が残る間の判定は省かない
+    tid = _machine(repo, capsys, last_result, tmp_path)
+    payload = {"kind": invoke.LISTEN, "gate": "design", "step": "design-gate", "answer": value, "late": True}
+    root = command.store_root_of(Path.cwd())
+    with store.open_store(store.default_url(root), root) as st:
+        run._write(st, tid, model.EventDraft("answered", "conductor", "設計", reason="直して", payload=payload, rev=1))
+
+    assert stage_inputs.stage_inputs_of(repo, tid, "design-mvv")[model.NO_SKIP] is True
 
 
 def test_an_unknown_machine_is_refused(tmp_path, monkeypatch):
