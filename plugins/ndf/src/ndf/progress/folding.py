@@ -13,7 +13,19 @@ from typing import Any, Optional
 
 from ndf.contracts import facts, result
 from ndf.progress import invoke, model, stages
-from ndf.progress.run_view import ANSWERED, FAILED, FINISH_HELD, FINISHED, REOPENED, STARTED, STEP_EVENT, View, event_payload
+from ndf.progress.run_view import (
+    ANSWERED,
+    APPROVAL_POSTING,
+    FAILED,
+    FINISH_HELD,
+    FINISHED,
+    REOPENED,
+    STARTED,
+    STEP_EVENT,
+    View,
+    event_payload,
+    posts_rejection,
+)
 
 
 def answer_word(word: str) -> str:
@@ -51,6 +63,8 @@ class StepProgress:
     finished_at: dict[str, int] = field(default_factory=dict)
     again: list[dict[str, Any]] = field(default_factory=list)
     held_finish: Optional[dict[str, Any]] = None
+    # `answer` の後に却下か変更要求の投稿を試みた承認ゲートの区分（`approval_decide.rejection_posted_after` と同じ失効条件）
+    rejecting: set[Optional[str]] = field(default_factory=set)
 
     def next_step(self, stage: stages.StageDef) -> Optional[stages.StepDef]:
         if self.held_finish is not None:
@@ -126,7 +140,12 @@ class StepProgress:
             self.held, self.again, self.held_finish = set(), [], None
             self.notes = p["notes"]
         elif ev.seq > self.anchor:
-            self.answer = ev
+            self.answer, self.rejecting = ev, set()
+
+    def _posting(self, ev: model.Event, p: dict[str, Any]) -> None:
+        """証跡の投稿を試みた記録。却下と変更要求なら、承認ゲートの区分を覚える。"""
+        if posts_rejection(ev):
+            self.rejecting.add(p["rejecting"])
 
 
 # 事象の種類 → 進みを書き換える StepProgress のメソッド（表に無い種類は進みを変えない）
@@ -137,6 +156,7 @@ _SEES: dict[str, Callable[[StepProgress, model.Event, dict[str, Any]], None]] = 
     STEP_EVENT: StepProgress._recorded,
     REOPENED: StepProgress._reopened,
     FINISH_HELD: StepProgress._finish_held,
+    APPROVAL_POSTING: StepProgress._posting,
 }
 
 

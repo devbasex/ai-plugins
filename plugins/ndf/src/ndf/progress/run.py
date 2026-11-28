@@ -127,13 +127,6 @@ def _void_answer(v: View, ev: Optional[model.Event], gate: Optional[str]) -> boo
     return ev is not None and model.mvv_answer_void(event_payload(ev), gate)
 
 
-def _rejected_since(v: View, stage: str, ev: Optional[model.Event], gate: Optional[str]) -> bool:
-    """承認の回答 `ev` の後に、却下か変更要求の投稿を試みた記録があるか（`approval_decide.counted_approval` と同じ失効条件）。"""
-    if ev is None or event_payload(ev).get("answer") != invoke.APPROVED:
-        return False
-    return approval_decide.rejection_posted_after(v.row_events(stage), gate, ev.seq)
-
-
 def _reopen(v: View, s: stages.StageDef, prog: StepProgress) -> None:
     """数えない MVV 判定の回答で済んだ承認ゲートのステップを、後ろのステップが済んでいなければ済んでいないものにする（#3959）。
 
@@ -160,7 +153,8 @@ def _running_move(v: View, s: stages.StageDef) -> Move:
         return Move(Action.RESUME, s, None, prog)
     listen = invoke.is_listen(step)
     # 失効した承認は読まずに待ちにする。回答を読む手で断ると、質問が待ちにならず回答し直せない
-    void = _void_answer(v, prog.answer, step.gate) or (listen and _rejected_since(v, s.name, prog.answer, step.gate))
+    rejected = listen and prog.answer_value() == invoke.APPROVED and step.gate in prog.rejecting
+    void = rejected or _void_answer(v, prog.answer, step.gate)
     answer = None if void else prog.answer
     waiting = listen or (prog.waiting is not None and prog.waiting["step"] == step.id)
     held = prog.waiting is not None or step.id in prog.held
