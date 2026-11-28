@@ -686,7 +686,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     状態ファイルの対象（`target_repo`）と違えば、状態を書く前に `precondition` で止まる（#3780）。`--stop-on-hold` は人の判断を待つ指摘が残れば incomplete にする。`--reviewed-pr-out` は
     `--reviewed-out` を書くときに、実際に読めた PR を `<所有者>/<リポジトリ>#<番号>` で書く（始めに消す）。書くのは、レビューした
     HEAD が読んだ head か、この起動がその PR の head のリポジトリのブランチへ送った修正のコミットのときだけである。この引数を
-    渡した起動は、始めに PR を読めないか head が取得した先頭と違えば、相手役を起動せずに `precondition` で止まる。
+    渡した起動と、状態にまだ対象のリポジトリが無い起動は、始めに PR を読めないか head が取得した先頭と違えば、相手役を
+    起動せずに `precondition` で止まる（同じコマンドを打ち直して再開する）。
     """
     refused = _begin_run(args)
     if refused is not None:

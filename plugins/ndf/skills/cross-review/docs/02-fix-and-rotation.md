@@ -60,7 +60,9 @@ PR に載せずに `mvv_unresolved` で止める。次の起動は、始めに�
 ## 終わり方
 
 `run` は終わると `--state-dir` へ要約（`summary.json`）を書き、終わり方から結果 JSON を出す。同じ判断を要約から出し直すときは
-`ndf cross-review finish --summary <summary.json> [--findings <F>]` を打つ（読むだけ）。
+`ndf cross-review finish --summary <summary.json> [--findings <F>]` を打つ（読むだけ）。出し直せるのは、要約から決まる終わり方と
+欠けである。直さずに残した指摘の件数（`summary` の「残した指摘 N（起票 M）」）と、残した MVV 違反の `decisions`（理由と URL）は
+出ない。これらは `run` の結果 JSON を読むか、PR の記録のコメントの指摘の表と起票した Issue で確かめる。
 
 | 終わり方（`final`） | 欠け（`gaps`） | 結果 |
 | --- | --- | --- |

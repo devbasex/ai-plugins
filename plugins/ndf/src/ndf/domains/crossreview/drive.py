@@ -863,19 +863,18 @@ def _drive_rounds(run: _Run, launch: Launcher, reader_for: Optional[carry.Reader
     prs = carry.reader(cfg, reader_for, run.warnings)
     prior = carry.read_prior(prs, run.warnings)
     run.read_pr = reviewed_pr.seen(run, prior.pr)
+    # 保存済みのラウンドがどのリポジトリの PR のものか確かめられないので、後で読んだ PR へ結び直さない（#3780）
+    if store.repo_of(run.data) is None and store.list_of(run.data, store.ROUNDS):
+        raise DriveStopped("precondition", store.target_unknown(cfg.state_dir))
     reason = reviewed_pr.why_unread(run, prior.pr)
     if reason is not None:
         # 読めなかった原因は注意にある。結果へ載る文なので秘密を伏せる
-        detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}", *run.warnings]
+        detail = [f"レビューを始める前に止めた。読んだ PR を確かめられない: {reason}。直したら同じコマンドを打ち直す", *run.warnings]
         raise DriveStopped("precondition", "\n".join(str(line) for line in run_log.redact(detail)))
-    if store.repo_of(run.data) is None:
-        # 保存済みのラウンドがどのリポジトリの PR のものか確かめられないので、後で読んだ PR へ結び直さない（#3780）
-        if store.list_of(run.data, store.ROUNDS):
-            raise DriveStopped("precondition", store.target_unknown(cfg.state_dir))
-        if run.read_pr is not None:
-            # 公開と起票先の確認に使う。head を確かめて読んだ PR のリポジトリだけを書く（#3780）
-            run.data[store.REPO_KEY] = run.read_pr.ident.partition("#")[0]
-            _save(run)
+    if store.repo_of(run.data) is None and run.read_pr is not None:
+        # 公開と起票先の確認に使う。head を確かめて読んだ PR のリポジトリだけを書く（#3780）
+        run.data[store.REPO_KEY] = run.read_pr.ident.partition("#")[0]
+        _save(run)
     if carry.carry(run, prior):
         _save(run)
     if carry.restate(run):

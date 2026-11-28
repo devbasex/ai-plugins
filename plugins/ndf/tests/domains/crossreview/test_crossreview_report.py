@@ -226,7 +226,7 @@ def test_run_keeps_its_outcome_when_the_record_cannot_be_written(wt: Path, tmp_p
 def test_issue_3780_2_filing_needs_the_settings_of_the_target_repository(
     state_repo: Optional[str], own: Optional[str], refused: bool
 ) -> None:
-    def remote_repo() -> str:
+    def remote_repo(remote: str) -> str:
         if own is None:
             raise git.GitError("リモートが無い")
         return own
@@ -329,14 +329,19 @@ def test_issue_3780_2_run_does_not_bind_saved_rounds_to_the_read_repository(
     assert store.state_repo(ref) is None and not fake.calls and hub.comments == [] and ref.path.is_file()
 
 
-def test_issue_3780_2_run_publishes_nothing_when_the_pr_was_not_read(wt: Path, tmp_path: Path, capsys, monkeypatch, hub) -> None:
-    """PR を読めずに対象の無いまま終えた run は、起票の候補が無くても公開せず、打ち直しの report でなく別の保存先を案内する。"""
+def test_issue_3780_2_run_resumes_with_the_same_command_after_the_pr_was_not_read(
+    wt: Path, tmp_path: Path, capsys, monkeypatch, hub
+) -> None:
+    """対象の無い状態で PR を読めなければ、相手役を起動せず、何も公開せずに止める。読めるようになれば同じ保存先で始まる。"""
+    read = threads.ReadPr(f"o/r#{PR}", BRANCH, sh(wt, "rev-parse", "HEAD").strip(), "o/r")
     monkeypatch.setattr(hub.port, "read_pr", lambda: None)
-    fake = Fake(tmp_path / "st", {"codex": [["一つ目"]], "kiro": [[]]}, decide=lambda fid: None)
-    _, got = _run(capsys, monkeypatch, fake, wt, "--max-rounds", "1")
-    assert fake.calls and (hub.comments, hub.port.opened) == ([], [])
-    [warning] = [w for w in got["warnings"] if "target_repo" in w]
-    assert "別の --state-dir" in warning and "cross-review report" not in warning
+    fake = Fake(tmp_path / "st", {"codex": [[]], "kiro": [[]]})
+    code, got = _run(capsys, monkeypatch, fake, wt)
+    assert code != 0 and got["cause"]["kind"] == "precondition"
+    assert not fake.calls and (hub.comments, hub.port.opened) == ([], [])
+    monkeypatch.setattr(hub.port, "read_pr", lambda: read)
+    code, _ = _run(capsys, monkeypatch, fake, wt)
+    assert code == 0 and fake.calls and store.state_repo(store.state_pr(fake.state_dir, PR)) == "o/r"
 
 
 def test_report_writes_the_record_from_a_left_state_file(tmp_path: Path, capsys, monkeypatch, hub) -> None:
@@ -899,3 +904,10 @@ def test_issue_3780_2_run_results_point_a_left_finding_at_the_record(wt: Path, t
     written = len(hub.comments)
     code, again = _run(capsys, monkeypatch, Fake(fake.state_dir, {"codex": [], "kiro": []}), wt)
     assert code == 0 and len(hub.comments) == written + 1, again
+
+
+def test_issue_3780_2_published_state_changes_with_a_carried_url_only() -> None:
+    state = {"pr": PR, "target_repo": "o/r", "rounds": [], "findings": []}
+    before = report_decide.published_state(PR, state, fin.CONVERGED)
+    state["issue_carried_urls"] = ["https://github.com/o/r/issues/5"]
+    assert report_decide.published_state(PR, state, fin.CONVERGED) != before

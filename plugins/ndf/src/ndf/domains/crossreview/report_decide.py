@@ -160,6 +160,9 @@ def published_state(pr: int, data: Mapping[str, Any], final: Optional[str], noti
         "findings": store.list_of(data, store.FINDINGS),
         "threads": data.get(THREADS),
     }
+    # 引き継いだ URL だけの項目が増えても本文は変わる（#3780）。無ければキーを足さない
+    if loose := _loose_urls(data):
+        shown["carried"] = loose
     # 注意が無ければキーを足さず、注意を比べないバージョンの要約と同じ値にする
     if notices:
         shown["notices"] = list(notices)
@@ -321,6 +324,26 @@ def _open_item(f: Mapping[str, Any], mark: Any, repo: Optional[str]) -> dict[str
     return {**keep, "thread": thread if type(thread) is int else None}
 
 
+def _listed_findings(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """記録のコメントの末尾の一覧に載せる指摘の行。"""
+    return [
+        f
+        for f in store.list_of(data, store.FINDINGS)
+        if isinstance(f, Mapping)
+        and f.get("outcome") == fin.UNRESOLVED
+        and not (_light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF)
+    ]
+
+
+def _loose_urls(data: Mapping[str, Any]) -> list[str]:
+    """引き継いだ起票の URL のうち、末尾の一覧の指摘の項目に無く、URL だけの項目で載せるもの。"""
+    repo = store.repo_of(data)
+    keys = (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)
+    held = {_own_issue(f.get(k), repo) for f in _listed_findings(data) for k in keys}
+    carried = (_own_issue(u, repo) for u in store.list_of(data, leftover_decide.CARRIED_URLS))
+    return [url for url in carried if url and url not in held]
+
+
 def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     """未解決の重い指摘と、重さによらず載せる指摘（必ず人の承認が要る操作に当たるもの・NDF が機械で確かめて作ったもの）の一覧を
     HTML のコメントに埋めた行（次の実行が `open_items` で読む）。`thread` はスレッドの最初のコメントの id（スレッドが無ければ null）。自由記述の値は JSON にする前に `clean`（書き先に応じた伏せ字。値の並びを
@@ -329,21 +352,11 @@ def open_block(data: Mapping[str, Any], clean: Cleaner = _same) -> str:
     挟んでも、次の保存先へ渡す。#3780）。"""
     done = data.get(THREADS) if isinstance(data.get(THREADS), Mapping) else {}
     repo = store.repo_of(data)
-    items = [
-        _open_item(f, done.get(f.get("id")), repo)
-        for f in store.list_of(data, store.FINDINGS)
-        if isinstance(f, Mapping)
-        and f.get("outcome") == fin.UNRESOLVED
-        and not (_light(f) and not f.get(fin.REDLINE) and f.get("by") != BY_NDF)
-    ]
+    items = [_open_item(f, done.get(f.get("id")), repo) for f in _listed_findings(data)]
     slots = [(item, k) for item in items for k in _OPEN_TEXTS if isinstance(item[k], str)]
     for (item, k), cleaned in zip(slots, clean([item[k] for item, k in slots]) if slots else ()):
         item[k] = cleaned
-    held = {item.get(k) for item in items for k in (leftover_decide.Filed.URL, leftover_decide.Filed.PRIOR)}
-    for carried in store.list_of(data, leftover_decide.CARRIED_URLS):
-        url = _own_issue(carried, repo)
-        if url and url not in held:
-            items.append({leftover_decide.PARKED: True, leftover_decide.Filed.URL: url})
+    items += [{leftover_decide.PARKED: True, leftover_decide.Filed.URL: url} for url in _loose_urls(data)]
     payload = "[" + ", ".join("{" + ", ".join(f"{_open_value(k)}: {_open_value(v)}" for k, v in item.items()) + "}" for item in items) + "]"
     return f"{OPEN_MARK}{payload} -->"
 

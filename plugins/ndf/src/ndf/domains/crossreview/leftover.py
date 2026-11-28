@@ -118,7 +118,8 @@ def unconfirmed_target(main: Path, state_repo: Optional[str], make: Callable[[Pa
     if not state_repo:
         return f"{skipped}（状態ファイルに対象のリポジトリが無く、元の PR のリポジトリを確かめられない）"
     try:
-        own = make(main).remote_repo()
+        # 主 worktree は分かっているので、リモート名を決めるための `git worktree list` を起動し直さない
+        own = make(main).remote_repo(git.remote_of(main))
     except (git.GitError, OSError) as exc:
         return f"{skipped}（メインディレクトリのリポジトリを確かめられない: {exc}）"
     if own.casefold() != state_repo.casefold():

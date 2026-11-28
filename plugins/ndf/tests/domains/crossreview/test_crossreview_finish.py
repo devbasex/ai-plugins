@@ -420,11 +420,13 @@ def test_an_unconfirmed_pull_request_stops_before_the_reviewers(
     monkeypatch.setattr(carry, "reader", lambda cfg, reader_for, warnings: None)
     monkeypatch.setattr(carry, "read_prior", lambda prs, warnings: carry.Prior(pr=pr))
     cfg = SimpleNamespace(check_pr=True, branch="feat/x")
-    run = SimpleNamespace(cfg=cfg, synced_head="h0", sent="h0", read_pr=None, warnings=[])
+    run = SimpleNamespace(cfg=cfg, data={}, synced_head="h0", sent="h0", read_pr=None, warnings=[])
     with pytest.raises(drive.DriveStopped, match=reason) as stopped:
         drive._drive_rounds(run, lambda spec: pytest.fail("相手役を起動した"), None)
     assert stopped.value.kind == "precondition"
     run.cfg.check_pr = False
+    assert reviewed_pr.why_unread(run, pr) is not None  # 状態に対象のリポジトリが無いので、確認が要る
+    run.data = {store.REPO_KEY: "o/r"}
     assert reviewed_pr.why_unread(run, pr) is None
 
 
