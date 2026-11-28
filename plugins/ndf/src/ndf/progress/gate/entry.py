@@ -615,8 +615,8 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     verify = verifier(st, seen, docs_only, revoke, reader.forget, take if advancing else lambda: None)
     env = replace(_drive_env(st, reader, revoke), verify=verify)
     out = run.COMMANDS[a.action](run.with_env(a, env), cwd, st)
-    if a.action in ("wait", "work"):
-        reader.forget()  # 待ちと作業の間に PR が変わりうるので、承認資料は読み直した対象で作る
+    if a.action == "wait":
+        reader.forget()  # 待ちの間に PR が変わりうるので、承認資料は読み直した対象で作る（`work` はステップを流すたびに捨てる）
     return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in before if w])
 
 

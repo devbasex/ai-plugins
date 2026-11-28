@@ -12,7 +12,7 @@ from typing import Any, NamedTuple, Optional
 from ndf.core import merge_approval
 from ndf.progress import invoke, model, stages
 from ndf.progress.folding import step_progress
-from ndf.progress.run_view import ANSWERED, STEP_EVENT, View, closes_only, ends_approvals, event_payload
+from ndf.progress.run_view import ANSWERED, APPROVAL_POSTING, STEP_EVENT, View, closes_only, ends_approvals, event_payload
 
 # 設計承認ゲートの区分（承認した PR のマージまで確かめる承認ゲート）
 DESIGN_GATE = next(g for g in model.table()["gates"] if g == "design")
@@ -103,6 +103,13 @@ def _target_of(seen: Any, head: Any = None) -> Optional[merge_approval.MergeTarg
     return merge_approval.MergeTarget(repo, number, base, sha)
 
 
+def _record_of(answer: Mapping[str, Any]) -> str:
+    """回答の payload の、証跡の記録の識別子。"""
+    seen = answer.get("seen")
+    shown = seen.get("presentation") if isinstance(seen, Mapping) else None
+    return merge_approval.presented_record_id(str(answer.get("gate_id")), shown)
+
+
 def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
     """事象が証跡を書いた承認の対象と記録の識別子。承認の回答と、省くと決めた MVV 判定の記録（判定のコマンドが証跡を書く）を読む。"""
     p = event_payload(ev)
@@ -111,7 +118,7 @@ def _trail(ev: model.Event) -> Optional[tuple[merge_approval.MergeTarget, str]]:
         target = _target_of(seen) if p.get("answer") == invoke.APPROVED and not closes_only(p) else None
         if target is None:
             return None
-        return target, merge_approval.presented_record_id(str(p.get("gate_id")), seen.get("presentation"))
+        return target, _record_of(p)
     if ev.draft.kind != STEP_EVENT:
         return None
     report = p.get("report")
@@ -135,11 +142,32 @@ def revocations(since: Mapping[str, Sequence[model.Event]], machine_id: str, nam
             target, approval = trail
             approvals = found[target].approvals if target in found else frozenset()
             found[target] = merge_approval.Revocation(target, approvals | {approval}, f"reopen:{machine_id}:{name}:{ev.seq}")
-    return list(found.values())
+    held = list(found.values())
+    for name in names:
+        for target, record in _unrecorded(since[name]):
+            at = next((i for i, r in enumerate(held) if r.target.same(target)), None)
+            if at is None:
+                reopen_id = f"reopen:{machine_id}:{name}:{record}"
+                held.append(merge_approval.Revocation(target, frozenset({record}), reopen_id, unconfirmed=True))
+            else:
+                held[at] = held[at]._replace(approvals=held[at].approvals | {record})
+    return held
+
+
+def _unrecorded(rows: Sequence[model.Event]) -> list[tuple[merge_approval.MergeTarget, str]]:
+    """工程の事象の列で、証跡の投稿を試みて回答が記録されていない承認の対象と記録の識別子（古い順）。
+
+    回答は証跡を投稿した後の DB の確定に失敗しうるので、投稿の前の記録（`APPROVAL_POSTING`）から指す。直近の承認の境界より
+    前の記録は数えない（境界へ移るときに取り消してある）。"""
+    cut = max((ev.seq for ev in rows if ends_approvals(ev)), default=0)
+    answered = (event_payload(ev) for ev in rows if ev.draft.kind == ANSWERED)
+    recorded = {_record_of(p) for p in answered}
+    posted = (event_payload(ev) for ev in rows if ev.seq > cut and ev.draft.kind == APPROVAL_POSTING)
+    return [(merge_approval.MergeTarget(*p["target"]), p["record"]) for p in posted if p["record"] not in recorded]
 
 
 def stage_revocations(v: View, stage: str) -> list[merge_approval.Revocation]:
-    """工程の直近の承認の境界（`ends_approvals`）より後の承認の取り消し。手で終えた回答待ちか質問の出し直しで境界が移るときに、
+    """工程の直近の承認の境界（`ends_approvals`）より後の承認（回答が記録されていない投稿を含む）の取り消し。手で終えた回答待ちか質問の出し直しで境界が移るときに、
     移る前に渡す。境界より前の承認は、その境界へ移るときに取り消してある。"""
     rows = [ev for ev in v.events if ev.draft.row_key == stage]
     cut = max((ev.seq for ev in rows if ends_approvals(ev)), default=0)

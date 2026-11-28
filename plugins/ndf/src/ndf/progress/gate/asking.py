@@ -515,39 +515,6 @@ def read_presented(root: Path, q: Question) -> Target:
         return Target()
 
 
-# 承認の証跡の投稿を試みた対象の控え（作業の保存先の承認資料のディレクトリ。工程ごとの質問の出し直しをまたいで残す）
-POSTED_NAME = "posted-approvals.json"
-
-
-def read_posted(root: Path, machine_id: str) -> list[tuple[str, merge_approval.MergeTarget, str]]:
-    """控えの（工程, 承認の対象, 記録の識別子）を古い順に返す。控えが無ければ空。"""
-    try:
-        text = _posted_path(root, machine_id).read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return []
-    return [(stage, merge_approval.MergeTarget(*target), record) for stage, target, record in json.loads(text)]
-
-
-def write_posted(root: Path, machine_id: str, rows: Iterable[tuple[str, merge_approval.MergeTarget, str]]) -> None:
-    """控えを書き直す。呼び手が回答と共有する排他（`store.approval_lock`）を持つ。"""
-    path = _posted_path(root, machine_id)
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    held = [[stage, list(target), record] for stage, target, record in rows]
-    with _private_temp(path.parent, json.dumps(held, ensure_ascii=False) + "\n") as tmp:
-        os.replace(tmp, path)
-
-
-def note_posted(root: Path, machine_id: str, stage: str, target: merge_approval.MergeTarget, record: str) -> None:
-    """承認の証跡を投稿する前に控える。投稿の後に DB の確定が失敗し、資料を出し直しても、取り消す承認を指せる。"""
-    rows = read_posted(root, machine_id)
-    if (stage, target, record) not in rows:
-        write_posted(root, machine_id, [*rows, (stage, target, record)])
-
-
-def _posted_path(root: Path, machine_id: str) -> Path:
-    return run.work_root(root, machine_id) / MATERIAL_DIR / POSTED_NAME
-
-
 # オーガナイザーのリリースの回答の語 → 承認ゲートの回答の語（`release.take_reply` と、中継を確かめる `answering` が共有する）
 ORGANIZER_ANSWERS = {plan.RELEASED: run.APPROVED, plan.REJECTED: run.REJECTED}
 # リクエストの中身の kind（計画のステートマシンのリクエスト。リクエストの ID の頭にも使う）

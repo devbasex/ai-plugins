@@ -16,7 +16,7 @@ import pytest
 from result_json import last_result
 
 from ndf.core import merge_approval
-from ndf.progress import command, gate, invoke, model, run, store
+from ndf.progress import approval_decide, command, gate, invoke, model, run, store
 from ndf.progress.gate import answering, finishing, release, targets
 
 ISSUE = 4520
@@ -115,14 +115,23 @@ _FLAGS = {
 
 
 def _answer(
-    st, tid, repo, env, shown: dict, value: str = "approved", key: str = "k-1", notes: Path | None = None, post=lambda row: True
+    st,
+    tid,
+    repo,
+    env,
+    shown: dict,
+    value: str = "approved",
+    key: str = "k-1",
+    notes: Path | None = None,
+    post=lambda row: True,
+    by: str = "human:reviewer",
 ) -> dict:
     """提示した route が固定する対象を見て回答する（`ndf answer` と同じ引数）。"""
     argv = shown["routes"][value]["argv"]
     seen = gate.Target(**{_FLAGS[f]: v for f, v in zip(argv, argv[1:]) if f in _FLAGS})
     qid = shown["metrics"]["gate"]["id"]
     env.reader.forget()
-    a = gate.Answer(qid, value, "回答", "human:reviewer", key, notes, seen=seen)
+    a = gate.Answer(qid, value, "回答", by, key, notes, seen=seen)
     return gate.answer(st, tid, a, answering.github_observe(repo, st.root, reader=env.reader), post)
 
 
@@ -602,7 +611,7 @@ def test_a_reopen_revokes_an_approval_whose_answer_was_not_recorded(repo, st, en
     target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
     rows = merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer())
     assert out["status"] == "ok" and merge_approval.merge_judgment(rows, target) is None, out
-    assert env.hub.dequeued == [DESIGN_PR] and answering.read_posted(st.root, tid) == []
+    assert env.hub.dequeued == [DESIGN_PR] and approval_decide.stage_revocations(run.read(st, tid), DESIGN) == []
 
 
 def test_a_recorded_approval_leaves_no_posted_note(repo, st, env, capsys):
@@ -611,7 +620,48 @@ def test_a_recorded_approval_leaves_no_posted_note(repo, st, env, capsys):
 
     _answer(st, tid, repo, env, _next(st, tid, repo, env), post=answering.github_post(repo, hub=lambda: env.hub))
 
-    assert env.hub.comments_of and answering.read_posted(st.root, tid) == []
+    revocations = approval_decide.stage_revocations(run.read(st, tid), DESIGN)
+    assert env.hub.comments_of and [r.unconfirmed for r in revocations] == [False]
+
+
+def test_a_send_back_revokes_an_approval_whose_answer_was_not_recorded(repo, st, env, capsys):
+    """先の提示への未確定の証跡は、後の回答を待ちへ戻すときにも取り消す（対象が元へ戻っても使えない）。"""
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    write = answering.github_post(repo, hub=lambda: env.hub)
+    _fail_answer(st, tid, repo, env, _next(st, tid, repo, env), write)
+    env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, head=merge_hub.OTHER)
+    _answer(st, tid, repo, env, _next(st, tid, repo, env), key="k-2", post=write)
+    env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, base="develop")
+    env.hub.files["develop"] = env.hub.files["main"]
+    env.reader.forget()
+    revoked: list = []
+
+    gate.recheck(st, tid, answering.github_observe(repo, st.root, reader=env.reader), revoke=revoked.extend)
+
+    assert {r.target.head for r in revoked} == {merge_hub.HEAD, merge_hub.OTHER}
+
+
+def test_an_unrecorded_approval_is_found_without_the_checkout_files(repo, st, env, capsys):
+    """投稿前の記録はステートマシンの DB にあり、別の保存先から開いた操作も取り消す承認を指せる。"""
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    _fail_answer(st, tid, repo, env, _next(st, tid, repo, env))
+
+    (held,) = approval_decide.stage_revocations(run.read(st, tid), DESIGN)
+
+    assert held.unconfirmed and held.target.number == DESIGN_PR
+
+
+@pytest.mark.parametrize("by", ["conductor", "service:bot"])
+def test_a_held_stage_is_approved_only_by_a_person(repo, st, env, capsys, by):
+    """本番へ反映されないマージでも、手で終えた工程の承認は人の回答に限る。"""
+    env.hub.files["main"] = (merge_hub.project_text(merge_hub.strategy(base="main", production="prod")), "c2")
+    tid = _held_design(st, capsys, repo, env)
+    shown = _next(st, tid, repo, env)
+
+    with pytest.raises(model.Refused, match="確定しない"):
+        _answer(st, tid, repo, env, shown, by=by)
 
 
 def test_an_answer_is_compared_with_the_target_read_under_the_work_lock(repo, st, env, capsys):
