@@ -493,8 +493,12 @@ def test_issue_3780_a_finding_no_longer_filed_still_gets_its_carried_issue_back(
     # 指摘と引き継いだ URL の組が同じ間は照らし直さず、URL が増えれば照らし直す
     calls = len(github.calls)
     assert leftover.candidates(again.data) == [] and again.go() == [] and len(github.calls) == calls
+    # 利用者が打った公開は照らし直し、書き足された目印の Issue を戻す
+    github.issues[0]["body"] += "\n" + leftover_decide.issue_mark(leftover_decide.identity(7, other["text"]))
+    assert leftover.candidates(again.data, manual=True) == [other]
     again.data[leftover.CARRIED_URLS] = [url, f"{ISSUES}999"]
     assert leftover.candidates(again.data) == [other]
+    assert again.go(manual=True) == [] and other[Filed.URL] == url and Filed.CHECKED not in other
 
 
 @pytest.mark.parametrize(("protect", "created"), [pytest.param(["user_data"], 1, id="filed-kind"), pytest.param([], 0, id="other-kind")])

@@ -484,7 +484,7 @@ class ReportFailed(Exception):
 
 class Filer(NamedTuple):
     """直さずに残した指摘の起票の前提。起票先は `locate` が返すメインディレクトリの `.ndf/project.json` で決める（`locate` は
-    起票の候補があるときだけ呼ぶ）。`repo_arg` は `--repo`、`manual` は利用者が打った公開（上限を超えた一覧も読み直す）。"""
+    起票の候補があるときだけ呼ぶ）。`repo_arg` は `--repo`、`manual` は利用者が打った公開（上限を超えた一覧も読み直し、照合済みの指摘も照らし直す）。"""
 
     locate: Callable[[], Optional[Path]] = lambda: None
     repo_arg: Optional[str] = None
@@ -521,7 +521,7 @@ def _post_report(
             f"PR #{ref.current_pr} の記録を公開していない（--repo の {filer.repo_arg} と状態ファイルの対象 {state_repo} が違う）"
         )
     # 起票の候補があるのに元の PR のリポジトリを確かめられない状態は、`--repo` が何であっても何も書かない（#3780）
-    if not state_repo and leftover.candidates(store.read_state(ref)):
+    if not state_repo and leftover.candidates(store.read_state(ref), manual=filer.manual):
         raise ReportFailed(
             f"PR #{ref.current_pr} の記録を公開していない（起票の候補があるが、状態ファイルに対象のリポジトリ target_repo が無く、"
             "元の PR のリポジトリを確かめられない）"
@@ -546,7 +546,7 @@ def _filing_target(data: Mapping[str, Any], main: Optional[Path]) -> tuple[Optio
 
 def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: Filer) -> list[str]:
     """直さずに残した指摘を起票し、注意を返す。起票の記録は元の PR に置くので、巻き直しの後は元の番号の公開のロックも取る。"""
-    rows = leftover.candidates(data) if hub.leftovers is not None else []
+    rows = leftover.candidates(data, manual=filer.manual) if hub.leftovers is not None else []
     if not rows:
         return []
     # 起票の前提は、公開のロックの待ちとスレッドの同期の後に読む。公開し直すかの判定の結果は使い回さない

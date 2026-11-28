@@ -137,12 +137,13 @@ def _checked_value(text: str, urls: Sequence[str]) -> str:
     return hashlib.sha256(joined.encode()).hexdigest()[:12]
 
 
-def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
+def candidates(data: Mapping[str, Any], *, manual: bool = False) -> list[dict[str, Any]]:
     """起票の候補の行（直さずに残した未解決の指摘のうち、まだ起票しておらず、起票する種類か引き継いだ起票の URL を持つもの）。
 
     状態に引き継いだ URL（`CARRIED_URLS`）があれば、どの指摘の Issue かは読むまで分からないので、残した指摘をすべて照合の
     候補にする。起票する種類を持たない行は照合だけで、起票はしない（`_Filing.sort`）。同じ指摘と URL の組で照らして Issue が
-    無かった行（`Filed.CHECKED`）は、候補にしない。"""
+    無かった行（`Filed.CHECKED`）は、候補にしない。Issue の本文や作者の権限はこの組に入らないので、利用者が打った公開
+    （`manual`）は照らし直す。"""
     pool = _carried_urls(data)
     return [
         row
@@ -155,7 +156,7 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         and (
             leftover_decide.files_issue(row)
             or row.get(Filed.PRIOR)
-            or (pool and row.get(Filed.CHECKED) != _checked_value(row["text"], pool))
+            or (pool and (manual or row.get(Filed.CHECKED) != _checked_value(row["text"], pool)))
         )
     ]
 
@@ -464,6 +465,8 @@ class _Filing:
         for ident, reason in self.errors.items():
             for row in self.rows[ident]:
                 row[Filed.ERROR] = reason
+                # 照らし直しに失敗した行は、次の公開でも候補にする
+                row.pop(Filed.CHECKED, None)
                 reasons.setdefault(reason, []).append(str(row.get("id")))
         pool = _carried_urls(self.data)
         for ident, rows in self.rows.items():
@@ -490,7 +493,7 @@ def file_issues(
 
     呼び手は、今の PR の番号と元の PR の番号の公開のロック（同じ番号なら 1 回）を持つ。"""
     rows: dict[str, list[dict[str, Any]]] = {}
-    for row in candidates(data):
+    for row in candidates(data, manual=manual):
         rows.setdefault(leftover_decide.identity(ref.origin_pr, row["text"]), []).append(row)
     if not rows:
         return []
