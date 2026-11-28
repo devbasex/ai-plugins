@@ -73,7 +73,7 @@ def test_only_finish_takes_output(name, capsys):
 @pytest.mark.parametrize("name", STAGE_ACTIONS)
 def test_stage_actions_keep_their_options(name):
     opts = {o for act in _sub(name)._actions for o in act.option_strings}
-    want = {"-h", "--help", "--reason", "--cwd"} | ({"--output"} if name == "finish" else set())
+    want = {"-h", "--help", "--reason", "--cwd"} | {"finish": {"--output"}, "retry": {"--later"}}.get(name, set())
     assert opts == want
 
 

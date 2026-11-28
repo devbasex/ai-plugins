@@ -337,10 +337,31 @@ def unknown_stages(snap: Snapshot, names: Iterable[str]) -> list[str]:
 OUTPUTS_EVENT = "outputs_recorded"  # 工程の出力をスプリントの文脈へ書く事象
 
 
+REOPENED_EVENT = "reopened"  # 工程を開き直す事象
+# 開き直しの後も文脈に残す出力のキー（設計承認で外した課題は、開き直しても戻さない）
+KEPT_ON_REOPEN = ("issues",)
+
+
+def reopened_at(events: Iterable[model.Event]) -> dict[str, int]:
+    """工程 → 直近の開き直しの事象の番号。"""
+    return {ev.draft.row_key: ev.seq for ev in events if ev.draft.kind == REOPENED_EVENT and ev.draft.row_key is not None}
+
+
 def recorded_outputs(events: Iterable[model.Event], rev: int) -> list[Mapping[str, Any]]:
-    """改訂 `rev` で工程が書いた出力（古い順）。"""
-    drafts = [ev.draft for ev in events if ev.draft.kind == OUTPUTS_EVENT and ev.draft.rev == rev]
-    return [d.payload["outputs"] for d in drafts if d.payload is not None]
+    """改訂 `rev` で工程が書いた出力（古い順）。工程の直近の開き直しより前に書いた出力は `KEPT_ON_REOPEN` のキーだけを残す。"""
+    events = list(events)
+    cut = reopened_at(events)
+    out: list[Mapping[str, Any]] = []
+    for ev in events:
+        d = ev.draft
+        if d.kind != OUTPUTS_EVENT or d.rev != rev or d.payload is None:
+            continue
+        outputs = d.payload["outputs"]
+        if d.row_key is not None and d.row_key in cut and ev.seq < cut[d.row_key]:
+            outputs = {k: v for k, v in outputs.items() if k in KEPT_ON_REOPEN}
+        if outputs:
+            out.append(outputs)
+    return out
 
 
 def compose_context(initial: Mapping[str, Any], outputs: Iterable[Mapping[str, Any]]) -> dict[str, Any]:

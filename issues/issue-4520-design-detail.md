@@ -31,11 +31,11 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `core/release_record.py` | 新設 | リリース記録の本文を読む（`domains/release/record_decide.py` から移す） | `contracts` | 移動: `Record`・`parse_record`・`records`・`payload_of`・`UnreadableRecord` |
 | `adapters/github.py` | 変更 | workflow の実行の一覧を読む | — | 新設 `GitHub.workflow_runs` |
 | `adapters/github_pulls.py` | 変更 | コメントの作成時刻を持つ（実行済みの証拠が、開き直しより後の記録かを見る） | — | 変更 `Authored`（`created` を足す） |
-| `core/merge_approval.py` | 変更 | 証跡の重複を、識別子・回答・対象で判定する。開き直しの取り消しの行を書く | `adapters` | 変更 `write_merge_row`。新設 `write_revocation` |
+| `core/merge_approval.py` | 変更 | 証跡の重複を、識別子・回答・対象で判定する。開き直しの取り消しの行を書き、PR をマージキューから外す | `adapters` | 変更 `write_merge_row`。新設 `write_revocations` |
 | `progress/approval_decide.py` | 新設 | 事象の列と対象から、有効な承認と残る否定の回答を決める | `progress.model` | 新設 `boundary`・`latest_answer`・`differences`・`objection_remains` |
 | `progress/delivery_decide.py` | 新設 | リリース記録と CD の実行から、工程を終えてよいかを決める | `core.release_record` | 新設 `pick_records`・`judge_delivery`・`judge_no_release`・`pick_run` |
 | `progress/run_approval.py` | 新設 | 承認ゲートの回答を読む手（`run.py` から分ける） | `run`・`approval_decide` | 移動と変更: `_consume`・`approved_seen`。新設 `consume_held`・`prior_approval` |
-| `progress/reopening.py` | 新設 | 開き直す工程と事象を組み、作業の停止を確かめ、承認の証跡を取り消す | `run`・`model`・`core.merge_approval` | 新設 `plan_reopen`・`work_stopped`・`revoke_approvals` |
+| `progress/reopening.py` | 新設 | 開き直す工程と事象を組み、作業の停止を確かめ、承認の証跡を取り消し、PR をマージキューから外す | `run`・`model`・`core.merge_approval` | 新設 `plan_reopen`・`work_stopped`・`revoke_approvals` |
 | `progress/redo.py` | 新設 | 作り直し用の作業場所の記録・作成・取り込み・片付け | `adapters.git`・`redo_decide` | 新設 `redo_record`・`ensure_workspace`・`take_in`・`discard`・`redirect_inputs` |
 | `progress/redo_decide.py` | 新設 | 作り直しの要否、ブランチの名前、移すコミットを決める | `progress.model` | 新設 `needed`・`branch_name`・`commits_to_move` |
 | `progress/gate/targets.py` | 新設 | 承認の対象を 1 回の呼び出しで 1 回だけ読む | `adapters.github`・`asking` | 新設 `TargetReader` |
@@ -188,15 +188,19 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `plan_reopen` | `progress/reopening.py` | 新設 | `(v: View, stage: str, *, later: str, reason: str, trigger: Mapping, notes: str \| None) -> Reopen` | 開き直す工程を決め、`reopened` と `enabled` の下書き、進みがあった工程の名前、取り消されない操作の警告、取り消す承認の対象を返す（書かない） |
-| `revoke_approvals` | `progress/reopening.py` | 新設 | `(r: Reopen, post: Revoke) -> None` | 取り消す対象ごとに `write_revocation` を呼ぶ。`answer` と `_cmd_retry` が DB の追記より前に呼ぶ |
-| `write_revocation` | `core/merge_approval.py` | 新設 | `(hub: GitHub, target: MergeTarget, record_id: str, viewer: Viewer) -> bool` | 対象の最新の証跡が承認なら、`回答: rejected`・`担い手: reopen` の行を書く。それ以外は書かない |
+| `revoke_approvals` | `progress/reopening.py` | 新設 | `(r: Reopen, post: Revoke) -> None` | 取り消す承認があれば、まとめて `write_revocations` へ渡す。`answer` と `_cmd_retry` が DB の追記より前に呼ぶ |
+| `write_revocations` | `core/merge_approval.py` | 新設 | `(hub: GitHub, revocations: Sequence[Revocation], viewer: Viewer) -> None` | `reopen` の却下で失効していない `approvals` の承認があるときだけ、`回答: rejected`・`担い手: reopen` の行を書く。対象の最新の承認が `approvals` の承認なら、先の承認をすべて取り消す却下を書く。それ以外（最新の承認が別のもの、後の通常の却下で承認が無い）は、`失効する承認:` で `approvals` を指す却下を書く。残る承認の無い対象の PR と、別のアカウントに失効していない `approvals` の承認がある対象の PR は、行を書いた後に `hub.dequeue` でマージキューから外す。別のアカウントに `reopen` の却下で失効していない `approvals` の承認があるなら（最新の承認が別にあっても、後に通常の却下があっても）、開き直しを断るために `TrailError` を投げる。投げるのは、実行アカウントの分の取り消しと、対象の PR のキューからの取り外しを済ませた後である。承認の対象のリポジトリが `hub.repo` と違えば、PR のコメントもキューの状態も読み書きせずに `TrailError`。コメントの一覧は PR ごとに 1 回読む |
 | `work_stopped` | `progress/reopening.py` | 新設 | `(st: Store, machine_id: str) -> ContextManager[None]` | 作業の排他を取り、起動のマーカーも確かめる。作業が流れていれば断る |
-| `_cmd_retry` | `progress/gate/finishing.py` | 変更 | `(a: Namespace, cwd: Path, st: Store) -> dict` | 失敗の工程は今のまま `retry` を書き、終了と手で終えた回答待ちは `--later` を必須にして開き直す |
+| `_cmd_retry` | `progress/gate/finishing.py` | 変更 | `(a: Namespace, cwd: Path, st: Store) -> dict` | 失敗の工程は今のまま `retry` を書き、終了と手で終えた回答待ちは `--later` を必須にして開き直す。確定した開き直しの送り直しには、書かずに初回の結果を返す。開き直しは `store.approval_lock` の中で行う |
 
-- `Reopen`（新設の型）: `drafts: list[EventDraft]`・`stages: list[str]`・`gates: list[tuple[str, str]]`（取り下げの対象の工程と承認ゲート）・`warnings: list[str]`・`revoke: list[tuple[MergeTarget, str]]`（直近の開き直しより後の承認のうち、証跡を書いた対象と、取り消しの行の記録の識別子 `reopen:<ステートマシンの ID>:<工程>:<回答の事象の番号>`）
+- `Reopen`（新設の型）: `drafts: list[EventDraft]`・`stages: list[str]`・`gates: list[tuple[str, str]]`（取り下げの対象の工程と承認ゲート）・`warnings: list[str]`・`revoke: list[Revocation]`（直近の開き直しより後の承認のうち、証跡を書いた対象、その承認を指す値の集合、取り消しの行の記録の識別子 `reopen:<ステートマシンの ID>:<工程>:<承認を記録した事象の番号>`）
+- 取り消しの行の記録の識別子の末尾には、承認を記録した事象の番号を入れる。利用者の回答では `answered`、MVV 判定が通した承認では判定の結果を保存した `step_recorded` の番号である。MVV 判定が通した承認は、利用者の回答が無くても取り消しの対象になる。同じ対象の承認が複数あれば、開き直す工程の順で最後の事象の工程と番号を使う
+- 承認を指す値は、利用者の回答なら証跡の記録の識別子である。MVV 判定が通した承認は、判定のコマンドの出力 `mvv_gate.note_url`（証跡を書いたコメントの URL）である。今の MVV の証跡は判定のコメントに入り、記録の識別子 `mvv:<ゲート>:<HEAD>` は別のステートマシンの判定と同じになる。証跡を別のコメントに分けて識別子へ質問の id を入れる変更（Task 3）では、照らす値も記録の識別子に変える
+- `committed_reopen(v, *, trigger, later, reason) -> list[Event]`（`progress/reopening.py`）は、送り直しの判定に使う開き直しの事象を返す
+- `approval_lock(store, machine_id)`（`progress/store.py`）は、回答と開き直しが共有する排他である。`answer` と `_cmd_retry` が使う
 - `later` は `reopen` か `keep`。`keep` は指定の工程だけを対象にする。無効と中止の工程は開き直さない。ただし、開き直す工程がリリースしないで終えて無効にした工程（`disabled` の `cause: no_release` と工程名が一致する）には、`later` の値によらず `enabled` を足す
-- `core/merge_approval.py` の証跡の読み取りは、担い手 `reopen` を却下の行でだけ数える
-- 取り消されない操作は、対象の工程のうち終了したもので、定義がマージかリリースのステップを持つものを挙げる
+- `core/merge_approval.py` の証跡の読み取りは、担い手 `reopen` を却下の行でだけ数える。`失効する承認:`（承認を指す値の JSON の並び）を持つ却下は、指した承認だけを取り消す。値を読めなければ、先の承認をすべて取り消す却下として数える
+- 取り消されない操作は、対象の工程のうち、定義がマージかリリースのステップを持ち、工程が終了したか、そのステップの成功を直近の開き直しより後に記録したものを挙げる
 
 ### 異常系の処理
 
@@ -205,6 +209,9 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `work_stopped` | 排他を取れない・起動の直後 | 作業が流れている | 排他と起動のマーカー | 呼び出し元へ返す | `refused`。`ndf progress wait` を案内 | 何も書かない |
 | `_cmd_retry` | `--later` が無い・失敗の工程に `--later` | 引数 | 状態の確かめ | 止める | `refused`。打てるコマンドを返す | 打ち直せる |
 | `revoke_approvals` | コメントを読めない・取り消しを書けない | GitHub・権限 | 投稿 | 止める | `refused` | DB へ書かない。打ち直せる |
+| `revoke_approvals` | 承認の対象のリポジトリが、打った場所のリポジトリと違う | DB を共有し、別のリポジトリの作業場所で打った | 対象の `repo` と `hub.repo` の照合 | 止める | `refused`。両方のリポジトリの名前 | PR にも DB にも書かない。承認の対象のリポジトリで打ち直せる |
+| `revoke_approvals` | 別のアカウントが同じ承認を今も持つ | 承認と開き直しでアカウントが違う | コメントの書き手のアカウント ID | 止める | `refused`。書き手の名前と、そのアカウントで打ち直すこと | token の利用者の分の取り消しとキューからの取り外しは済む。DB へ書かない。そのアカウントで打ち直せる |
+| `revoke_approvals` | キューの状態を読めない・キューから外せない | GitHub・権限 | `hub.dequeue` | 止める | `refused` | DB へ書かない。取り消しの行は残り、打ち直すと行を増やさずに外す |
 | `_cmd_retry` | 手で終えていない回答待ち・未着手・実行中・無効・中止、完了・中止したスプリント | 状態 | 状態の確かめ | 止める | `refused`。代わりのコマンドを返す | — |
 
 ### ログと記録の出力
@@ -219,15 +226,31 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | --- | --- | --- | --- |
 | `plan_reopen` | `_cmd_cancel` の工程の列挙 | `command.py` を読む | 使えない。中止は全工程が対象で、開き直しは指定の工程から後ろである |
 | `work_stopped` | `run.is_live`・`run._launching`・`store.run_lock` | `run.py` を読む | 使う。排他を持ったまま起動のマーカーを見る形にまとめる |
-| `revoke_approvals`・`write_revocation` | `merge_approval.write_merge_row`・`answering._post_trail` | `core/merge_approval.py`・`gate/answering.py` を読む | 行の形と投稿は使う。対象の最新の行が承認のときだけ却下の行を足す関数は無い |
+| `revoke_approvals`・`write_revocations` | `merge_approval.write_merge_row`・`answering._post_trail` | `core/merge_approval.py`・`gate/answering.py` を読む | 行の形と投稿は使う。対象の最新の行が承認のときだけ却下の行を足す関数は無い。キューから外すのは `GitHub.dequeue`（キューの状態を読み、入っていれば外す）を使う。REST の `GitHub.pull` はキューの状態を読まない（`queued` は常に偽）ので使わない |
 
 ### 単体テストの観点
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `plan_reopen` | 指定と後ろの工程に `reopened` | `keep` は 1 件。後ろがすべて未着手なら `stages` は指定だけ。`keep` でも `no_release` で無効にした工程は戻す | 人が無効にした工程と中止の工程を含めない |
-| `revoke_approvals` | 承認した対象に却下の行が増え、同じ対象の `merge_judgment` が None | 本番へ反映されない承認は対象にしない。打ち直しで行は増えない | 書けなければ事象を追記しない |
+| `revoke_approvals` | 承認した対象に却下の行が増え、同じ対象の `merge_judgment` が None | 本番へ反映されない承認は対象にしない。打ち直しでは、記録済みの却下を重ねて書かない。マージキューと開き直しの可否は、表の下の入力で確かめる | 書けない・外せない・別のアカウントの承認が残るなら事象を追記しない |
 | `_cmd_retry` | 失敗の工程は今と同じ事象 | — | 異常系の各行 |
+
+`revoke_approvals` が PR をマージキューに残すか外すかの規則は、設計文書の「外への書き込みの順序」に従う。初回にも打ち直しにも同じ規則が適用されるので、次の入力はどちらでも確かめる。
+
+表の「残る承認」は、対象ごとに、設計文書の「外への書き込みの順序」に従って実行アカウントの証跡から選んだ最新の行が、残す工程か別のステートマシンの承認であることを指す。過去に該当する承認があっても、最新の行が通常の却下なら「ない」である。`失効する承認:` を持つ却下は、指した承認を外すだけで、最新の行には選ばない。
+
+「別のアカウントの承認」は、別のアカウントの証跡にある開き直し対象の承認を指す。
+
+| 入力: 残る承認 | 入力: 別のアカウントの承認 | 結果: マージキュー | 結果: 開き直し |
+| --- | --- | --- | --- |
+| ある | 証跡がない | 残す | する |
+| ある | 編集済みか、`reopen` の却下で失効済み | 残す | する |
+| ある | 編集も `reopen` の却下での失効もされていない（通常の却下で隠れているものを含む） | 外す | 断る |
+| ない | 証跡がないか、編集済みか、`reopen` の却下で失効済み | 外す | する |
+| ない（残す工程の承認の後に通常の却下があり、最新の行がその却下） | 証跡がない | 外す | する |
+| ない | 編集も `reopen` の却下での失効もされていない | 外す | 断る |
+| 同じ PR の複数の対象（HEAD 違い）のうち、1 つにない | 証跡がない | 外す | する |
 
 ## 手で終える操作
 
@@ -279,7 +302,8 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 同時に走りうる処理 | 共有する資源 | 排他の取り方 | 冪等性と中断からの再開 |
 | --- | --- | --- | --- |
 | `finish` と変更要求・却下の回答 | 工程の事象 | 両方が作業の排他を取る | 途中で止まった `finish` は何も追記していないので、打ち直して判定し直す。投稿済みの判定のコメントは再利用する |
-| `finish` と承認の回答 | 同上 | 承認は排他を取らない | 追記の前に読み直し、番号の条件で追記する |
+| `finish` と承認の回答 | 同上 | 承認は作業の排他を取らない | 追記の前に読み直し、番号の条件で追記する |
+| 回答と開き直し | PR の証跡と工程の事象 | 両方が `store.approval_lock` を取り、取れなければ断る | 断られた側は何も書かず、打ち直す |
 
 ### 既存の部品の再利用
 

@@ -6,16 +6,147 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Optional
 
+from ndf.adapters.git import GitError
+from ndf.adapters.github import GitHubError
 from ndf.contracts import result
-from ndf.progress import command, definition, model, stages, store
+from ndf.core import merge_approval
+from ndf.progress import command, definition, model, reopening, run, stages, store
+from ndf.progress.gate.answering import shared_hub
+from ndf.progress.records import github_records, sync_records
 
 
-def _cmd_retry(a: argparse.Namespace, _cwd: Path, st: store.Store) -> dict[str, Any]:
-    with store.run_lock(st, a.machine_id):
+def _revoker(cwd: Path) -> reopening.Revoke:
+    """承認の取り消しを PR へ書き、マージキューから外す口。どちらかができなければ `model.Refused`（開き直しを記録しない）。"""
+    get_hub = shared_hub(cwd)
+
+    def revoke(revocations: list[merge_approval.Revocation]) -> None:
+        try:
+            hub = get_hub()
+            merge_approval.write_revocations(hub, revocations, hub.viewer())
+        except (merge_approval.TrailError, GitHubError, GitError) as exc:
+            numbers = "・".join(f"#{n}" for n in sorted({r.target.number for r in revocations}))
+            raise model.Refused(
+                f"PR {numbers} の承認の取り消しとマージキューからの取り外しを終えられないので、開き直さない: {exc}"
+            ) from None
+
+    return revoke
+
+
+def _retry_refusal(machine_id: str, stage: str, state: str, later: Optional[str]) -> Optional[str]:
+    """`retry` を断る理由と、代わりに打てるコマンド。打てるなら None。失敗の工程は `--later` なし、終了の工程は必須。"""
+    base = f"ndf progress retry {machine_id} {stage} --reason <理由>"
+    if state == "failed":
+        return f"失敗した工程 {stage} は --later を受けない。{base} を打つ" if later else None
+    if state == run.FINISHED:
+        return None if later else f"終了した工程 {stage} は後ろの扱いを指定する。{base} --later reopen か --later keep を打つ"
+    others = {
+        "pending": f"ndf progress next {machine_id} で流す",
+        "running": f"ndf progress wait {machine_id} で待つか、承認ゲートの回答を ndf answer で記録する",
+        command.TOGGLE_KINDS["disable"]: f"ndf progress enable {machine_id} {stage} --reason <理由> で有効に戻す",
+    }
+    other = others[state] if state in others else f"ndf progress show {machine_id} で状態を確かめる"
+    return f"工程 {stage} は{model.label(state)}で、retry を打てるのは失敗と終了の工程。{other}"
+
+
+def _reopen_stage(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+    """終了した工程を開き直し、進捗記録を書き直す。PR の承認の取り消しは、DB の追記より先に行う。
+
+    読み取りから追記までは、回答と共有する排他（`store.approval_lock`）の中で行う。"""
+    with store.approval_lock(st, a.machine_id):
+        planned, seqs = _append_reopen(a, st, _revoker(cwd))
+    _, errors = sync_records(run.read(st, a.machine_id), cwd, github_records)
+    unsynced = [f"{e}（ndf progress resync {a.machine_id} で揃える）" for e in errors]
+    return command.with_warnings(_reopened_result(a, planned, seqs), after=[*planned.warnings, *unsynced])
+
+
+def _append_reopen(a: argparse.Namespace, st: store.Store, revoke: reopening.Revoke) -> tuple[reopening.Reopen, list[int]]:
+    """承認を取り消してから開き直しを追記する。追記がぶつかって打ち直すときは、取り消す対象が変わった場合だけ PR を読み直す。"""
+    attempts = command.append_attempts()
+    revoked: list[merge_approval.Revocation] = []
+    for attempt in range(1, attempts + 1):
+        v = run.read(st, a.machine_id)
+        planned = reopening.plan_reopen(v, a.stage, later=a.later, reason=a.reason, trigger=_trigger(a))
+        if planned.revoke != revoked:
+            reopening.revoke_approvals(planned, revoke)
+            revoked = planned.revoke
+        try:
+            with store.transaction(st) as conn:
+                return planned, store.append_events(conn, a.machine_id, planned.drafts, v.events[-1].seq)
+        except store.Conflict:
+            if attempt == attempts:
+                raise
+    raise AssertionError("到達しない")
+
+
+def _trigger(a: argparse.Namespace) -> dict[str, str]:
+    """開き直しの事象に残すきっかけ。指定した工程は、送り直しの判定に使う。"""
+    return {"by": "retry", "stage": a.stage}
+
+
+def _reopened_result(a: argparse.Namespace, planned: reopening.Reopen, seqs: list[int], note: str = "") -> dict[str, Any]:
+    summary = f"ステートマシン {a.machine_id} の工程を開き直した: {'・'.join(planned.stages)}。続きは ndf progress next で流す{note}"
+    return result.result(
+        command.TOOL,
+        result.OK,
+        summary,
+        items=[{"kind": "reopened", "stage": name} for name in planned.stages],
+        metrics={"machine_id": a.machine_id, "seqs": seqs},
+        next=result.command(command.TOOL, "next", a.machine_id),
+    )
+
+
+def _replayed_reopen(a: argparse.Namespace, v: run.View) -> Optional[dict[str, Any]]:
+    """確定した開き直しの送り直しなら、書かず GitHub へ要求も送らずに初回と同じ結果を返す。違えば None。
+
+    送り直しと扱うのは、同じ工程・理由・後ろの扱いの開き直しがあり、開き直した工程にその後の記録が無いときである。"""
+    batch = reopening.committed_reopen(v, trigger=_trigger(a), later=a.later, reason=a.reason)
+    if not batch:
+        return None
+    before = replace(v, events=[ev for ev in v.events if ev.seq < batch[0].seq])
+    planned = reopening.plan_reopen(before, a.stage, later=a.later, reason=a.reason, trigger=_trigger(a))
+    note = f"（開き直しは記録済み。進捗記録が古ければ ndf progress resync {a.machine_id} で揃える）"
+    out = _reopened_result(a, planned, [ev.seq for ev in batch], note)
+    return command.with_warnings(out, after=planned.warnings)
+
+
+def _cmd_retry(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+    """失敗の工程は事象 `retry` を書く（済んだステップを残す）。終了の工程は `--later` に従って開き直す。
+
+    確定した開き直しの送り直し（`_replayed_reopen`）は書かないので、作業の排他を取れなくても受ける。"""
+    if not a.reason.strip():
+        raise model.Refused("retry には理由が要る（--reason <理由>）")
+    with ExitStack() as stack:
+        try:
+            stack.enter_context(reopening.work_stopped(st, a.machine_id))
+        except model.Refused:
+            # 開き直しの直後に起動した作業が排他を持つ場合。履歴を読み足すのは、排他を取れないときだけにする
+            replayed = _replayed_reopen(a, run.read(st, a.machine_id)) if a.later else None
+            if replayed is None:
+                raise
+            return replayed
+        return _retry_stopped(a, cwd, st)
+
+
+def _retry_stopped(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str, Any]:
+    """作業の排他を取った後の `retry`。送り直しは、排他を取るまでの間に確定した開き直しも含めて、ここで読んだ記録で見分ける。"""
+    v = run.read(st, a.machine_id)
+    replayed = _replayed_reopen(a, v) if a.later else None
+    if replayed is not None:
+        return replayed
+    v.snap.stage(a.stage)  # 工程の無い名前はここで断る
+    state = v.rows[a.stage].state
+    refused = _retry_refusal(a.machine_id, a.stage, state, a.later)
+    if refused is not None:
+        whole = f"ステートマシンは{model.label(v.whole)}。" if model.is_terminal(v.whole) else ""
+        raise model.Refused(whole + refused)
+    if state == "failed":
         return command._changed(a, st, "retry", None)
+    return _reopen_stage(a, cwd, st)
 
 
 def _read_stage_output(a: argparse.Namespace, st: store.Store) -> tuple[Any, stages.StageDef, list[str], list[tuple[str, Optional[str]]]]:

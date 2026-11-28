@@ -35,6 +35,8 @@ STEP_EVENT = _event_kind("step_recorded")
 ANSWERED = _event_kind("answered")
 FAILED = _event_kind("failed")
 FINISHED = _event_kind("finished")
+# 工程を開き直す事象。これより前の結果・出力・承認は、記録に残るが今の判断に使わない
+REOPENED = stages.REOPENED_EVENT
 # 失敗した行を待ちへ戻す事象（`ndf progress retry` と同じ種類）
 RETRY_EVENT = _event_kind("retry")
 # 工程の定義の写しの工程の順を置き換えた事象（このリリースの前に始めた状態機械の移行。#4409 の決定 6）
@@ -98,6 +100,22 @@ class View:
         """スプリントの文脈。作成の時点の値に、工程が書いた出力（`outputs_recorded`）を順に重ねる。"""
         return stages.compose_context(self.doc["context"], stages.recorded_outputs(self.events, self.rev))
 
+    def last_reopened(self, stage: str) -> int:
+        """工程の直近の開き直しの事象の番号（無ければ 0）。"""
+        cut = stages.reopened_at(self.events)
+        return cut[stage] if stage in cut else 0
+
+    def last_pr(self) -> Optional[int]:
+        """最後に記録した文脈の `pr`。開き直しで今の文脈から外れたものも含む（進捗記録の PR の欄を書く番号）。"""
+        for ev in reversed(self.events):
+            if ev.draft.kind != stages.OUTPUTS_EVENT or ev.draft.rev != self.rev:
+                continue
+            pr = result.outputs_of(event_payload(ev)).get("pr")
+            if isinstance(pr, int):
+                return pr
+        pr = self.doc["context"].get("pr")
+        return pr if isinstance(pr, int) else None
+
 
 def event_payload(ev: model.Event) -> dict[str, Any]:
     """事象の payload。無ければ空。"""
@@ -157,7 +175,7 @@ _UNSEEN: Any = object()
 
 
 class StageAnswers:
-    """工程の事象を新しい順にたどる走査を 1 本だけ持つ（#4513）。
+    """工程の事象を新しい順にたどる走査を 1 本だけ持つ（#4513）。走査は工程の直近の開き直しで止まる。
 
     たどった事象ごとに「最新の承認の回答」と「リリース承認ゲートへの最後の回答とその次の事象」の両方を照らし、最初に当たった
     ものを覚える。`approved` と `release_gate` は、覚えた値があればそれを返し、無ければ止まった所から古い方へ続ける。
@@ -175,6 +193,8 @@ class StageAnswers:
     def _advance(self) -> bool:
         """事象を 1 つ古い方へ進める。尽きたら覚えていない値を None にして偽を返す。"""
         ev = next(self._events, None)
+        if ev is not None and ev.draft.kind == REOPENED and ev.draft.row_key == self._stage:
+            self._events, ev = iter(()), None
         if ev is None:
             self._approved = None if self._approved is _UNSEEN else self._approved
             self._gate = None if self._gate is _UNSEEN else self._gate

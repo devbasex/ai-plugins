@@ -550,8 +550,7 @@ def presentation_key(t: Target) -> str:
 
 def presented_id(q: Question) -> str:
     """質問 `q` の、提示した承認の対象（`q.target`）ごとの識別子。承認の対象が無ければ質問の id のまま。"""
-    key = presentation_key(q.target)
-    return f"{q.id}-{key}" if key else q.id
+    return merge_approval.presented_record_id(q.id, presentation_key(q.target))
 
 
 def request_id(q: Question) -> str:

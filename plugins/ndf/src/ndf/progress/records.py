@@ -39,6 +39,8 @@ class View(Protocol):
 
     def context(self) -> dict[str, Any]: ...
 
+    def last_pr(self) -> Optional[int]: ...
+
 
 class Records(Protocol):
     """課題と PR の本文の読み書き。"""
@@ -98,8 +100,10 @@ def replace_section(body: str, heading: str, content: str) -> str:
 def _targets(v: View) -> list[tuple[str, int, str, str]]:
     ctx = v.context()
     out = [("issue", int(n), ISSUE_SECTION, issue_section(v)) for n in ctx["issues"]]
-    if "pr" in ctx:
-        out.append(("pr", int(ctx["pr"]), PR_SECTION, pr_section(v)))
+    # 開き直しで文脈から `pr` が外れても、前に記録した PR の欄を書き直す
+    pr = ctx["pr"] if "pr" in ctx else v.last_pr()
+    if pr is not None:
+        out.append(("pr", int(pr), PR_SECTION, pr_section(v)))
     return out
 
 
