@@ -1,9 +1,9 @@
-"""CI と GitHub から測る設定の項目（P4 の必須のチェック・P6 の PR のマージ先・P8 の GitHub の分。#3569）。
+"""CI と GitHub から測る設定の項目（CI の必須のチェック。#3569）。
 
 **`gh` へ渡すのは読む要求だけである。** `gh api` は `--method GET` を付けて打つ。
 `gh` の 1 回の呼び出しは、締め切りまでの残りと 30 秒の小さい方で打ち切る。締め切りに届いた後は起動しない。
-呼ぶのは必須のチェック（`rules/branches`）・閉じた PR（`pulls`）・課題（`issues`）の 3 か所だけで、CI の実行・ジョブ・
-成果物は読み手が無いので取りに行かない（#4516 の決定 3）。外部の語（ruleset）は、ここで設定の語（必須のチェック）へ直す。
+呼ぶのは必須のチェック（`rules/branches`）の 1 か所だけで、ほかの値は読み手が無いので取りに行かない（#4516・#4521）。
+外部の語（ruleset）は、ここで設定の語（必須のチェック）へ直す。
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ndf.adapters import cli_floor
-from ndf.domains.project.items import measured, obj, question, seq, unknown
-from ndf.domains.project.measure_repo import Tree, call_limit, url_hosts
+from ndf.domains.project.items import measured, obj, seq, unknown
+from ndf.domains.project.measure_repo import Tree, call_limit
 
 TIME_UP = "時間切れ"
 
@@ -89,57 +89,14 @@ def _required_checks(gh: Gh, branch: Optional[str]) -> list[str]:
     return required_contexts(gh.get(f"repos/{gh.repo}/rules/branches/{branch}"))
 
 
-def _measure_merges(gh: Gh) -> tuple[dict[str, int], list[str]]:
-    """閉じた PR のマージ先別のマージ数と、本文に出たホスト名。"""
-    pulls = [p for p in seq(gh.get(f"repos/{gh.repo}/pulls?state=closed&per_page=100")) if isinstance(p, dict)]
-    merges: dict[str, int] = {}
-    for pr in pulls:
-        if pr.get("merged_at"):
-            ref = obj(pr.get("base")).get("ref")
-            merges[ref] = merges[ref] + 1 if ref in merges else 1
-    hosts = {h for pr in pulls for h in url_hosts(str(pr["body"]) if pr.get("body") else "")}
-    return merges, sorted(hosts)
-
-
 def measure(tree: Tree, repo: Optional[str], head: Optional[str], deadline: float) -> dict[str, Any]:
-    """P4 と、P6・P8 の GitHub の分を測る。返すのは `{"ci", "merges", "github_issues", "hosts", "notes"}`。
+    """必須のチェックを測る。返すのは `{"ci", "notes"}`。
 
-    `gh` を呼ぶのは `rules/branches/<head>`（`head` があるとき。無ければ `ci` を不明にする）・閉じた PR・課題の 3 回だけである。
+    `gh` を呼ぶのは `rules/branches/<head>` の 1 回だけで、`head` が無ければ呼ばずに `ci` を不明にする。
     """
-    out: dict[str, Any] = {"merges": None, "github_issues": None, "hosts": [], "notes": []}
     if not repo:
-        return {**out, "ci": unknown("origin が GitHub のリポジトリを指していない")}
-    gh = Gh(tree.root, repo, deadline)
+        return {"ci": unknown("origin が GitHub のリポジトリを指していない"), "notes": []}
     try:
-        out["ci"] = measured({"required_checks": _required_checks(gh, head)})
+        return {"ci": measured({"required_checks": _required_checks(Gh(tree.root, repo, deadline), head)}), "notes": []}
     except GhUnavailable as exc:
-        out["ci"] = unknown(str(exc))
-        out["notes"].append(f"CI を測れない: {exc}")
-    try:
-        out["merges"], out["hosts"] = _measure_merges(gh)
-        issues = seq(gh.get(f"repos/{repo}/issues?state=all&per_page=100"))
-        out["github_issues"] = sum(1 for i in issues if isinstance(i, dict) and "pull_request" not in i)
-    except GhUnavailable as exc:
-        out["notes"].append(f"PR のマージ先と GitHub Issues を測れない: {exc}")
-    return out
-
-
-def measure_issues(repo_part: dict[str, Any], ci_part: dict[str, Any]) -> dict[str, Any]:
-    """P8 の質問。課題の SSOT の候補と根拠（名前とホスト名だけ。URL は持たない）。"""
-    hosts = sorted(set(repo_part["hosts"]) | set(seq(ci_part.get("hosts"))))
-    found = {
-        "markdown": bool(repo_part["markdown_files"]),
-        "github": bool(ci_part.get("github_issues")),
-        "redmine": any("redmine" in h for h in hosts),
-        "external": any("redmine" not in h for h in hosts),
-    }
-    candidates = [k for k, hit in found.items() if hit]
-    issues = ci_part["github_issues"] if ci_part.get("github_issues") is not None else "不明"
-    evidence = [
-        {"text": f"issues/*.md: {repo_part['markdown_files']} 本"},
-        {"text": f"GitHub Issues（直近 100 件のうち）: {issues}"},
-        {"text": f"PR の本文とテンプレートのホスト名: {'・'.join(hosts) if hosts else '無し'}"},
-    ]
-    if ci_part.get("merges") is None and not candidates:
-        return unknown("課題の保存先を測れない")
-    return question(candidates, evidence)
+        return {"ci": unknown(str(exc)), "notes": [f"CI を測れない: {exc}"]}

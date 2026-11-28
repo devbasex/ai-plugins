@@ -35,7 +35,7 @@ from ndf.adapters import git
 from ndf.contracts import limits, result
 from ndf.domains.project import analysis_record, check, measure_ci, measure_repo, secret, strategy_cli, write
 from ndf.domains.project import strategy_write as bw
-from ndf.domains.project.items import STATUSES, obj, seq, unknown
+from ndf.domains.project.items import STATUSES, unknown
 from ndf.domains.records import files, jsonfile
 from ndf.domains.relay import signals
 
@@ -64,11 +64,10 @@ def _gh_repo(repo: git.Git, remote: str) -> Optional[str]:
 
 
 class MeasurementContext(NamedTuple):
-    """`gh` と CI の項目を測る文脈。リモートの GitHub のリポジトリ・リモートの既定ブランチ・リポジトリの中の課題の保存先。"""
+    """CI の項目を測る文脈。リモートの GitHub のリポジトリとリモートの既定ブランチ。"""
 
     gh_repo: Optional[str]
     head: Optional[str]
-    repo_issues: Optional[dict[str, Any]]
 
 
 class _Steps:
@@ -91,36 +90,27 @@ class _Steps:
         return None
 
 
-def _instruction_notes(items: dict[str, Any]) -> list[str]:
-    """指示書の項目（`instructions`）の注記。測れなかった項目は空。"""
-    return list(seq(obj(obj(items.get("instructions")).get("value")).get("notes")))
-
-
 def _ci_items(tree: measure_repo.Tree, step: _Steps, ctx: MeasurementContext) -> list[str]:
-    """`gh` と CI から測る項目を入れ、指示ファイルと CI の注記を返す。"""
-    items = step.items
+    """CI の項目を入れ、CI の注記を返す。"""
     ci_part = step("ci", lambda: measure_ci.measure(tree, ctx.gh_repo, ctx.head, step.deadline))
-    notes = _instruction_notes(items)
-    if ci_part:
-        items["ci"] = ci_part["ci"]
-        notes += ci_part["notes"]
-    if "issues" not in items:
-        items["issues"] = measure_ci.measure_issues(ctx.repo_issues, ci_part if ci_part else {})  # noqa: NDF501 外部コマンド: CI の測りが時間切れなら空の材料で数える
-    return notes
+    if not ci_part:
+        return []
+    step.items["ci"] = ci_part["ci"]
+    return list(ci_part["notes"])
 
 
 def measure_project(root: Path, budget: float) -> dict[str, Any]:
-    """P1〜P10 を測る。git の木から測る項目を先に、残りの時間で `gh` の項目を測る。"""
+    """設定の項目を測る。git の木から測る項目を先に、残りの時間で `gh` の項目を測る。"""
     start = time.monotonic()
     dirs = check.repo_dirs(root)
     repo, main = dirs.top, dirs.main
     tree = measure_repo.Tree(repo.cwd, start + budget)
     step = _Steps(start + budget)
-    repo_issues = measure_repo.measure(tree, step, step.items)
+    notes = measure_repo.measure(tree, step, step.items)
     decl = check.load(main)
     state = check.branch_state(repo, check.declared_branches(decl), tree.remote)
-    ctx = MeasurementContext(gh_repo=_gh_repo(repo, tree.remote), head=state["head"], repo_issues=repo_issues)
-    notes = _ci_items(tree, step, ctx)
+    ctx = MeasurementContext(gh_repo=_gh_repo(repo, tree.remote), head=state["head"])
+    notes += _ci_items(tree, step, ctx)
     if tree.skipped:
         notes.append(f"秘密の名前のファイルを開かなかった: {'・'.join(tree.skipped[:10])}")
     return {

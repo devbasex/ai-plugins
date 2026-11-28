@@ -1,4 +1,4 @@
-"""git の木から測る設定の項目（P1・P2・P5・P6 の git の分・P7・P9・P10・素材）（#3569。旧い
+"""git の木から測る設定の項目（テストと素材）と指示書の注記（#3569。旧い
 `project_lib/measure_repo.py`・`compose.py`・`measure_materials.py` の移し先）。秘密の表は `secret.py`、結果の形は `items.py` にある。
 
 ファイルは HEAD の木から読み（`git cat-file`）、秘密の名前の表に当たるファイルは開かない。項目の測定は
@@ -26,23 +26,6 @@ from ndf.domains.project.secret import is_secret_path, redact
 MAX_READ = 512 * 1024
 # git・gh の 1 回の上限の方針（contracts/limits/）
 CALL_POLICY = "project.measure-call"
-LANG_EXT = {ext: row["id"] for row in facts.rows("languages", code=True) for ext in row["extensions"]}
-# 依存の名前とフレームワークの組（バージョンは依存の定義の主の数字）
-FRAMEWORKS = (
-    ("laravel/framework", "laravel"),
-    ("symfony/framework-bundle", "symfony"),
-    ("next", "next"),
-    ("react", "react"),
-    ("vue", "vue"),
-    ("nuxt", "nuxt"),
-    ("express", "express"),
-    ("@nestjs/core", "nestjs"),
-    ("hono", "hono"),
-    ("svelte", "svelte"),
-    ("django", "django"),
-    ("flask", "flask"),
-    ("fastapi", "fastapi"),
-)
 RUNNERS = {  # 実行器 → 当てる設定ファイルの名前と依存の名前
     "phpunit": (("phpunit.xml*",), ("phpunit/phpunit",)),
     "pytest": (("pytest.ini", "conftest.py"), ("pytest",)),
@@ -51,25 +34,9 @@ RUNNERS = {  # 実行器 → 当てる設定ファイルの名前と依存の名
     "go test": ((), ()),
     "rspec": ((".rspec",), ("rspec",)),
 }
-DB_WORDS = ("mysql", "postgres", "mariadb", "redis", "mongo")
-CHECK_TOOLS = (  # 名前 → 設定ファイルの名前
-    ("pint", ("pint.json",)),
-    ("phpstan", ("phpstan.neon*",)),
-    ("eslint", (".eslintrc*", "eslint.config.*")),
-    ("prettier", (".prettierrc*", "prettier.config.*")),
-    ("biome", ("biome.json*",)),
-    ("ruff", ("ruff.toml", ".ruff.toml")),
-    ("mypy", ("mypy.ini",)),
-    ("rubocop", (".rubocop.yml",)),
-    ("golangci-lint", (".golangci.y*ml",)),
-    ("markdownlint", (".markdownlint*",)),
-    ("pre-commit", (".pre-commit-config.yaml",)),
-)
-PYPROJECT_TOOLS = ("ruff", "black", "mypy", "isort")
 INSTRUCTION_FILES = facts.ids("instruction-files", measure=True)
 OLD_GUIDE_MARK = "NDF_PLUGIN_GUIDE_START"
 TEST_WORDS = re.compile(r"phpunit|pytest|jest|vitest|rspec|go test|npm (?:run )?test|docker compose exec|run-[\w-]*tests?")
-POLICY_WORDS = re.compile(r"doc-lint|文体|文言テスト|markdown-writing|document-style|書き方")
 IMPORT_TOKEN = re.compile(r"(?:^|\s)@([\w./-]+\.md)\b")
 DEP_NAME = re.compile(r"[\s<>=!~\[;]")
 REQ_NAME = re.compile(r"[\s<>=!~\[;#]")
@@ -172,19 +139,6 @@ class Tree:
         return hits
 
 
-def _major(spec: str) -> Optional[str]:
-    m = re.search(r"(\d+(?:\.\d+)?)", spec)
-    return m.group(1) if m else None
-
-
-def _first_number(spec: str) -> str:
-    """バージョンの指定の主の数字（`^10.10` → `10`）。主が 0 なら次の数字まで（`^0.115` → `0.115`）。"""
-    m = re.search(r"(\d+)(?:\.(\d+))?", spec)
-    if not m:
-        return ""
-    return f"0.{m.group(2)}" if m.group(1) == "0" and m.group(2) else m.group(1)
-
-
 def _sections(c: dict[str, Any], names: tuple[str, ...]) -> dict[str, str]:
     out: dict[str, str] = {}
     for sec in names:
@@ -284,40 +238,6 @@ def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
     return {s.language: s.read(tree) for s in DEP_SOURCES}
 
 
-def _spec(deps: dict[str, dict[str, str]], lang: str, name: str) -> str:
-    return deps[lang][name] if name in deps[lang] else ""
-
-
-def _versions(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Optional[str]]:
-    node = _major(_spec(deps, "javascript", NODE_ROW))
-    version_of = {
-        "php": _major(_spec(deps, "php", PHP_ROW)),
-        "python": _major(_spec(deps, "python", PYTHON_ROW)),
-        "javascript": node,
-        "typescript": node,
-    }
-    for f in tree.shallow("go.mod"):
-        m = re.search(r"^go\s+(\S+)", tree.text(f), re.M)
-        version_of["go"] = m.group(1) if m else None
-    return version_of
-
-
-def measure_languages(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Any]:
-    """言語の行（`{name, frameworks, version?}`）を名前の順に並べる。ファイル数は言語を見つけるためだけに数え、行に書かない（#4516）。"""
-    found = {LANG_EXT[s] for s in (PurePosixPath(p).suffix.lower() for p in tree.files) if s in LANG_EXT}
-    version_of = _versions(tree, deps)
-    out = []
-    for lang in sorted(found):
-        dep_lang = "javascript" if lang == "typescript" else lang
-        names = deps[dep_lang] if dep_lang in deps else {}
-        fws = [f"{fw} {_first_number(names[dep])}".strip() for dep, fw in FRAMEWORKS if dep in names]
-        entry: dict[str, Any] = {"name": lang, "frameworks": fws}
-        if version_of.get(lang):
-            entry["version"] = version_of[lang]
-        out.append(entry)
-    return measured(out)
-
-
 def top_level_block(text: str, key: str, strip: Callable[[str], str]) -> Iterator[tuple[int, str]]:
     """YAML を読まずに字下げで、トップレベルの `<key>:` の中の行を (字下げ, 行) で返す。各行へ先に `strip`（コメントの
     落とし方）を当て、空になった行は飛ばす。"""
@@ -337,40 +257,22 @@ def _drop_comment_line(line: str) -> str:
     return "" if line.lstrip().startswith("#") else line
 
 
-def compose_services(text: str) -> list[tuple[str, str]]:
-    """compose のファイルの `services:` の直下の名前と image（YAML を読まずに字下げで拾う）。"""
+def compose_services(text: str) -> list[str]:
+    """compose のファイルの `services:` の直下の名前（YAML を読まずに字下げで拾う）。"""
     names: list[str] = []
-    images: dict[str, str] = {}
     indent: Optional[int] = None
     for lead, line in top_level_block(text, "services", _drop_comment_line):
         indent = lead if indent is None else indent
         stripped = line.strip()
         if lead == indent and stripped.endswith(":"):
             names.append(stripped[:-1].strip("'\""))
-        elif names and stripped.startswith("image:"):
-            images[names[-1]] = line.split(":", 1)[1].strip().strip("'\"")
-    return [(s, images[s] if s in images else "") for s in names]
+    return names
 
 
-def _workflow_services(tree: Tree) -> list[str]:
-    """CI のワークフローの `services:` の中の image。"""
-    out: list[str] = []
-    for f in sorted(p for p in tree.files if check.is_input(p) and p.startswith(".github/")):
-        out += [m.group(1) for m in re.finditer(r"^\s+image:\s*['\"]?([\w./:-]+)", tree.text(f), re.M)]
-    return out
-
-
-def measure_services(tree: Tree) -> tuple[dict[str, Any], list[str]]:
+def service_names(tree: Tree) -> list[str]:
+    """根と 1 段下の compose のファイルのサービス名（重複なく整列）。テストの質問の候補にする。"""
     files = tree.shallow("compose*.y*ml", "docker-compose*.y*ml")
-    names: list[str] = []
-    dbs: set[str] = set()
-    for f in files:
-        for svc, image in compose_services(tree.text(f)):
-            names.append(svc)
-            dbs |= {w for w in DB_WORDS if w in svc.lower() or w in image.lower()}
-    for image in _workflow_services(tree):
-        dbs |= {w for w in DB_WORDS if image.lower().startswith(w)}
-    return measured({"container": bool(files), "compose_files": files, "databases": sorted(dbs)}), sorted(set(names))
+    return sorted({name for f in files for name in compose_services(tree.text(f))})
 
 
 def _test_scripts(tree: Tree, filename: str) -> list[str]:
@@ -421,37 +323,6 @@ def measure_test(tree: Tree, deps: dict[str, dict[str, str]], services: list[str
     return question({"runners": runners, "commands": commands, "compose_services": services}, evidence)
 
 
-def url_hosts(text: str) -> set[str]:
-    """本文の URL のホスト名だけ（github.com とその配下は除く）。"""
-    hosts = {m.group(1).lower() for m in re.finditer(r"https?://([\w.-]+)", text)}
-    return {h for h in hosts if not h.endswith("github.com") and not h.endswith("githubusercontent.com")}
-
-
-def measure_issues_repo(tree: Tree) -> dict[str, Any]:
-    local = [p for p in tree.files if re.match(r"issues/[^/]+\.md$", p)]
-    templates = [p for p in tree.files if re.match(r"\.github/(pull_request_template\.md|PULL_REQUEST_TEMPLATE/|ISSUE_TEMPLATE/)", p, re.I)]
-    hosts: set[str] = set()
-    for t in templates:
-        hosts |= url_hosts(tree.text(t))
-    return {"markdown_files": len(local), "templates": templates, "hosts": sorted(hosts)}
-
-
-def measure_checks(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, Any]:
-    tools = [{"name": name, "config": f} for name, pats in CHECK_TOOLS for f in tree.shallow(*pats)]
-    for f in tree.shallow("pyproject.toml"):
-        configured = obj(tree.toml(f).get("tool"))
-        tools += [{"name": name, "config": f"{f} [tool.{name}]"} for name in PYPROJECT_TOOLS if name in configured]
-    if "nunomaduro/larastan" in deps["php"] or "larastan/larastan" in deps["php"]:
-        tools.append({"name": "larastan", "config": "composer.json"})
-    return measured({"tools": tools})
-
-
-def measure_policies(tree: Tree) -> dict[str, Any]:
-    evidence = tree.grep(instruction_files(tree), POLICY_WORDS)
-    candidates = [{"doc_lint": False, "reject_md_wording_tests": False}, {"doc_lint": True, "reject_md_wording_tests": True}]
-    return question(candidates, evidence)
-
-
 def _normalize(path: str) -> str:
     parts: list[str] = []
     for p in path.split("/"):
@@ -473,7 +344,8 @@ def _old_guide_notes(tree: Tree, files: list[str], imports: list[dict[str, str]]
     return notes
 
 
-def measure_instructions(tree: Tree) -> dict[str, Any]:
+def instruction_notes(tree: Tree) -> list[str]:
+    """指示書の注意書き（指示書かその読み込むファイルに古い NDF の案内がある・指示書が無い）。"""
     files = instruction_files(tree)
     imports = [
         {"from": f, "to": _normalize(str(PurePosixPath(f).parent / m.group(1)))} for f in files for m in IMPORT_TOKEN.finditer(tree.text(f))
@@ -481,7 +353,7 @@ def measure_instructions(tree: Tree) -> dict[str, Any]:
     notes = _old_guide_notes(tree, files, imports)
     if not files:
         notes.append("指示書（AGENTS.md・CLAUDE.md など）が無い。NDF と各ランタイムが読む指示書を置くとよい")
-    return measured({"files": files, "imports": imports, "notes": notes})
+    return notes
 
 
 def _library_seeds(deps: dict[str, dict[str, str]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -518,28 +390,19 @@ def measure_materials(tree: Tree, deps: dict[str, dict[str, str]]) -> dict[str, 
 Step = Callable[[str, Callable[[], Any]], Any]
 
 
-def measure(tree: Tree, step: Step, items: dict[str, Any]) -> dict[str, Any]:
-    """git の木から測る項目を `items` へ入れ、リポジトリの中の課題の保存先（`issues` の材料）を返す。"""
-    dep = step("languages", lambda: dependencies(tree))
+def measure(tree: Tree, step: Step, items: dict[str, Any]) -> list[str]:
+    """git の木から測る項目（`test`・`materials`）を `items` へ入れ、指示書の注記を返す。"""
+    dep = step("dependencies", lambda: dependencies(tree))
     if dep is None:
         dep = {lang: {} for lang in DEP_LANGUAGES}
-    else:
-        got = step("languages", lambda: measure_languages(tree, dep))
-        if got is not None:
-            items["languages"] = got
-    services_got = step("services", lambda: measure_services(tree))
-    services: list[str] = []
-    if services_got:
-        items["services"], services = services_got
-    for key, fn in (
-        ("test", lambda: measure_test(tree, dep, services)),
-        ("checks", lambda: measure_checks(tree, dep)),
-        ("ndf_policies", lambda: measure_policies(tree)),
-        ("instructions", lambda: measure_instructions(tree)),
-        ("materials", lambda: measure_materials(tree, dep)),
-    ):
+    services = step("services", lambda: service_names(tree))
+    if services is None:
+        services = []
+    for key, fn in (("test", lambda: measure_test(tree, dep, services)), ("materials", lambda: measure_materials(tree, dep))):
         got = step(key, fn)
         if got is not None:
             items[key] = got
-    repo_issues = step("issues", lambda: measure_issues_repo(tree))
-    return repo_issues if repo_issues else {"markdown_files": 0, "templates": [], "hosts": []}
+    notes = step("instructions", lambda: instruction_notes(tree))
+    if notes is None:  # 締め切りか失敗。注記を出さない
+        return []
+    return notes

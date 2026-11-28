@@ -68,7 +68,7 @@ def _measure(repo: Path, monkeypatch) -> tuple[dict[str, Any], list[tuple[Any, A
 
     def fake_ci(tree, gh_repo, head, deadline):
         seen.append((gh_repo, head))
-        return {"ci": {"status": "unknown", "reason": "x"}, "merges": None, "github_issues": None, "hosts": [], "notes": []}
+        return {"ci": {"status": "unknown", "reason": "x"}, "notes": []}
 
     monkeypatch.setattr(cli.measure_ci, "measure", fake_ci)
     return cli.measure_project(repo, 30), seen
