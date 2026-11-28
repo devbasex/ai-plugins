@@ -370,12 +370,13 @@ def _mask_unread(existing: dict[str, Any]) -> Optional[str]:
 def _project_file(inp: Inputs, doc: dict[str, Any]) -> Optional[File]:
     """設定の File。今の設定と同じなら None（File を読まない）。読み手の無い項目かその指紋が残る設定では、差分の前の側の値と指紋を
     伏せる（旧い値に認証情報が入っていても、出力に写さない）。"""
-    if inp.existing is not None and value_digest(inp.existing) == value_digest(doc):
-        return None
     path = files.path(inp.main, "project")
-    old = path.read_text(encoding="utf-8") if inp.existing is not None else None
+    old = None
     if inp.existing is not None:
-        old = _mask_unread(inp.existing) or old
+        if value_digest(inp.existing) == value_digest(doc):
+            return None
+        text = path.read_text(encoding="utf-8")  # 伏せた文を使うときも読む（読めないファイルはここで失敗する）
+        old = _mask_unread(inp.existing) or text
     return File(path, files.relpath("project"), old, dumps(doc))
 
 
