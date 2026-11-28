@@ -22,6 +22,7 @@ from typing import Literal, NamedTuple, Optional
 from ndf.contracts.worker_paths_open import ACL_FIRST_ENTRY as _ACL_FIRST_ENTRY
 from ndf.contracts.worker_paths_open import ACL_TYPE_EXTENDED as _ACL_TYPE_EXTENDED
 from ndf.contracts.worker_paths_open import darwin_acl_lib as _darwin_acl_lib
+from ndf.contracts.worker_paths_open import others_write as _others_write
 from ndf.contracts.worker_paths_open import (
     EntryError,
     EntryUnsafe,
@@ -305,13 +306,14 @@ def _open_file(wd: WorkDir, name: str) -> Optional[int]:
         raise EntryUnreadable(name, e.strerror or str(e)) from None
 
 
-def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
+def read_file(wd: WorkDir, name: str, *, owned: bool = False, private_group: bool = False) -> Optional[str]:
     """名前のファイルを UTF-8 で読む。無ければ None。
 
     開いた記述子を確かめ、同じ記述子から読むので、確かめの後に名前を差し替えられても読むのは確かめた inode である。
     `owned` なら、呼んだ利用者が持ち、グループとほかの利用者が書き込めないファイルだけを読み、ほかは `EntryUnsafe`
     （`foreign`）で止める（共有の保存先で別の利用者が用意・書き換えできる中身を、呼んだ利用者の権限で使わないため）。
-    書き込めるかはモードのビットと、開いた記述子の拡張 ACL で見る（`_others_may_write`）。
+    書き込めるかはモードのビットと、開いた記述子の拡張 ACL で見る（`_others_may_write`）。`private_group` なら、呼んだ利用者
+    だけの個人グループの書き込みは許す（umask 002 で取り出した作業場所のファイルを読むため）。
     """
     fd = _open_file(wd, name)
     if fd is None:
@@ -321,7 +323,7 @@ def read_file(wd: WorkDir, name: str, *, owned: bool = False) -> Optional[str]:
         kind = _unsafe_kind(st)
         if kind:
             raise EntryUnsafe(name, kind)
-        if owned and (st.st_uid != os.geteuid() or _others_may_write(fd, st)):
+        if owned and (st.st_uid != os.geteuid() or _others_may_write(fd, st, private_group=private_group)):
             raise EntryUnsafe(name, "foreign")
         with os.fdopen(fd, "rb", closefd=False) as f:
             data = f.read()
@@ -393,16 +395,21 @@ def _check_lock(fd: int, name: str) -> None:
         raise EntryUnsafe(name, "foreign")
 
 
-def _others_may_write(fd: int, st: os.stat_result) -> bool:
+def _others_may_write(fd: int, st: os.stat_result, *, private_group: bool = False) -> bool:
     """開いたファイル `fd` へ、呼んだ利用者のほかが書き込めうるなら真。
 
     モードのグループとほかの利用者の書き込みのビットを見る。Linux の POSIX ACL は名前付きの項目の書き込みをマスク（モードの
     グループのビット）で抑えるので、モードのビットで足りる。macOS の拡張 ACL はモードと別に書き込みを許せるので、拡張 ACL の
     項目があるか確かめられないときも書き込めうるとみなす（`_has_acl_darwin`。`_refuse_acl` と同じく置き換えない側へ倒す）。
-    `write_file` が書いたファイルは親から継いだ拡張 ACL を外しているので、ここで拒まれない。
+    `write_file` が書いたファイルは親から継いだ拡張 ACL を外しているので、ここで拒まれない。`private_group` なら、個人グループ
+    の書き込みのビットは数えない。ただし Linux で拡張 ACL があれば、そのビットはマスク（ほかの利用者の書き込みを表しうる）
+    なので数える。
     """
     if st.st_mode & 0o022:
-        return True
+        if not private_group or _others_write(st):
+            return True
+        if sys.platform != "darwin" and (not hasattr(os, "getxattr") or _has_acl(fd)):
+            return True
     return sys.platform == "darwin" and _has_acl_darwin(fd)
 
 

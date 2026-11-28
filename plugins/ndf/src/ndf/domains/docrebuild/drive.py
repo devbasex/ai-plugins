@@ -6,21 +6,23 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import stat
 import string
 import subprocess
+import tempfile
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
 from ndf import cli, contracts, identity
 from ndf.adapters import git
-from ndf.contracts import result
+from ndf.contracts import result, worker_paths
 from ndf.core import issue_docs, start_point
 from ndf.domains.docrebuild import gate_decide
 from ndf.domains.docrebuild import select_decide as sd
@@ -35,7 +37,8 @@ WORK_KIND = TOOL
 RESULT_SCHEMA = contracts.schema_path("io/document-rebuild.result")
 PROMPT_TEMPLATE = "contracts/worker/document-rebuild.md"
 SKILL = "skills/document-rebuild/SKILL.md"
-REQUIREMENTS_FILE = "issues/issue-{number}-requirements.md"
+# 要求仕様のコピーを置く、保存先の下の一時ディレクトリの名前の頭
+REQUIREMENTS_COPIES = "requirement-copies"
 ADD_PREFIX, READER_PREFIX = contracts.schema_enum(RESULT_SCHEMA, "/$defs/id_prefix")
 # `git diff A...B` で分岐点が無いときの終了コード（設計書の実測）
 NO_MERGE_BASE = 128
@@ -151,18 +154,63 @@ def inspect(cwd: Path, found: Sequence[Target]) -> Inspection:
 def requirements_of(cwd: Path, targets: Sequence[Target]) -> dict[str, list[str]]:
     """設計書ごとの、組になる要求仕様のコピー（作業場所の通常ファイルのもの）。
 
-    組になるのは、設計書の名前に含まれる課題の番号すべての要求仕様である（`issue-7-8-design.md` なら課題 7 と 8）。
-    工程の `--issue` が課題 7 だけでも、課題 8 の要求仕様を落とさない。設計書でない対象と、コピーが 1 つも無い設計書は含めない。
+    組になるのは、名前の番号が設計書の名前の番号と重なる要求仕様である（`issue-7-8-design.md` なら課題 7 と 8 の
+    要求仕様と、番号をまとめた `issue-7-8-requirements.md`）。工程の `--issue` が課題 7 だけでも、課題 8 の要求仕様を
+    落とさない。設計書でない対象と、コピーが 1 つも無い設計書は含めない。
+
+    作業場所の外を読み手役に渡さないため、`issues/` がシンボリックリンクなら列挙しない。設計書の対象が無いときも列挙しない。
     """
+    designs = [t for t in targets if t.kind == "design"]
+    if not designs or os.path.islink(cwd / "issues"):
+        return {}
+    names = (f"issues/{p.name}" for p in (cwd / "issues").glob("*-requirements.md"))
+    numbered = sorted((sorted(issue_docs.requirements_issues(rel)), rel) for rel in names)
     out: dict[str, list[str]] = {}
-    for t in targets:
-        if t.kind != "design":
-            continue
-        paths = [REQUIREMENTS_FILE.format(number=n) for n in sorted(issue_docs.design_issues(t.path))]
-        found = [rel for rel in paths if _is_regular(cwd / rel)]
+    for t in designs:
+        wanted = issue_docs.design_issues(t.path)
+        found = [rel for numbers, rel in numbered if wanted.intersection(numbers) and regular_file(cwd, rel)]
         if found:
             out[t.path] = found
     return out
+
+
+@contextlib.contextmanager
+def copy_requirements(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> Iterator[dict[str, list[str]]]:
+    """組になる要求仕様を保存先の一時ディレクトリへ写し、設計書ごとのコピーの絶対パスを渡す。
+
+    worker は作業場所のパスを開き直さず、検査した記述子から読んだ内容のコピーだけを読む。一時ディレクトリは実行ごとに新しく
+    作り（既にあるファイルの権限を引き継がない）、抜けるとき（途中の失敗を含む）に消す。安全に読めない・写せない要求仕様が
+    あれば `Precondition`。
+    """
+    found = sorted({rel for rels in requirements.values() for rel in rels})
+    if not found:
+        yield {}
+        return
+    try:
+        state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        scratch = tempfile.TemporaryDirectory(prefix=f"{REQUIREMENTS_COPIES}-", dir=state_dir)
+    except OSError as exc:
+        raise Precondition(f"要求仕様書を写す一時ディレクトリを保存先 {state_dir} に作れない: {exc}") from None
+    with scratch as top:
+        copies = {rel: str(_copy_requirement(cwd, rel, Path(top))) for rel in found}
+        yield {design: [copies[rel] for rel in rels] for design, rels in requirements.items()}
+
+
+def _copy_requirement(cwd: Path, rel: str, into: Path) -> Path:
+    """`rel` をリンクをたどらずに開き、同じ記述子でオーナーと書き込み権限を確かめて読み、内容を `into` へ置く。"""
+    source = Path(rel)
+    try:
+        with worker_paths.open_resolved(cwd) as top, worker_paths.open_subdir(top, str(source.parent)) as wd:
+            worker_paths.check_unshared(wd, source.name)
+            text = worker_paths.read_file(wd, source.name, owned=True, private_group=True)
+        if text is None:
+            raise Precondition(f"要求仕様書 {rel} が無くなった")
+        with worker_paths.open_or_create(into) as out:
+            worker_paths.check_unshared(out)
+            worker_paths.write_file(out, source.name, text, private=True)
+            return out.path / source.name
+    except (OSError, worker_paths.EntryError) as exc:
+        raise Precondition(f"要求仕様書 {rel} を安全に読んで保存先へ写せない: {exc}") from None
 
 
 def regular_file(cwd: Path, rel: str) -> bool:
@@ -522,8 +570,9 @@ def drive(args: RunArgs, *, git_of: Callable[[Path], git.Git] = git.Git, runner:
         if not chosen.targets:
             summary = f"組み直す文書が無い（種類: {'・'.join(args.kinds)}・起点: {ref}）"
             return result.result(TOOL, result.OK, summary, [], {"targets": []}, warnings=chosen.skipped)
-        prompt = prompt_text(chosen.targets, requirements_of(args.cwd, chosen.targets), _root() / SKILL)
-        out, result_file = run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
+        with copy_requirements(args.cwd, requirements_of(args.cwd, chosen.targets), args.state_dir) as requirements:
+            prompt = prompt_text(chosen.targets, requirements, _root() / SKILL)
+            out, result_file = run_worker_at(args.state_dir, args.cwd, WORK_KIND, prompt, runner)
         attempts = out["metrics"].get("attempts") if isinstance(out.get("metrics"), dict) else None
         log.info("組み直す worker が終えた", extra={"worker_status": out.get("status"), "attempts": attempts})
         stopped, report = worker_report(out, result_file)

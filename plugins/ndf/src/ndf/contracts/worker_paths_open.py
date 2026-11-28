@@ -328,25 +328,30 @@ def _entry_fixed(parent: int, child: Optional[os.stat_result]) -> bool:
         return False
     if sys.platform == "darwin" and acl_lets_change_darwin(parent):
         return False
-    if not _others_write(up):
+    if not others_write(up):
         return True
     return child is not None and bool(up.st_mode & stat.S_ISVTX) and child.st_uid in (0, me)
 
 
-def _others_write(st: os.stat_result) -> bool:
+def others_write(st: os.stat_result) -> bool:
     """モードが、呼んだ利用者だけの個人グループ（`_private_group`）を除くグループかほかの利用者に書き込みを許すか。"""
     return bool(st.st_mode & 0o002 or (st.st_mode & 0o020 and not _private_group(st.st_gid)))
 
 
 def _private_group(gid: int) -> bool:
-    """`gid` が呼んだ利用者だけの個人グループ（呼んだ利用者の主グループで、利用者と同じ名前で、ほかの利用者を項目に持たない）なら真。
+    """`gid` が呼んだ利用者だけの個人グループ（呼んだ利用者の主グループで、利用者と同じ名前で、ほかの利用者を項目に持たず、
+    主グループにするほかの UID も無い）なら真。
 
     引けない（名前の無い gid・利用者）なら偽（共有のグループとみなす）。macOS の `staff` のような共有の主グループは名前が違うので偽。
     """
     if gid != os.getegid():
         return False
     # 引けないことを例外にしないよう一覧から探す（ここへ来るのはグループの書き込みのある親だけなので、一覧を読むのはまれ）
-    names = [u.pw_name for u in pwd.getpwall() if u.pw_uid == os.geteuid()]
+    users, me = pwd.getpwall(), os.geteuid()
+    # 主グループの所属は passwd の `pw_gid` に記録され、`gr_mem` には現れない
+    if any(u.pw_gid == gid and u.pw_uid != me for u in users):
+        return False
+    names = [u.pw_name for u in users if u.pw_uid == me]
     groups = [g for g in grp.getgrall() if g.gr_gid == gid]
     return bool(names and groups) and groups[0].gr_name == names[0] and set(groups[0].gr_mem) <= {names[0]}
 
@@ -393,7 +398,7 @@ def check_owned(wd: WorkDir, names: Iterable[str]) -> None:
         st = _lstat(wd, name)
         if st is not None and stat.S_ISLNK(st.st_mode):
             raise EntryUnsafe(name, "symlink")
-        if st is not None and (st.st_uid not in (0, os.geteuid()) or _others_write(st)):
+        if st is not None and (st.st_uid not in (0, os.geteuid()) or others_write(st)):
             raise EntryUnsafe(name, "foreign")
 
 

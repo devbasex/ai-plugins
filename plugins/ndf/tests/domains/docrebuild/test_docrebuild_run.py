@@ -18,7 +18,7 @@ from typing import Any, Optional
 import pytest
 
 from ndf.adapters import git
-from ndf.contracts import causes
+from ndf.contracts import causes, worker_paths
 from ndf.domains.crossreview import finish_decide
 from ndf.core import start_point
 from ndf.domains.docrebuild import cli, drive
@@ -241,6 +241,28 @@ def test_requirements_follow_every_issue_in_the_design_name(tmp_path: Path) -> N
     }
 
 
+def test_requirements_pair_by_the_numbers_in_the_name(tmp_path: Path) -> None:
+    """#4735: 番号をまとめた要求仕様書も組にする。番号の一部（`78`）とリンクは組にしない。"""
+    for rel in ("issues/issue-7-8-requirements.md", "issues/issue-78-requirements.md"):
+        _write(tmp_path, rel)
+    (tmp_path / "issues/issue-7-requirements.md").symlink_to(tmp_path / "issues/issue-78-requirements.md")
+    targets = [Target("issues/issue-7-8-design.md", "design")]
+    assert drive.requirements_of(tmp_path, targets) == {"issues/issue-7-8-design.md": ["issues/issue-7-8-requirements.md"]}
+
+
+def test_requirements_are_not_read_through_a_linked_issues_directory(tmp_path: Path) -> None:
+    """`issues/` が作業場所の外を指すリンクなら、その中の要求仕様書を組にしない。"""
+    cwd, outside = tmp_path / "work", tmp_path / "outside"
+    _write(outside, "issue-75-requirements.md")
+    cwd.mkdir()
+    (cwd / "issues").symlink_to(outside, target_is_directory=True)
+    assert drive.requirements_of(cwd, [Target(DESIGN, "design")]) == {}
+
+
+def test_requirements_without_the_issues_directory(tmp_path: Path) -> None:
+    assert drive.requirements_of(tmp_path, [Target(DESIGN, "design")]) == {}
+
+
 # --- 足すべき内容と確かめの記録 ---
 
 TARGETS = (Target(DESIGN, "design"), Target(PLAN, "plan"), Target("docs/a.md", "manuscript"))
@@ -365,7 +387,8 @@ def test_drive_hands_only_this_issues_design(tmp_path: Path) -> None:
     assert got["status"] == "ok", got
     assert got["metrics"]["targets"] == [DESIGN]
     assert f"`{DESIGN}`" in worker.prompt and OTHER_DESIGN not in worker.prompt
-    assert f"`{REQ}`" in worker.prompt
+    assert "requirement-copies-" in worker.prompt and f"/{Path(REQ).name}`" in worker.prompt and f"`{REQ}`" not in worker.prompt
+    assert not list((tmp_path / "state").glob("requirement-copies-*"))
 
 
 def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
@@ -377,7 +400,64 @@ def test_drive_pairs_requirements_with_each_design(tmp_path: Path) -> None:
     worker = FakeWorker(_report(readers=[_reader(design)]))
     assert _run(tmp_path, fake, worker, issues=(7,))["status"] == "ok"
     line = next(ln for ln in worker.prompt.splitlines() if "組になる要求仕様のコピー:" in ln)
-    assert "`issues/issue-7-requirements.md`" in line and "`issues/issue-8-requirements.md`" in line
+    assert "/issue-7-requirements.md`" in line and "/issue-8-requirements.md`" in line
+
+
+def test_copy_requirements_passes_a_private_copy_of_what_was_checked(tmp_path: Path) -> None:
+    """worker へ渡すのは読んだ内容のコピーで、作業場所の要求仕様を後で差し替えても中身は変わらない。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    rel = "issues/issue-7-requirements.md"
+    _write(cwd, rel, "読んだ内容\n")
+    with drive.copy_requirements(cwd, {DESIGN: [rel]}, state) as copies:
+        [copy] = copies[DESIGN]
+        (cwd / rel).unlink()
+        (cwd / rel).symlink_to(tmp_path / "outside.md")
+        assert Path(copy).read_text(encoding="utf-8") == "読んだ内容\n"
+        assert Path(copy).parent.parent == state.resolve() and os.stat(copy).st_mode & 0o077 == 0
+    assert not Path(copy).parent.exists()
+
+
+@pytest.mark.parametrize("kind", ["link", "linked_directory", "writable_file", "writable_directory", "gone"])
+def test_copy_requirements_refuses_what_others_can_replace(tmp_path: Path, kind: str) -> None:
+    """選んだ後にリンクへ差し替わった・ほかの利用者が書き換えられる要求仕様は、読まずに止める。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    rel = "issues/issue-7-requirements.md"
+    _write(cwd, rel)
+    _write(tmp_path / "outside", "issue-7-requirements.md", "外の内容\n")
+    if kind in ("link", "gone"):
+        (cwd / rel).unlink()
+    if kind == "link":
+        (cwd / rel).symlink_to(tmp_path / "outside/issue-7-requirements.md")
+    if kind == "linked_directory":
+        (cwd / "issues").rename(cwd / "moved")
+        (cwd / "issues").symlink_to(tmp_path / "outside", target_is_directory=True)
+    if kind == "writable_file":
+        (cwd / rel).chmod(0o666)
+    if kind == "writable_directory":
+        (cwd / "issues").chmod(0o777)
+    with pytest.raises(drive.Precondition), drive.copy_requirements(cwd, {DESIGN: [rel]}, state):
+        pass
+    assert not list(state.glob(f"{drive.REQUIREMENTS_COPIES}-*"))
+
+
+def test_copy_requirements_removes_the_copies_made_before_a_failure(tmp_path: Path) -> None:
+    """途中の要求仕様を読めずに止まっても、先に写したコピーを残さない。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    first, gone = "issues/issue-7-requirements.md", "issues/issue-8-requirements.md"
+    _write(cwd, first)
+    with pytest.raises(drive.Precondition), drive.copy_requirements(cwd, {DESIGN: [first, gone]}, state):
+        pass
+    assert not list(state.glob(f"{drive.REQUIREMENTS_COPIES}-*"))
+
+
+def test_copy_requirements_checks_who_may_write_on_the_read_descriptor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """モードのビットに出ない書き込みの許可（拡張 ACL）がある要求仕様は、読まずに止める。"""
+    cwd, state = tmp_path / "work", tmp_path / "state"
+    rel = "issues/issue-7-requirements.md"
+    _write(cwd, rel)
+    monkeypatch.setattr(worker_paths, "_others_may_write", lambda fd, st, **_: True)
+    with pytest.raises(drive.Precondition), drive.copy_requirements(cwd, {DESIGN: [rel]}, state):
+        pass
 
 
 @pytest.mark.parametrize(("base", "remote"), [("main", "origin"), ("trunk", "up")])

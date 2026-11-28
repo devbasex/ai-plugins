@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ndf.core.plan.inputs_decide import (
     DesignResult,
     absorbed_missing,
@@ -163,8 +165,8 @@ def test_current_section_lines_fences_headings_and_boundaries():
         "前\n## 対象\r\na\n   ```\n## 囲みの中ではない\nb\n   ```\n```\n## 囲みの中\n~~~\nc\n~~~\n```\n"
         "### 小見出し\n# 上の見出し\nd\n## 対象\ne\n"
     )
-    # 字下げした囲みは囲みとして扱わない。最初の見出しのセクションだけを読み、`#` / `##` の見出しで終わる
-    assert section_lines(body, "## 対象") == ["a", "   ```"]
+    # 字下げが 3 つまでの囲みも囲みとして扱う。最初の見出しのセクションだけを読み、`#` / `##` の見出しで終わる
+    assert section_lines(body, "## 対象") == ["a", "### 小見出し"]
     assert section_lines("## 対象\n", "## 対象") == [""]
     assert section_lines("x", "## 対象") is None
     assert section_lines("## 対象x\n", "## 対象") is None
@@ -187,3 +189,75 @@ def test_current_design_target_lines_fences_and_sections():
         ("テスト設計", 13, "`y`"),
         ("決定の記録", 17, "`w`"),
     ]
+
+
+# --- HTML コメントの中の記入例（#4735 の r2-1・r2-2） ---
+
+_COMMENTED = "<!-- 記入例\n```md\n```\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | 例 |\n-->\n"
+
+
+def test_the_example_in_an_html_comment_is_not_a_record():
+    from ndf.domains.loop.acceptance_decide import read_checks
+
+    assert read_checks(_COMMENTED) == {}
+
+
+def test_recorded_body_keeps_the_html_comment_and_replaces_the_real_table():
+    from ndf.domains.loop.acceptance_decide import read_checks, recorded_body
+
+    real = "## 受け入れ条件\n\n- [ ] 甲\n\n## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | 古い |\n"
+    got = recorded_body(_COMMENTED + "\n" + real, {1: "新しい"}, [])
+    assert got.startswith(_COMMENTED)
+    assert "古い" not in got
+    assert read_checks(got)[1].means == "新しい"
+
+
+@pytest.mark.parametrize("opening", ["<details>\n<!--\n", "<details>\n<!--\n\n", "<details><!--\n"])
+def test_the_example_in_a_comment_inside_an_html_block_is_not_a_record(opening):
+    from ndf.domains.loop.acceptance_decide import read_checks
+
+    example = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | 例 |\n"
+    assert read_checks(f"{opening}{example}-->\n</details>\n") == {}
+
+
+def test_the_row_in_a_comment_following_the_table_is_not_a_record():
+    from ndf.domains.loop.acceptance_decide import read_checks
+
+    table = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n| 1 | マージ前 | pytest | <!--\n| 2 | マージ前 | 未実行 |\n-->\n"
+    assert list(read_checks(table)) == [1]
+
+
+# --- 確認の表の範囲とコメント（PR #4767 の r3-3・r4-4・r5-2） ---
+
+_TABLE = "## 受け入れ条件の確認\n\n| 条件 | 区分 | 手段 |\n| --- | --- | --- |\n"
+
+
+@pytest.mark.parametrize("opening", ["<details>\n<!--", "<details><!--", "<details>\n  <!--", "<details>\n<!-- 注 -->\n<!--"])
+def test_recorded_body_does_not_replace_the_table_in_a_comment_after_a_tag(opening):
+    from ndf.domains.loop.acceptance_decide import recorded_body
+
+    commented = f"## 受け入れ条件\n\n- [ ] 甲\n\n{opening}\n{_TABLE}| 1 | マージ前 | 例 |\n-->\n</details>\n"
+    got = recorded_body(commented, {1: "新しい"}, [])
+    assert got.startswith(commented.rstrip("\n"))
+    assert got.count("新しい") == 1
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        " <!--\n| 2 | マージ前 | 記入例 |\n-->\n",
+        " <!-- メモ\n| 2 | マージ前 | 記入例 |\n-->\n",
+        "\n<!--\n| 2 | マージ前 | 記入例 |\n-->\n",
+        " <!-- 注 --> <!--\n| 2 | マージ前 | 記入例 |\n-->\n",
+    ],
+)
+def test_recorded_body_keeps_the_comment_that_follows_the_table(tail):
+    from ndf.domains.loop.acceptance_decide import read_checks, recorded_body
+
+    body = f"## 受け入れ条件\n\n- [ ] 甲\n\n{_TABLE}| 1 | マージ前 | 古い |{tail}"
+    got = recorded_body(body, {1: "新しい"}, [])
+    comment = tail[tail.rindex("<!--") :]
+    assert got.endswith("\n" + comment)
+    assert "古い" not in got
+    assert list(read_checks(got)) == [1]
+    assert recorded_body(got, {1: "新しい"}, []) == got

@@ -149,8 +149,8 @@ plugins/ndf/src/ndf/
 | `Doc` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(path: str, source: str, commit: Optional[str], issues: tuple[int, ...], body: str, criteria: tuple[Criterion, ...], criteria_digest: str)` | 読んだ要求仕様書 1 本 |
 | `Lookup` | `core/requirements_decide.py` | 新設（型） | `NamedTuple(docs: dict[int, Doc], missing: tuple[int, ...])` | 番号ごとの要求仕様書と、見つからない番号 |
 | `RequirementsError` | `core/requirements_decide.py` | 新設（例外） | `(cause: str, detail: str, gaps: Sequence[dict[str, str]] = ())` | 読めない理由を結果 JSON の `cause` で持つ |
-| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(text: str) -> str` | チェックボックスの印と先頭の番号を除き前後の空白を落とした文の SHA-256 の先頭 12 桁を返す |
-| `criteria_of` | `core/requirements_decide.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを上から番号を振って読み、文の重なりを断る |
+| `criterion_digest` | `core/requirements_decide.py` | 新設 | `(block: str) -> str` | `- [ ]`、`- [x]`、`- [X]` のいずれかで始まる条件の行を、続きの行とともに書かれたまま受け取る。設計書の「条件の版を計算する文」の順に整え、SHA-256 の先頭 12 桁を返す。先頭のチェック状態は版の計算に含めない。どれでも始まらない入力は `ValueError` |
+| `criteria_of` | `core/requirements_decide.py` | 新設 | `(body: str) -> tuple[Criterion, ...]` | `## 受け入れ条件` のチェックボックスを、字下げした継続の行を含めて上から番号を振って読み、文の重なりを断る |
 | `criteria_list_digest` | `core/requirements_decide.py` | 新設 | `(criteria: Sequence[Criterion]) -> str` | 条件の版を番号の順に改行でつないだ文字列の SHA-256 の先頭 12 桁を返す |
 | `parse_doc` | `core/requirements_decide.py` | 新設 | `(path: str, raw: bytes, *, source: str, commit: Optional[str], repo: str) -> Doc` | バイト列を UTF-8 で読み、元の Issue の行と条件を確かめて `Doc` にする |
 | `base_commit` | `core/requirements_docs.py` | 新設 | `(git: Git, remote: str, base: str) -> str` | `<remote>/<base>` を 1 回だけコミットに解決する |
@@ -206,9 +206,9 @@ plugins/ndf/src/ndf/
 
 | 新設する関数 | 確かめた既存の部品 | 確かめた手段 | 結果 |
 | --- | --- | --- | --- |
-| `criteria_of` | `core/plan/inputs_decide.criteria` | `core/plan/inputs_decide.py` を読んだ | 使う（番号の数え方を共有し、版だけを足す） |
+| `criteria_of` | `core/plan/inputs_decide.criteria` | `core/plan/inputs_decide.py` を読んだ | 使う（番号の数え方を共有する。条件の文は、同じモジュールの `criteria_blocks` で継続の行まで読む） |
 | `criterion_digest`・`criteria_list_digest` | `hashlib.sha256`・`domains/loop/acceptance_decide` の今の表 | `grep -rn sha256 src/ndf/core` | 使う（`hashlib`）。今の確認の表は版を持たないので、版を計算する既存の関数は無い |
-| `parse_doc` | markdown-it-py（`domains/materials/collect._tokens`） | `grep -rn MarkdownIt src/ndf` | 使わない（`inputs_decide.criteria` が行で読んでおり、数え方を変えないため） |
+| `parse_doc` | markdown-it-py（`domains/materials/collect._tokens`） | `grep -rn MarkdownIt src/ndf` | コードブロックと HTML コメントの範囲だけに使う（`inputs_decide` が読む）。条件の行は `inputs_decide.criteria` が行で読み、数え方を変えない |
 | `worktree_candidates` | `contracts/worker_paths.open_workdir`・`read_bytes`・`check_owned`・`check_unshared`・`has_acl` | `contracts/worker_paths_open.py` を読んだ | 使う |
 | `tree_candidates` | `Git.blobs`・`adapters/git.REGULAR_MODES` | `adapters/git.py` を読んだ | 使う。ツリーの一覧は新設の `Git.tree_entries` |
 | `base_commit` | `progress.command.base_ref` | `progress/command.py` を読んだ | 使えない（`progress` の層にあり、`core` から呼ぶと層の向きに反する）。`Git.commit_or_none` を使う |
@@ -218,7 +218,7 @@ plugins/ndf/src/ndf/
 
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
-| `criterion_digest` | 同じ文は同じ版 | `[x]` と `[ ]`、先頭の `1.` の有無、前後の空白で版が変わらない | 文を 1 字変えると版が変わる |
+| `criterion_digest` | 同じ文は同じ版 | 行頭のチェックボックスが `[x]` か `[ ]` か、先頭の `1.` の有無、前後の空白で版が変わらない | 文を 1 字変えると版が変わる |
 | `criteria_of` | 3 件を番号つきで返す | 条件 0 件は空の並び | 同じ文の条件 2 つで `check_failed` |
 | `parse_doc` | URL がそろえば `Doc` | 番号 2 つの名前で 2 行 | 1 行欠けで `check_failed` |
 | `worktree_candidates` | 追跡していないファイルも読む | 番号の一部（`78` と `7`）は当たらない | リンク・ほかの利用者が書ける・ACL の項目（`has_acl` を差し替え）で内容を返さない |
@@ -903,6 +903,7 @@ plugins/ndf/src/ndf/
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
 | `requirements_of` | `domains/docrebuild/drive.py` | 変更 | 今のまま | 作業場所の `issues/` のうち、`issue_docs.requirements_issues` が設計書の番号と重なる通常ファイルを組にする |
+| `copy_requirements` | `domains/docrebuild/drive.py` | 新設 | `(cwd: Path, requirements: Mapping[str, Sequence[str]], state_dir: Path) -> ContextManager[dict[str, list[str]]]` | 組になる要求仕様書をリンクをたどらずに開き、同じ記述子でオーナーと書き込み権限を確かめて読む（`worker_paths`。呼んだ利用者だけの個人グループの書き込みは許す）。内容は保存先に実行ごとに作る一時ディレクトリへコピーし、そのパスを渡す。一時ディレクトリは worker が終えたときと、途中で失敗したときに消す。確かめられなければ `precondition` で止める |
 
 変える前は `issues/issue-<番号>-requirements.md` だけを番号ごとに探したので、`issue-7-8-requirements.md` が組にならなかった。変えた後は番号の重なりで探し、定数 `REQUIREMENTS_FILE` を消す。
 
@@ -911,6 +912,7 @@ plugins/ndf/src/ndf/
 | 関数 | 正常 | 境界値 | 異常 |
 | --- | --- | --- | --- |
 | `requirements_of` | `issue-7-8-design.md` と `issue-7-8-requirements.md` が組になる | 番号の一部（`78`）は当たらない | リンクは組にしない |
+| `copy_requirements` | 所有者だけが読めるコピーを渡し、抜けると消す | 読んだ後に元を差し替えても中身は変わらない | リンク・ほかの利用者が書ける・消えた要求仕様書で止まり、先に作ったコピーを残さない |
 
 ## worker の起動指示（`contracts/worker/`・`core/worker.py`）
 
@@ -922,7 +924,7 @@ plugins/ndf/src/ndf/
 | --- | --- | --- |
 | `core/worker.py` の `ACCEPTANCE_RULES` | `ndf loop acceptance record --issue <番号>` で区分を記録する | 単位の指示の `--run` と条件一覧の版を添えて `record` を打つ。条件の文は要求仕様書（`ndf records requirements show`）から読む |
 | `contracts/worker/kinds.json` | 要求の工程の worker が Issue の本文へ要求を書く | 要求仕様書のファイルへ書き、Issue の本文を変えない |
-| `contracts/worker/document-rebuild.md` | 要求仕様のコピー | 要求仕様書 |
+| `contracts/worker/document-rebuild.md` | 要求仕様のコピー（Issue の本文から作ったファイル）の、作業場所のパスを渡す。編集しない | 検査済みの要求仕様書を実行の保存先にコピーし、worker にはそのコピーのパスを渡す。元の要求仕様書とコピーは編集しない |
 
 ## 手順書と用語集
 

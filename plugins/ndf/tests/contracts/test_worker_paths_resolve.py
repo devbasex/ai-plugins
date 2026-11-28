@@ -664,8 +664,11 @@ def test_acl_lets_change_darwin_is_true_when_it_cannot_tell(monkeypatch):
     assert worker_paths_open.acl_lets_change_darwin(0) is True
 
 
-@pytest.mark.parametrize(("group", "members", "shared"), [("me", [], False), ("devs", [], True), ("me", ["other"], True)])
-def test_check_unshared_counts_group_write_only_for_a_group_others_are_in(tmp_path, monkeypatch, group, members, shared):
+@pytest.mark.parametrize(
+    ("group", "members", "primary_of_other", "shared"),
+    [("me", [], False, False), ("devs", [], False, True), ("me", ["other"], False, True), ("me", [], True, True)],
+)
+def test_check_unshared_counts_group_write_only_for_a_group_others_are_in(tmp_path, monkeypatch, group, members, primary_of_other, shared):
     # PR 4307 の r8-3: Ubuntu の既定（利用者と同名の個人グループ・umask 002）のグループの書き込みは差し替えの余地に数えない
     from types import SimpleNamespace
 
@@ -675,7 +678,10 @@ def test_check_unshared_counts_group_write_only_for_a_group_others_are_in(tmp_pa
     (work / "f").write_text("本文", encoding="utf-8")
     gid = work.stat().st_gid
     monkeypatch.setattr(worker_paths_open.os, "getegid", lambda: gid)
-    monkeypatch.setattr(worker_paths_open.pwd, "getpwall", lambda: [SimpleNamespace(pw_name="me", pw_uid=os.geteuid())])
+    users = [SimpleNamespace(pw_name="me", pw_uid=os.geteuid(), pw_gid=gid)]
+    if primary_of_other:
+        users.append(SimpleNamespace(pw_name="other", pw_uid=os.geteuid() + 1, pw_gid=gid))
+    monkeypatch.setattr(worker_paths_open.pwd, "getpwall", lambda: users)
     monkeypatch.setattr(worker_paths_open.grp, "getgrall", lambda: [SimpleNamespace(gr_name=group, gr_gid=gid, gr_mem=members)])
     with worker_paths.open_workdir(work) as wd:
         if shared:

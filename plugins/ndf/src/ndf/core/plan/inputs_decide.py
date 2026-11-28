@@ -12,15 +12,272 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import NamedTuple, Optional, TypeVar
+
+from markdown_it import MarkdownIt
+from markdown_it.common.html_re import attr_name, attribute, open_tag
+from markdown_it.rules_block import StateBlock, html_block, paragraph
+from markdown_it.rules_inline import StateInline, backtick, html_inline
+from markdown_it.token import Token
 
 HEADING = "## 受け入れ条件"
 CHECKS_HEADING = "## 受け入れ条件の確認"
 CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
-_FENCE = re.compile(r"^(```|~~~)")
+# HTML の文を前から区切る。コメントは閉じ（無ければ末尾）まで 1 つにして中のタグを読まず、タグは改行を含めて読む
+_COMMENT_OR_TAG = re.compile(rf"<!(?=--).*?(?:-->|\Z)|({open_tag})", re.DOTALL)
+# 文の末尾で閉じていないタグ（属性の間か、引用符で始めた属性値の途中）。1 つめの組は書きかけの属性の `=`、2 つめは
+# 閉じていない属性値
+_UNFINISHED_TAG = re.compile(rf"""<[A-Za-z][A-Za-z0-9\-]*{attribute}*(?:\s+{attr_name}\s*(=)\s*("[^"]*|'[^']*)?|\s*/?)\Z""")
+
+
+def _recording(rule: Callable[[StateInline, bool], bool]) -> Callable[[StateInline, bool], bool]:
+    """インラインの規則が読み取った範囲を `env["spans"]` に残す規則。"""
+
+    def run(state: StateInline, silent: bool) -> bool:
+        start = state.pos
+        matched = rule(state, silent)
+        # 画像の代替テキストは別の文字列として解析されるので、位置を残さない
+        if matched and not silent and state.src == state.env["src"]:
+            state.env["spans"].append((rule is html_inline, start, state.pos))
+        return matched
+
+    return run
+
+
+# コード表記と本物の HTML コメントの位置を読む（`<!--` を含む段落と見出しだけに使う。引数なしの設定は CommonMark）
+_INLINE = MarkdownIt()
+_INLINE.inline.ruler.at("backticks", _recording(backtick))
+_INLINE.inline.ruler.at("html_inline", _recording(html_inline))
+
+
+def _comment_spans(content: str) -> list[tuple[bool, int, int]]:
+    """インラインの文の (本物のコメントなどの HTML か, 開始, 終了) の並び。偽はコード表記。"""
+    env: dict = {"src": content, "spans": []}
+    _INLINE.inline.parse(content, _INLINE, env, [])
+    return env["spans"]
+
+
+def _inline_marks(lines: Sequence[str] | Mapping[int, str], tokens: Iterable[Token]) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """`<!--` の位置を (段落と見出しの中の本物のコメントの開き, コメントを開かないもの) で返す。
+
+    コメントを開かないのは、段落と見出しのコード表記の中と、HTML のブロックのタグの属性値の中。
+    位置は (行の添字, 行末までの文字数)。行頭の字下げや引用の記号を除いた行でも、元の行でも同じ値になる。
+    結果はトークンに残し、同じトークンの解析と位置の変換は 1 回だけにする。
+    """
+    comments: set[tuple[int, int]] = set()
+    literals: set[tuple[int, int]] = set()
+    for token in (t for t in tokens if t.type in ("inline", "html_block") and "<!--" in t.content):
+        if "marks" not in token.meta:
+            if token.type == "inline":
+                token.meta["marks"] = _token_marks(lines, token)
+            else:
+                token.meta["marks"] = set(), _literals(token.content, token.map[0], _tag_spans(token.content))
+        comments |= token.meta["marks"][0]
+        literals |= token.meta["marks"][1]
+    return comments, literals
+
+
+def _tag_spans(text: str) -> list[tuple[int, int]]:
+    """HTML の文 `text` のタグの (開始, 終了)。この中の `<!--`（属性値の中）はコメントを開かない。"""
+    return [tag.span() for tag in _COMMENT_OR_TAG.finditer(text) if tag[1]]
+
+
+def _markdown_spans(text: str) -> list[tuple[int, int]]:
+    """Markdown の文 `text` の、中の `<!--` がコメントを開かない (開始, 終了)。
+
+    コード表記・タグ・エスケープを、同じインライン解析の結果から読む。
+    """
+    spans = [(a, b) for is_html, a, b in _comment_spans(text) if not (is_html and text.startswith("<!", a))]
+    escaped = (m.start() for m in re.finditer("<!--", text))
+    return spans + [(at, at + 4) for at in escaped if (at - len(text[:at].rstrip("\\"))) % 2]
+
+
+def _literals(text: str, first: int, spans: Iterable[tuple[int, int]]) -> set[tuple[int, int]]:
+    """`spans` の中の `<!--` の位置（`_inline_marks` と同じ形）。`text` の先頭の行の添字は `first`。"""
+    ends = [m.start() for m in re.finditer("\n", text)] + [len(text)]
+    found = (mark.start() for begin, stop in spans for mark in re.compile("<!--").finditer(text, begin, stop))
+    return {(first + k, ends[k] - at) for at in found for k in (bisect_left(ends, at),)}
+
+
+def _token_marks(lines: Sequence[str] | Mapping[int, str], token: Token) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """インラインのトークン 1 つの `_inline_marks`。"""
+    # 解析する文の各行は、元の行から字下げと引用などの記号を除いた後ろの部分
+    places: list[tuple[int, int]] = []
+    for i, piece in enumerate(token.content.split("\n"), token.map[0]):
+        body = piece.lstrip()
+        rest = len(lines[i]) - lines[i].rfind(body) + (len(piece) - len(body))
+        places.extend((i, rest - col) for col in range(len(piece) + 1))
+    comments: set[tuple[int, int]] = set()
+    literals: set[tuple[int, int]] = set()
+    for is_html, begin, stop in _comment_spans(token.content):
+        if is_html:
+            if token.content.startswith("<!--", begin):
+                comments.add(places[begin])
+        else:
+            literals.update(places[m.start()] for m in re.compile("<!--").finditer(token.content, begin, stop))
+    return comments, literals
+
+
+def _scan_line(
+    i: int,
+    line: str,
+    inside: bool,
+    in_html: bool,
+    marks: tuple[set[tuple[int, int]], set[tuple[int, int]]],
+) -> tuple[str, bool, bool, Optional[int], int]:
+    """1 行の (HTML コメントを除いた文, 行の最初の文字がコメントの中か, 行の終わりがコメントの中か, 閉じた位置, 開いた位置)。
+
+    閉じた位置は、行の中で最後に閉じたコメントの直後の添字（閉じたコメントが無ければ None）。
+    開いた位置は、行の中で最後に開いた `<!--` の添字（開いたコメントが無ければ -1）。
+
+    `<!--` がコメントを開くのは、行の最初の文字にあるか、HTML のブロックの中にあるか、インライン解析がコメントと読む
+    ときだけで、ほかはただの文字とする。コード表記の中と、HTML のブロックのタグの属性値の中はコメントを開かない。
+    `marks` は `_inline_marks` の結果。
+    """
+    comments, literals = marks
+    kept, pos, head, closed, opened = "", 0, inside, None, -1
+    while pos < len(line):
+        if inside:
+            end = line.find("-->", pos)
+            inside = end < 0
+            pos = len(line) if inside else end + 3
+            closed = closed if inside else pos
+            continue
+        found = line.find("<!--", pos)
+        if found < 0:
+            kept += line[pos:]
+            break
+        at_head = not (kept + line[pos:found]).strip()
+        place = (i, len(line) - found)
+        if place not in literals and (at_head or in_html or place in comments):
+            kept += line[pos:found]
+            head = head or at_head
+            # `<!-->` も閉じるように、開きの `<!` の直後から閉じを探す
+            inside, pos, opened = True, found + 2, found
+            continue
+        kept += line[pos : found + 4]
+        pos = found + 4
+    return kept, head, inside, closed, opened
+
+
+def _unfinished_tags(line: str, carried: Iterable[str] = ()) -> set[str]:
+    """`line` の末尾で閉じていないタグの候補すべての、続きの行の判定に足りる短い書き出し。候補が無ければ空。
+
+    どの `<` が本物のタグの開きかは続きの行まで読むまで決まらない（コード表記の中の書き方の例もある）ので、
+    すべての開始位置の候補を残す。`carried` は前の行までの書き出しで、`書き出し + "\\n" + line` の先頭からだけ判定し、
+    `line` の中の `<` は書き出しの数に関わらず 1 回ずつ判定する。読み終えた行を読み直さない。
+    """
+    starts = [(f"{head}\n{line}", 0) for head in carried] + [(line, mark.start()) for mark in re.finditer("<", line)]
+    found = (_UNFINISHED_TAG.match(text, at) for text, at in starts)
+    return {"<a b" + equals + value[:1] for equals, value in (tag.groups("") for tag in found if tag)}
+
+
+def _breaks_block(state: StateBlock, line: int, end: int) -> bool:
+    """`line` が、前の行から続く段落を markdown-it-py の段落の規則で切るか。
+
+    HTML のブロックの規則は除く（属性値の中の行頭の `<!--` は、ブロックを始めない）。
+    """
+    if state.isEmpty(line):
+        return True
+    if state.sCount[line] - state.blkIndent > 3 or state.sCount[line] < 0:
+        return False
+    parent, state.parentType = state.parentType, "paragraph"
+    try:
+        return any(rule(state, line, end, True) for rule in state.md.block.ruler.getRules("paragraph") if rule is not _HTML_BLOCK)
+    finally:
+        state.parentType = parent
+
+
+def _read_after(
+    state: StateBlock, at: int, end: int, tail: str, spans_of: Callable[[str], list[tuple[int, int]]]
+) -> tuple[set[tuple[int, int]], int]:
+    """行 `at` の残り `tail` と、タグが閉じるまで読み足した行の (コメントを開かない `<!--`, 行をまたぐタグが届く最後の行)。
+
+    次の行を足すのはタグが閉じていないまま行が終わるときだけで、markdown-it-py がブロックの切れ目と読む行は越えない。
+    届く行が無ければ -1。`spans_of` は読んだ文の、中の `<!--` がコメントを開かない範囲を返す。
+    """
+    parts, heads, stop = [tail], _unfinished_tags(tail), at + 1
+    while heads and stop < end and not _breaks_block(state, stop, end):
+        parts.append(state.src[state.bMarks[stop] : state.eMarks[stop]])
+        heads = _unfinished_tags(parts[-1], heads)
+        stop += 1
+    text = "\n".join(parts)
+    if "<!--" not in text:
+        return set(), -1
+    spans = spans_of(text)
+    found = _literals(text, at, spans)
+    chain = at
+    breaks = [m.start() for m in re.finditer("\n", text)]
+    for begin, last in sorted((at + bisect_left(breaks, a), at + bisect_left(breaks, b)) for a, b in spans):
+        if begin <= chain < last:
+            chain = last
+    return found, chain if any(at < n <= chain for n, _ in found) else -1
+
+
+def _hold_rows(state: StateBlock, token: Token, end: int, in_html: bool) -> None:
+    """ブロック `token` がコメントかタグを開いたまま終えていれば、閉じる行までを 1 つの HTML のブロックとして足す。"""
+    rows = {n: state.src[state.bMarks[n] + state.tShift[n] : state.eMarks[n]] for n in range(*token.map)}
+    marks = _inline_marks(rows, [token])
+    inside, closed = False, None
+    for n, text in rows.items():
+        _, _, inside, closed, _ = _scan_line(n, text, inside, in_html, marks)
+
+    first = line = state.line
+    literals: set[tuple[int, int]] = set()
+    # 行をまたぐタグが届く最後の行
+    reach = first - 1
+    if in_html and not inside and closed is not None:
+        literals, last = _read_after(state, first - 1, end, rows[first - 1][closed:], _tag_spans)
+        reach = max(reach, last)
+    while line < end and (inside or line <= reach):
+        text = state.src[state.bMarks[line] : state.eMarks[line]]
+        if inside and "-->" in text:
+            found, last = _read_after(state, line, end, text.partition("-->")[2], _markdown_spans)
+            literals |= found
+            reach = max(reach, last)
+        inside = _scan_line(line, text, inside, True, (set(), literals))[2]
+        line += 1
+    if line > first:
+        held = state.push("html_block", "", 0)
+        held.map = [first, line]
+        held.content = state.getLines(first, line, state.blkIndent, True)
+        held.meta["marks"] = set(), {mark for mark in literals if first <= mark[0] < line}
+        state.line = line
+
+
+def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Callable[[StateBlock, int, int, bool], bool]:
+    """ブロックを開いたままのコメントかタグで終えるとき、閉じる行までを 1 つの HTML のブロックとして読む規則。
+
+    コメントの中の囲みの記号を、閉じた後の行まで続く囲みにしない。属性値の中の行頭の `<!--` を、次のブロックの
+    コメントの開きにしない。開いたままかは、`_split_comments` と同じく `_scan_line` で決める。
+    コメントを閉じた後ろは、閉じた行の残りを解析する（`_read_after`。HTML のブロックを除くブロックの切れ目は越えない）。
+    読み足した行は元のブロックの外なので Markdown として読み、元の HTML のブロックの中で閉じたときは HTML として読む。
+    """
+
+    def run(state: StateBlock, start: int, end: int, silent: bool) -> bool:
+        if not rule(state, start, end, silent):
+            return False
+        if silent:
+            return True
+        in_html = rule is html_block
+        token = state.tokens[-1] if in_html else state.tokens[-2]
+        if "<!--" in token.content:
+            _hold_rows(state, token, end, in_html)
+        return True
+
+    return run
+
+
+# コードブロックと HTML のブロックの範囲を読む（リスト項目の中の字下げは、行頭からの字下げの数では判定できない）。
+# ブロックの範囲だけを読むので、インラインは解析しない
+_MARKDOWN = MarkdownIt().disable(["inline", "text_join"])
+_HTML_BLOCK = _holding_comment(html_block)
+_MARKDOWN.block.ruler.at("html_block", _HTML_BLOCK, {"alt": ["paragraph", "reference", "blockquote"]})
+_MARKDOWN.block.ruler.at("paragraph", _holding_comment(paragraph))
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
@@ -52,41 +309,165 @@ def body_lines(body: str) -> list[str]:
     return body.replace("\r\n", "\n").split("\n")
 
 
+def physical_lines(text: str) -> list[str]:
+    """`body_lines` の行のうち、最後の改行の後ろを行に数えないもの（閉じていないコードブロックの空行にしない）。"""
+    lines = body_lines(text)
+    if lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def heading_at(lines: Sequence[str], heading: str) -> Optional[int]:
-    """行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
-    return next((i for i, line in enumerate(lines) if line.rstrip() == heading), None)
+    """囲みと HTML コメントの外で、行全体（行末の空白を除く）が `heading` と一致する最初の行の添字。無ければ None。"""
+    found = _after_heading(lines, heading)
+    return None if found is None else found[0]
+
+
+def _after_heading(lines: Sequence[str], heading: str) -> Optional[tuple[int, list[tuple[int, str]], set[int]]]:
+    """`heading_at` の添字、それより後ろの囲みと HTML コメントの外の行、コメントの行の添字（添字は `lines` のもの）。無ければ None。
+
+    見出しの検索とセクションの読み出しが、1 回の解析を共有する。
+    """
+    fenced, commented = _hidden_lines(lines)
+    visible = [(i, line) for i, line in enumerate(lines) if i not in fenced and i not in commented]
+    return next(((i, visible[k + 1 :], commented) for k, (i, line) in enumerate(visible) if line.rstrip() == heading), None)
 
 
 def section_lines(body: str, heading: str) -> Optional[list[str]]:
-    """見出しのセクションの行（コードブロックの外）。セクションが無ければ None。見出しは行全体が一致するものだけ。"""
-    lines = body_lines(body)
-    at = heading_at(lines, heading)
-    if at is None:
+    """見出しのセクションの行（囲みと HTML コメントの外）。セクションが無ければ None。見出しは行全体が一致するものだけ。"""
+    found = _after_heading(body_lines(body), heading)
+    if found is None:
         return None
     out = []
-    for _, line in outside_fences(lines[at + 1 :]):
+    for _, line in found[1]:
         if SECTION_END.match(line):
             break
         out.append(line)
     return out
 
 
-def outside_fences(lines: Iterable[str], fence: re.Pattern[str] = _FENCE) -> Iterator[tuple[int, str]]:
-    """囲み（`fence` に当たる行で開いて閉じる）の外の行を `(添字 0 始まり, 行)` で返す。囲みの行そのものは返さない。"""
-    fenced = False
+def _block_tokens(lines: Sequence[str]) -> list[Token]:
+    """`lines` のブロックのトークンのうち、行の添字の範囲（`map`）を持つもの。"""
+    # 行の中に残った CR は改行と数えられるので、添字がずれないように空白にする
+    text = "\n".join(line.replace("\r", " ") for line in lines)
+    return [t for t in _MARKDOWN.parse(text) if t.map]
+
+
+def _span(tokens: Iterable[Token], *kinds: str) -> set[int]:
+    """`kinds` の種類のトークンが占める行の添字。"""
+    return {i for t in tokens if t.type in kinds for i in range(*t.map)}
+
+
+def _split_comments(lines: Sequence[str], tokens: Sequence[Token]) -> list[tuple[str, bool, bool]]:
+    """行ごとの (HTML コメントを除いた文, 行の最初の文字がコメントの中か, 読み始めの行の添字)。
+
+    3 つめはその行の添字で、行をまたぐコメントの中の行は、コメントを開いた行の添字を閉じる行まで引き継ぐ。
+    コードブロックの行はコメントを探さない。ほかの行は `_scan_line` で読む。
+    """
+    code = _span(tokens, "fence", "code_block")
+    html = _span(tokens, "html_block")
+    marks = _inline_marks(lines, tokens)
+    out: list[tuple[str, bool, int]] = []
+    inside, start = False, 0
     for i, line in enumerate(lines):
-        if fence.match(line):
-            fenced = not fenced
-            continue
-        if not fenced:
+        if not inside:
+            start = i
+            if i in code:
+                out.append((line, False, start))
+                continue
+        kept, head, inside, _, _ = _scan_line(i, line, inside, i in html, marks)
+        out.append((kept, head, start))
+    return out
+
+
+def _analyze(lines: Sequence[str], *, terminated: bool = False) -> tuple[list[Token], list[tuple[str, bool, int]]]:
+    """`lines` のブロックのトークンと、`_split_comments` の結果（解析は 1 回）。
+
+    `terminated` が真なら最後の行も改行で終えて解析する（末尾の空行が、閉じていないコードブロックの本文に入る）。
+    """
+    # 行の中に残った CR は改行と数えられるので、添字がずれないように空白にする
+    work = [line.replace("\r", " ") for line in lines]
+    tokens = _block_tokens([*work, ""] if terminated else work)
+    return tokens, _split_comments(work, tokens)
+
+
+def _hidden_lines(lines: Sequence[str]) -> tuple[set[int], set[int]]:
+    """読まない行の添字を (囲み, HTML コメント) で返す（記入例を本物の見出し・条件・表として読まない）。"""
+    tokens, split = _analyze(lines)
+    return _span(tokens, "fence"), {i for i, (_, head, _) in enumerate(split) if head}
+
+
+def uncommented(lines: Sequence[str]) -> list[tuple[str, bool]]:
+    """HTML コメントを除いた行を (文, コードブロックの中身か) で返す。コメントだけの行（中の空行を含む）は返さない。
+
+    コードの行は、リストと囲みに属する字下げだけを除いたもので、コード本体の相対的な字下げと空行は残る。
+    囲みの開閉の行はコードの中身にしない。コードの範囲は、コメントを除いた行で決める。コメントだけの行は、段落の中で
+    始まったコメントのものは閉じる行まで詰め（段落が続くまま）、ほかは空行に置き換える（コメントが区切っていた段落と
+    コードをつなげない）。
+    """
+    tokens, split = _analyze(lines, terminated=True)
+    paragraph_lines = _span(tokens, "inline")
+    kept = [not head or bool(text.strip()) for text, head, _ in split]
+    rows = [(i, text if kept[i] else "") for i, (text, _, start) in enumerate(split) if kept[i] or start not in paragraph_lines]
+    texts = [text for _, text in rows]
+    if texts != list(lines):
+        tokens = _block_tokens([*texts, ""])
+    code: dict[int, str] = {}
+    for token in (t for t in tokens if t.type in ("fence", "code_block")):
+        start = token.map[0] + (token.type == "fence")
+        content = token.content.removesuffix("\n").split("\n") if token.content else []
+        code.update(enumerate(content, start))
+    return [(code[n] if n in code else text, n in code) for n, (i, text) in enumerate(rows) if kept[i]]
+
+
+def outside_fences(lines: Iterable[str]) -> Iterator[tuple[int, str]]:
+    """囲み（` ``` ` か `~~~` のコードブロック）と HTML コメントの外の行を `(添字 0 始まり, 行)` で返す。
+    囲みの開閉の行と、最初の文字がコメントの中にある行は返さない。
+
+    囲みの範囲は CommonMark の解析（markdown-it-py）で決める。リスト項目の中の囲みは、項目の本文の位置から字下げを数える。
+    """
+    found = list(lines)
+    fenced, commented = _hidden_lines(found)
+    for i, line in enumerate(found):
+        if i not in fenced and i not in commented:
             yield i, line
 
 
 def criteria(body: str) -> list[str]:
-    """受け入れ条件のセクションのチェックボックスの文（上から）。セクションが無ければ空。"""
-    found = section_lines(body, HEADING)
-    matches = [_BOX.match(line) for line in found] if found is not None else []
-    return [m.group(1).strip() for m in matches if m]
+    """受け入れ条件のセクションのチェックボックスの先頭の行の文（上から）。セクションが無ければ空。"""
+    return [block.split("\n", 1)[0].strip() for block in criteria_blocks(body)]
+
+
+def criteria_blocks(body: str) -> list[str]:
+    """受け入れ条件のセクションのチェックボックスを、字下げした継続の行を含めて返す（上から。番号の数え方は `criteria` と同じ）。
+
+    先頭の行はチェックボックスの後ろの文、続く行は書かれたままで、どの行も改行で終える。空行では終わらず、字下げの無い行で終わる。
+    字下げしたコードブロックの行も条件の続きに含める。コードブロックと HTML コメントの中の行は、条件の始まりにもセクションの終わりにもしない。
+    空白と空行の整え方は、呼び手が決める。
+    """
+    lines = physical_lines(body)
+    found = _after_heading(lines, HEADING)
+    if found is None:
+        return []
+    at, visible, commented = found
+    outside = {i for i, _ in visible}
+    blocks: list[list[str]] = []
+    inside = False
+    for i, line in enumerate(lines[at + 1 :], at + 1):
+        if i in outside:
+            if SECTION_END.match(line):
+                break
+            box = _BOX.match(line)
+            if box:
+                blocks.append([box.group(1)])
+                inside = True
+                continue
+        if inside:
+            # コメントの行は、字下げが無くても条件を終わらせない（条件のハッシュ値を作る側が除く）
+            inside = i in commented or not line.strip() or line.startswith((" ", "\t"))
+            if inside:
+                blocks[-1].append(line)
+    return ["".join(f"{line}\n" for line in block) for block in blocks]
 
 
 def section_lack(body: str) -> Optional[str]:
@@ -122,29 +503,46 @@ def cells(line: str) -> list[str]:
 
 
 def section_span(lines: Sequence[str], heading: str) -> Optional[tuple[int, int]]:
-    """見出しのセクションの本文の行の範囲（見出しの次の行から、囲みの外の次の `#`・`##` の見出しの前まで）。無ければ None。"""
-    at = heading_at(lines, heading)
-    if at is None:
+    """見出しのセクションの本文の行の範囲（見出しの次の行から、囲みと HTML コメントの外の次の `#`・`##` の見出しの前まで）。無ければ None。"""
+    found = _after_heading(lines, heading)
+    if found is None:
         return None
-    start = at + 1
-    end = next((start + i for i, line in outside_fences(lines[start:]) if SECTION_END.match(line)), len(lines))
-    return start, end
+    at, visible, _ = found
+    end = next((i for i, line in visible if SECTION_END.match(line)), len(lines))
+    return at + 1, end
 
 
 def checks_table_spans(lines: Sequence[str]) -> list[tuple[int, int]]:
-    """`## 受け入れ条件の確認` のセクションの、囲みの外の表の行の範囲（終わりは含まない）を上から。セクション・表が無ければ空。"""
-    section = section_span(lines, CHECKS_HEADING)
-    if section is None:
+    """`## 受け入れ条件の確認` のセクションの、囲みと HTML コメントの外の表の行の範囲（終わりは含まない）を上から。セクション・表が無ければ空。
+
+    範囲は囲みかコメントの中の行の手前で終える（その行は読まず、書き換えない）。
+    """
+    found = _after_heading(lines, CHECKS_HEADING)
+    if found is None:
         return []
-    start, end = section
+    visible = found[1]
+    end = next((i for i, line in visible if SECTION_END.match(line)), len(lines))
+    outside = {i for i, _ in visible if i < end}
     spans: list[tuple[int, int]] = []
-    for i, line in outside_fences(lines[start:end]):
-        at = start + i
-        if not line.strip().startswith("|") or (spans and at < spans[-1][1]):
+    for i, line in visible:
+        if i >= end:
+            break
+        if not line.strip().startswith("|") or (spans and i < spans[-1][1]):
             continue
-        last = next((j for j in range(at, end) if not _table_line(lines[j], j > at)), end)
-        spans.append((at, last))
+        last = next((j for j in range(i, end) if j not in outside or not _table_line(lines[j], j > i)), end)
+        spans.append((i, last))
     return spans
+
+
+def opened_comment(lines: Sequence[str], row: int) -> list[str]:
+    """行 `row`（行の最初の文字がコメントの外の行）が開いたまま終える HTML コメントの、`<!--` から行末まで。無ければ空。
+
+    その行を書き換える側が、後ろに残すコメントの開きにする（後続のコメントの行を本文に出さない）。
+    """
+    tokens = _block_tokens(lines)
+    html = _span(tokens, "html_block")
+    _, _, inside, _, opened = _scan_line(row, lines[row].replace("\r", " "), False, row in html, _inline_marks(lines, tokens))
+    return [lines[row][opened:]] if inside else []
 
 
 def _table_line(line: str, after_row: bool) -> bool:
