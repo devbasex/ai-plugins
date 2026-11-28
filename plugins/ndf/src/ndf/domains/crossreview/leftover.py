@@ -216,6 +216,7 @@ class _Filing:
     texts: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     urls: list[str] = field(default_factory=list)
     me: int = 0  # 実行しているアカウントの ID
+    unsure_post: bool = False  # 記録の新規の POST が、作られたかどうか分からないまま失敗した
 
     def account_ids(self) -> list[int]:
         return [x for x in store.list_of(self.data, ACCOUNT_IDS) if type(x) is int]
@@ -428,6 +429,7 @@ class _Filing:
         try:
             at = self.write()
         except Exception as exc:  # noqa: BLE001 ネットワーク: 記録を書けないまま作ると、打ち直しで 2 件になる
+            self.unsure_post = self.record_id is None and not _refused(exc)
             for ident in idents:
                 self.fail(ident, f"起票の記録を書けない: {_reason(exc)}")
                 # 作っていない識別値は、結果の書き込みに試みた記録として残さない
@@ -480,11 +482,14 @@ class _Filing:
 
     def _close(self, record: bool) -> list[str]:
         """`record` か、前に書けなかった URL があれば、起票の記録へ結果を書き、注意を返す。書けなければ URL を状態に残す
-        （行は起票済みで候補から外れるので、次の公開はこれを見て書き直す）。"""
+        （行は起票済みで候補から外れるので、次の公開はこれを見て書き直す）。記録の新規の POST の結果が分からないときは、もう一度
+        POST すると記録が 2 つになりうるので書かず、URL を状態に残して、記録を読み直す次の公開に任せる。"""
         pending = unrecorded(self.data)
         for ident, url in pending.items():
             self.entries.setdefault(ident, {}).setdefault("url", url)
-        if record or pending:
+        if (record or pending) and self.unsure_post:
+            self.hold({i: url for i in [*pending, *self.rows] if (url := self.url_of(i))})
+        elif record or pending:
             try:
                 self.write()
             except Exception as exc:  # noqa: BLE001 ネットワーク: 次の公開が書き直す

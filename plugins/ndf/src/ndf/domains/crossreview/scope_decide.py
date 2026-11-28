@@ -150,8 +150,9 @@ class Basis(NamedTuple):
     （merge-base の SHA。PR 3944 の r2-1）、`reviewers` は今回の相手役（r2-2）、`focus` は今回の重点（r4-3）、`mvv` は今の
     MVV を見分ける値（確かめられなければ `UNKNOWN_MVV`。#4076）。`stand_in` が真なら、前のラウンドの埋めた席を、席の名前か
     欠けた相手役のどちらか一方として今回の席に割り当てる（同じ head の打ち直しの再利用だけが使う。#3955）。`unit` は今回の
-    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回読んだ PR（読んだ PR の確認を求めない起動は None。
-    #4369）。`number` は状態の今の PR 番号（`current_number`。#3780）。"""
+    単位の指示を見分ける値（`unit_id`。#4369）。`pr` は今回確認できた PR の識別子（確認できなければ None。
+    #4369）で、`pr_optional` が真なら識別子の記録の無いラウンドも合う（読んだ PR の確認を求めない起動）。`number` は状態の
+    今の PR 番号（`current_number`）、`rewound` はその番号が巻き直し後のものか（`is_rewound`。#3780）。"""
 
     base: Optional[str] = None
     reviewers: Optional[Collection[str]] = None
@@ -161,6 +162,8 @@ class Basis(NamedTuple):
     unit: Optional[str] = None
     pr: Optional[str] = None
     number: Optional[int] = None
+    pr_optional: bool = False
+    rewound: bool = False
 
 
 def current_number(state: Mapping[str, Any]) -> Optional[int]:
@@ -171,12 +174,30 @@ def current_number(state: Mapping[str, Any]) -> Optional[int]:
     return None
 
 
+def is_rewound(state: Mapping[str, Any]) -> bool:
+    """状態の今の PR 番号が、元の番号から巻き直した後のものか。"""
+    origin = state.get(store.ORIGIN_KEY)
+    return type(origin) is int and current_number(state) != origin
+
+
+def _number_of(record: Mapping[str, Any]) -> Optional[int]:
+    """ラウンドを回した PR の番号。番号の記録（`PR_NUMBER`）の無い旧形式は、読んだ PR（`PR`）の番号。どちらも無ければ None。"""
+    if PR_NUMBER in record:
+        return record[PR_NUMBER]
+    number = str(record[PR]).rpartition("#")[2] if PR in record else ""
+    return int(number) if number.isdecimal() else None
+
+
 def _same_pr(record: Mapping[str, Any], basis: Basis) -> bool:
-    """ラウンドが今回と同じ PR のものか。巻き直しは今の番号で見分ける（PR を読めなくても分かる）。読んだ PR は、リポジトリ名の
-    大文字小文字を区別せずに照らす。"""
-    if basis.number is not None and PR_NUMBER in record and record[PR_NUMBER] != basis.number:
-        return False
-    return basis.pr is None or (PR in record and str(record[PR]).casefold() == basis.pr.casefold())
+    """ラウンドが今回と同じ PR のものか。巻き直しは今の番号で見分ける（PR を読めなくても分かる）。巻き直し済みで番号を特定
+    できないラウンドは、同じ PR とみなさない。読んだ PR は、リポジトリ名の大文字小文字を区別せずに照らす。"""
+    if basis.number is not None:
+        number = _number_of(record)
+        if basis.rewound if number is None else number != basis.number:
+            return False
+    if basis.pr is None:
+        return True
+    return str(record[PR]).casefold() == basis.pr.casefold() if PR in record else basis.pr_optional
 
 
 def _matches(record: Mapping[str, Any], basis: Basis, checked: bool = True) -> bool:

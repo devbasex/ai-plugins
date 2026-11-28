@@ -121,7 +121,7 @@ plugins/ndf/
 
 | 関数 | 保存先 | 種類 | シグネチャ | 責務 |
 | --- | --- | --- | --- | --- |
-| `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と PR（巻き直しは `Basis.number` と記録の `pr_number`、読んだ PR の識別子は `Basis.pr`）だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
+| `origin_record` | `scope_decide.py` | 新設 | `origin_record(state: Mapping[str, Any], basis: Basis) -> Optional[Mapping[str, Any]]` | 相手役の全員が読んだ最後のラウンドの記録を返す。今回の席と PR（巻き直しは `Basis.number`・`Basis.rewound` と記録の `pr_number`（無ければ `pr` の番号）、読んだ PR の識別子は `Basis.pr`・`Basis.pr_optional`）だけを照らし、比較基点・重点・単位の指示・MVV は見ない |
 | `read_origin` | `round_scope.py` | 新設 | `read_origin(g: git.Git, state: Mapping[str, Any], basis: scope_decide.Basis, head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | `origin_record` の head が `head` の祖先なら、その比較基点と head を返す |
 | `line_origin` | `round_scope.py` | 新設 | `line_origin(g: git.Git, state: Mapping[str, Any], head: str, confirmed: Optional[str] = None) -> Optional[changes.Range]` | 線引きの起点（担当した相手役が全員結果を返した最後のラウンドの、比較基点と head）を返す |
 

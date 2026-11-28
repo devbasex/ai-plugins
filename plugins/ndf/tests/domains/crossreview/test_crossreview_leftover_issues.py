@@ -487,14 +487,20 @@ def test_issue_3780_a_record_that_was_not_written_is_written_by_the_next_run() -
     assert later.go() == [] and later.row[Filed.URL] == url and github.created() == 1
 
 
-def test_issue_3780_a_url_found_beside_a_failed_announcement_is_recorded() -> None:
+@pytest.mark.parametrize("status", [pytest.param(422, id="refused"), pytest.param(502, id="unknown")])
+def test_issue_3780_a_url_found_beside_a_failed_announcement_is_recorded(status: int) -> None:
+    """拒まれた記録の POST は同じ公開で書き直す。結果の分からない POST は繰り返さず、次の公開が書く。"""
     github = FakeGitHub()
     Run(github).go()
     url = github.issues[0]["html_url"]
     again = Run(github, _row(prior_issue=url), _row("r2-2", text="別の指摘"))
     again.ref = store.StateRef(9, 9, Path("unused"))
-    github.fail[("POST", "issues/9/comments")] = 502
+    github.fail[("POST", "issues/9/comments")] = status
     assert again.go() and again.row[Filed.URL] == url and github.created() == 1
+    if status == 502:
+        assert github.count("POST", "issues/9/comments") == 1 and again.data[leftover.UNRECORDED]
+        github.fail[("POST", f"repos/{REPO}/issues")] = 422
+        again.go()
     entries = leftover_decide.record_entries(github.records[-1]["body"], ISSUES)
     assert entries == {leftover_decide.identity(9, again.row["text"]): {"url": url}}
 
