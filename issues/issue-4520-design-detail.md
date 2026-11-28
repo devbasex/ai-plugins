@@ -453,7 +453,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `consume_held` | `progress/run_approval.py` | 新設 | `(d: Drive, v: View, m: Move) -> dict \| None` | 有効な承認を照らし、設計はマージ済み、デプロイはリリースの確かめを通して終了を書く |
 | `prior_approval` | `progress/run_approval.py` | 新設 | `(d: Drive, v: View, s: StageDef, step: StepDef) -> list[EventDraft] \| None` | 自動の流れの承認ゲートに有効な先の承認があれば、質問せずに済ませる事象を返す。追認と `no_release` の承認は使わない |
 | `approved_seen` | `progress/run_approval.py` | 変更 | `(answers: StageAnswers, root: Path) -> dict \| None` | 直近の開き直しより後で、工程の対象の PR を見た承認だけを返す |
-| `ensure` | `progress/gate/mvv_trail.py` | 新設 | `(hub: Callable[[], GitHub], answered: Mapping) -> None` | 判定の記録へのリンクと担い手 `mvv` の行を持つ証跡を書く。承認がまだ有効かは、呼ぶ側（`run_approval`）が回答の排他の中で確かめる |
+| `ensure` | `progress/gate/mvv_trail.py` | 新設 | `(hub: Callable[[], GitHub], answered: Mapping) -> str \| None` | 判定の記録へのリンクと担い手 `mvv` の行を持つ証跡を書く。同じ対象への利用者の最新の証跡が却下なら書かず、理由を返す。承認がまだ有効かは、呼ぶ側（`run_approval`）が回答の排他の中で確かめる |
 | `recheck` | `progress/gate/rechecking.py` | 変更 | `(st, machine_id, observe, docs_only=never_docs_only, revoke=no_revoke, how=Recheck()) -> str \| None` | 承認の対象を持つ回答は、マージ先と本番への反映を比べる。`how` は、書くか、比べた回答の番号の控え先、呼び手が作業の排他を持つかを渡す |
 | `verifier` | `progress/gate/rechecking.py` | 新設 | `(st, observe, docs_only, revoke, forget, take=…) -> ((machine_id: str, seq: int \| None) -> str \| None)` | 戻り値の関数を `run.Env.verify` に渡す。`next`・`work` の駆動は、作業の排他の中で、最初の手と回答を読む手の前にこの関数を呼ぶ。最初の手では、読む回答が無くても `seq=None` で呼ぶ。戻り値の関数は `recheck` を呼ぶ（照合し終えた回答には呼び直さない）。対象を読むのは `recheck` で、照合する回答（`ndf answer` で書かれ、まだ読まれていない回答）があるときだけ読む。戻り値の関数は先読みしない。`take`（リリースのリクエストへの回答を承認ゲートの回答として書く）は初回の `recheck` の前に 1 度だけ呼ぶ。`take` が同じ対象をすでに読んでいれば、`recheck` はその結果を使う |
 | `_reading_skipped` | `progress/run.py` | 変更 | `(d, v, s, step, prog) -> list[EventDraft] \| None` | 有効な先の承認がある設計では、読み手役のステップを打たない |
@@ -462,7 +462,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 - `run.py` の `Env` に 3 つの口を足し、`gate` のエントリポイントが差し込む。`run` は GitHub を直接読まない今の形を保つ
   - `approved_state: Callable[[View, Question], Reading]`
   - `confirm: Callable[..., Confirmed]`
-  - `mvv_trail: Callable[[Mapping], None]`（`service:mvv` の回答の payload を受ける）
+  - `mvv_trail: Callable[[Mapping], str | None]`（`service:mvv` の回答の payload を受け、利用者の却下があって書かなければ理由を返す）
 - 証跡の記録の識別子は `mvv:<ゲート>:<質問の id>:<HEAD>`。本文は `## MVV 判定（` の見出しを持つ（今の証跡の数え方に合わせる）
 - `consume_held` が `no_release` の承認で終了を書くときは、`hand_finish` と同じく、同じ追記で後ろの対象の工程へ `disabled`（`cause: no_release`）を書く
 
@@ -471,6 +471,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | 関数 | 失敗 | 原因 | 検出する場所 | 扱い | 利用者に見える出力と終了コード | 後始末と再実行の可否 |
 | --- | --- | --- | --- | --- | --- | --- |
 | `consume` | 判定した対象が今と違う | push・付け替え・設定の変更 | `differences` | 人へ質問し直す | `gate` | 承認も証跡も書かない |
+| `ensure` | 同じ対象を利用者が却下している | 単発プランの `ndf ci answer` など | 証跡の読み取り | 人へ質問し直す | `gate` | 承認の証跡を書かず、承認ゲートを待ちへ戻す |
 | `consume`・`ensure` | 証跡を書けない | GitHub | 投稿 | 止める | `stopped`（`transient`） | 承認は記録済み。次の `next` が書く |
 | `consume`・`consume_held` | 承認した PR が未マージ | 順序 | `Reading.merged` | 止める | `stopped`（`precondition`）。HEAD とマージの手順 | 承認は残る |
 | `consume_held` | マージされた HEAD かマージ先が承認と違う | 承認の後の変更 | `differences` | 質問し直す | `gate`。違う HEAD がマージされたと載せる | — |

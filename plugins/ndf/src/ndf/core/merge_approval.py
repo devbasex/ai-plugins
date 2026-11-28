@@ -194,20 +194,34 @@ def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
     return not approvals.isdisjoint((row.record_id, row.url))
 
 
-def write_merge_row(hub: GitHub, row: MergeRow, viewer: Viewer, *, latest_only: bool | None = None, preface: str = "") -> bool:
+def write_merge_row(
+    hub: GitHub, row: MergeRow, viewer: Viewer, *, latest_only: bool | None = None, preface: str = "", yield_to_user: bool = False
+) -> bool:
     """重なる証跡が無ければ投稿して真、あれば投稿せずに偽（送り直しで重ならない）。値が不正なら `TrailError`。
 
     何を重なりとするかは `latest_only` で決まる（`_already_written`）。指定しない呼び手（`ndf ci answer`）は記録の識別子だけを見る。
 
     `preface` は同じコメントの証跡の行の前に置く本文（担い手 `mvv` の行は `MVV_NOTE_HEADING` の見出しが無いと数えない）。
 
+    `yield_to_user` が真なら（担い手が利用者でない承認）、同じ対象への利用者の最新の行が却下のときは投稿せずに `UserRejected`。
+    利用者の却下はどの入口（`ndf ci answer`・`ndf answer`）で書いても、後からの承認に上書きさせない。同じ 1 回の読み取りで確かめる。
+
     `viewer` のアカウント ID が読めていなければ、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
-    if _already_written(merge_rows(hub, row.target.number, viewer), row, latest_only):
+    rows = merge_rows(hub, row.target.number, viewer)
+    if yield_to_user and _user_rejected(rows, row.target):
+        raise UserRejected(f"#{row.target.number} の同じ承認の対象（マージ先と HEAD）に利用者の却下がある")
+    if _already_written(rows, row, latest_only):
         return False
     Publisher(hub).comment(row.target.number, preface + render_merge_row(row))
     return True
+
+
+def _user_rejected(rows: Sequence[MergeRow], target: MergeTarget) -> bool:
+    """`target` への利用者の最新の行（`rows` は古い順）が却下か。"""
+    latest = [r.answer for r in rows if r.by == USER_BY and r.target.same(target)][-1:]
+    return latest == [REJECTED]
 
 
 def _already_written(rows: Sequence[MergeRow], row: MergeRow, latest_only: bool | None) -> bool:
@@ -326,3 +340,7 @@ def _other_holders(found: Sequence[tuple[Authored, MergeRow]], viewer: Viewer, t
 
 class TrailError(Exception):
     """証跡を書けない・書いた回答が判定に届かない・HEAD が提示から動いた・書き手が回答の手順でない。"""
+
+
+class UserRejected(TrailError):
+    """利用者が同じ対象を却下しているので、利用者でない担い手の承認を書かない。"""

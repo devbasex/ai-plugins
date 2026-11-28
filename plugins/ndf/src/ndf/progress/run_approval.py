@@ -43,7 +43,9 @@ class Hands(Protocol):
 
     def write(self, *drafts: model.EventDraft) -> None: ...
 
-    def write_if_unchanged(self, v: View, *drafts: model.EventDraft) -> None: ...
+    def write_if_unchanged(self, v: View, *drafts: model.EventDraft) -> bool:
+        """`v` を読んだ後に事象が増えていないときだけ書く。書いたら真。"""
+        ...
 
     def synced(self) -> None: ...
 
@@ -93,7 +95,9 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
             return d.report(v, waiting)
         qid = model.question_id(v.machine_id, v.rev, m.stage.name, m.step.id, m.progress.anchor)
         payload, reason = model.mvv_answer(m.step.id, invoke.LISTEN, APPROVED, held, qid)
-        d.write(model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev))
+        draft = model.EventDraft(ANSWERED, CONDUCTOR, m.stage.name, reason=reason, payload=payload, rev=v.rev)
+        if not _write_after_answers(d, v, draft):
+            return None  # 呼び手が最新の記録から決め直す
         return d.proceed(v, m, f"{reason}。回答は検証を通してから読むので next を打つ")
     if event_payload(m.event)["answer"] == APPROVED:
         if event_payload(m.event).get("by") == model.MVV_SERVICE:
@@ -107,11 +111,23 @@ def consume(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     return None
 
 
+def _write_after_answers(d: Hands, v: View, draft: model.EventDraft) -> bool:
+    """回答と共有する排他の中で、`v` を読んだ後に事象が増えていないときだけ `draft` を書く。書いたら真。
+
+    書いている回答があれば終わるまで待つ。待った場合は PR の head やマージ先が変わりうるので、書かずに読んだ対象を捨てる。"""
+    with store.approval_lock_after_answer(d.st, v.machine_id, d.env.sleep) as waited:
+        if waited:
+            d.env.forget()
+            return False
+        return d.write_if_unchanged(v, draft)
+
+
 def _pass_by_mvv(d: Hands, v: View, m: Move) -> None:
     """MVV 判定の承認を確定する。回答と共有する排他の中で記録を確かめ、承認の証跡を書いてから承認ゲートのステップを済ませる
     （#4520 の決定 7）。排他の中では回答が確定しないので、後の変更要求・却下の証跡は承認の証跡より後に並ぶ。
 
-    待ったか事象が増えていれば何も書かず、呼び手が決め直す。省けない記録があれば承認ゲートの待ちへ戻す。証跡を書けなければ
+    待ったか事象が増えていれば何も書かず、呼び手が決め直す。省けない記録があるか、PR の証跡に同じ対象への利用者の却下が
+    あれば、承認ゲートの待ちへ戻す。証跡を書けなければ
     `model.Refused` で、ステップは済ませない。"""
     assert m.stage is not None and m.step is not None and m.progress is not None and m.event is not None
     with store.approval_lock_after_answer(d.st, v.machine_id, d.env.sleep) as waited:
@@ -120,14 +136,20 @@ def _pass_by_mvv(d: Hands, v: View, m: Move) -> None:
         if waited or moved:
             d.env.forget()
         elif approval_decide.skip_barred(v.stage_events(m.stage.name), m.step.gate, m.stage.mvv_before(m.step.id)):
-            why = "MVV 判定の後に承認でない回答が記録されたので、人へ問う"
-            wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
-            d.env.revoke(approval_decide.stage_revocations(v, m.stage.name))
-            d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
-            d.warn(why)
+            _back_to_waiting(d, v, m, "MVV 判定の後に承認でない回答が記録されたので、人へ問う")
+        elif (why := d.env.mvv_trail(event_payload(m.event))) is not None:
+            _back_to_waiting(d, v, m, why)
         else:
-            d.env.mvv_trail(event_payload(m.event))
             d.write_if_unchanged(v, _passed(v, m, m.event))
+
+
+def _back_to_waiting(d: Hands, v: View, m: Move, why: str) -> None:
+    """工程の承認を取り消して、承認ゲートを待ちへ戻す。呼び手は回答と共有する排他を持つ。"""
+    assert m.stage is not None and m.step is not None and m.progress is not None
+    wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
+    d.env.revoke(approval_decide.stage_revocations(v, m.stage.name))
+    d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
+    d.warn(why)
 
 
 def _standing(d: Hands, v: View, s: stages.StageDef, step: stages.StepDef, answered: model.Event) -> approval_decide.Standing:

@@ -12,15 +12,18 @@ from ndf.progress import approval_decide, model
 from ndf.progress.gate.asking import Target
 
 
-def ensure(hub: Callable[[], GitHub], answered: Mapping[str, Any]) -> None:
+def ensure(hub: Callable[[], GitHub], answered: Mapping[str, Any]) -> str | None:
     """`service:mvv` の承認の回答（事象の payload）の証跡を、判定した対象の PR へ書く（同じ回答の証跡があれば書かない）。
 
     呼び手は、回答と共有する排他の中で、承認でない回答が無いことを確かめてから打つ。本文は判定の記録の見出し、判定の記録の
-    コメントへのリンク、証跡の行である。承認の対象の無い判定は何も書かない。書けなければ `model.Refused`。"""
+    コメントへのリンク、証跡の行である。承認の対象の無い判定は何も書かない。書けなければ `model.Refused`。
+
+    単発プランの `ndf ci answer` の回答はステートマシンの記録に残らないので、PR の証跡も読む。同じ対象を利用者が却下して
+    いれば何も書かず、人へ問う理由を返す。それ以外は None。"""
     seen = Target.from_dict(answered.get("seen"))
     target = seen.binding()
     if target is None:
-        return
+        return None
     held = answered[model.MVV_KEY]
     preface = f"{merge_approval.MVV_NOTE_HEADING}{model.gate_label(answered['gate'])}）\n\n判定の記録: {approval_decide.judged_note_url(held)}\n\n"
     row = merge_approval.MergeRow(
@@ -28,6 +31,9 @@ def ensure(hub: Callable[[], GitHub], answered: Mapping[str, Any]) -> None:
     )
     try:
         made = hub()
-        merge_approval.write_merge_row(made, row, made.viewer(), preface=preface)
+        merge_approval.write_merge_row(made, row, made.viewer(), preface=preface, yield_to_user=True)
+    except merge_approval.UserRejected as exc:
+        return f"{exc}ので、MVV 判定で省かず人へ問う"
     except (merge_approval.TrailError, GitHubError, GitError) as exc:
         raise model.Refused(f"MVV 判定の承認の証跡を書けないので、承認ゲートを済ませない。ndf progress next を打ち直す: {exc}") from None
+    return None

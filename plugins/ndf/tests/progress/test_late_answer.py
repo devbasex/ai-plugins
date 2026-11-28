@@ -15,6 +15,7 @@ from result_json import last_result
 
 from ndf import contracts
 from ndf.contracts import result
+from ndf.core import merge_approval
 from ndf.progress import command, gate, invoke, model, run, store
 from ndf.progress.gate import answering, entry, finishing
 
@@ -466,3 +467,29 @@ def test_an_objection_after_the_judgement_stops_the_mvv_approval(repo, st, env, 
     out = manual._next(st, tid, repo, env)
 
     assert written == [] and out["status"] == "gate" and out["metrics"]["stage"] == DESIGN, out
+
+
+def test_a_rejection_in_the_pr_trail_stops_the_mvv_approval(repo, st, env, board, capsys):
+    """ステートマシンの記録に無い利用者の却下が PR にあれば、承認ゲートを済ませず人へ問う。"""
+    tid = _approved_by_mvv(repo, st, env, capsys)
+    env.env = replace(env.env, mvv_trail=lambda _answered: "利用者の却下がある")
+
+    out = manual._next(st, tid, repo, env)
+
+    assert out["status"] == "gate" and out["metrics"]["stage"] == DESIGN, out
+
+
+def test_an_mvv_row_is_not_written_over_a_user_rejection():
+    """利用者の却下の後に、同じ対象へ利用者でない担い手の承認を書かない。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+    rejected = merge_approval.MergeRow("rejected", "user", target, True, "plan:answer:1")
+    merge_approval.write_merge_row(hub, rejected, hub.viewer())
+    approved = merge_approval.MergeRow("approved", "mvv", target, True, "mvv:1")
+
+    with pytest.raises(merge_approval.UserRejected):
+        merge_approval.write_merge_row(
+            hub, approved, hub.viewer(), preface=f"{merge_approval.MVV_NOTE_HEADING}design）\n\n", yield_to_user=True
+        )
+
+    assert len(hub.comments(DESIGN_PR)) == 1
