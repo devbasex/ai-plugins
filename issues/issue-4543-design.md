@@ -128,7 +128,7 @@ graph TD
 
 | 経路 | 小見出しを渡すとき | 外すとき | 判定の材料 |
 | --- | --- | --- | --- |
-| 読み手役（`ndf records reading prompt`） | 右の列の「外すとき」以外のすべて。指定が無ければ渡す | 確定仕様、変更履歴、README・利用者への案内を読ませるとき | 頼む側が指示の JSON の任意のキー `distinction` に `false` を書く |
+| 読み手役（`ndf records reading prompt`） | 右の列の「外すとき」以外のすべて。指定が無ければ渡す | 変更履歴を読ませるとき。確定仕様、README、利用者への案内は、小見出しの「当てる文章」がどこにも無いとき | 頼む側が指示の JSON の任意のキー `distinction` に `false` を書く |
 | 作業の AI（基準の全文を受け取る作業） | 設計（`design`）、詳細設計（`design-detail`）、設計の検査の直し（`design-check-fix`）、要求（`requirements`） | 素材集め（`document-sources`）、実装計画（`implementation-plan`）、確定仕様化（`plan-to-spec`）、振り返り（`retrospective`） | 作業の定義 `contracts/worker/kinds.json` の作業ごとの値 |
 | cross-review（レビュー担当と修正担当） | PR の変更に、課題の設計書か要求仕様のコピーがある | どちらも無い（基準の残りはこれまでどおり渡す） | 変更したファイルの名前。名前の形は `ndf/core/issue_docs.py` だけに置く |
 
@@ -313,7 +313,7 @@ graph TD
 | `plugins/ndf/src/ndf/core/issue_docs.py` と `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` に置く。`drive.py` の `REQUIREMENTS_FILE` は定義をやめ、`issue_docs.py` の定義を参照する | 6 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` | 変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す。変更に要求仕様のコピーがあれば、修正担当への指示に決定 7 の扱いを足す | 6・7 |
 | `plugins/ndf/contracts/data/review-criteria.json` と `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を JSON に置き、`criteria_decide.py` がそれを読む | 7 |
-| `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `distinction` を `false` にすると足す | 6 |
+| `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、`distinction` を `false` にする条件（決定 6 の表の「外すとき」）を足す | 6 |
 | `plugins/ndf/skills/design/references/design-template.md` | 「承認する人が読む欄」のセクションに「要約の段落と解き方の全体像は書き分けの小見出しに従って書く」という指示を足し、その小見出しを指す。テンプレート本体のコードブロックにある「解き方の全体像」の説明は、「この設計では〜」と分かる形で書くように直す。`legacy-refactor` の「目的」「目指す姿」にも同じ指示を足す | 1 |
 | `plugins/ndf/skills/pr/SKILL.md` | 「PR の作成・更新」の本文の書き方に、概要（`## Summary`・`## 概要`）は書き分けの小見出しに従って書くと足す。設計 PR と実装 PR の両方に当たると書き、「利用者向けの変化」「移行の手順」は対象外とする | 1 |
 | `plugins/ndf/skills/requirements-design/SKILL.md` | 手順 7 の「仕様の正は課題の本文である」の段落に、課題の本文は PR の本文にもなるので、概要に当たるセクションは書き分けの小見出しに従って書くと足し、その小見出しを指す | 1・5 |
