@@ -2,9 +2,11 @@
 
 ここにあるのは、開始前の確かめ（`prepare`）、打ち直しで単位の回をどう続けるかの判定（`round_state`・`resume_of`）と、
 単位を順に流す処理（`run_stage`。作業場所の用意・`impl`・マージ・スプリントの PR）である。
-開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた実装計画に単位の見出しがあるかで経路を決める。
-単位の経路なら、手元をリモートに揃え、表をすべて読み、ブランチをリモートへ送ってから並びを `units.json` に書く。
-読み方と順序は docs/specifications/ndf-implement-stage-review-units.md の「開始前の確かめ」、打ち直しの表は同じ文書の「打ち直し」にある。
+開始前の確かめは、作業場所が今いるブランチをリモートから取得し、コミットされた単位のファイルか実装計画の単位の見出しがあるかで
+経路を決める。分け方の承認が要るスプリントは常に単位の経路にする。単位の経路なら、手元をリモートに揃え、並びを読んで `units.json` に書く。
+単位のファイルがあるか承認が要れば、承認の記録と照らし、単位のファイルを読んで確かめてから、確かめたコミットをリモートへ送る
+（issues/issue-3702-design-detail.md の「始める前」）。どちらでもなければ、実装計画の表を読んでから送る。
+表の読み方と順序は docs/specifications/ndf-implement-stage-review-units.md の「開始前の確かめ」、打ち直しの表は同じ文書の「打ち直し」にある。
 
 `ndf.progress.invoke` を import しない（`invoke` がこのモジュールを呼ぶので、型は `plan_runs` が持つ）。プランを流すのと
 コマンドを打つのは `invoke` が渡す `Ports` を通す。`domains/` を import できないので、作業場所の用意は `ndf worktree create`、
@@ -22,6 +24,7 @@ import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts, identity
@@ -33,12 +36,13 @@ from ndf.core import branch_strategy, json_pointer, route
 from ndf.core.issue_docs import plan_issues
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import inputs_decide, units_files
+from ndf.core.plan import units_decide as ud
 from ndf.core.plan import runner as plan_runner
-from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup, unit_key
 from ndf.progress import issue_values, plan_runs, refactor_values
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
 from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
-from ndf.progress.plan_runs import StageResult, StageRun, UnitsStopped
+from ndf.progress.plan_runs import SprintPlan, StageResult, StageRun, UnitsStopped
 from ndf.testing import scoped
 
 # 単位の回の保存先のファイル（`reviewed-head` は `impl` のプラン、`stopped-head` と `merge.json` は単位を流す処理が書く）
@@ -53,6 +57,8 @@ UNIT_CHECKS = "unit_required_checks"
 LS_REMOTE_ABSENT = 2
 # 単位のブランチ名に付ける、単位の名前の sha256 の先頭の字数
 UNIT_HASH_CHARS = 8
+# 承認した文書を送るコミットの記録（ステートマシンの作業の保存先。`{"record_head", "commit"}`）
+DESIGN_SYNC_FILE = "design-sync.json"
 # 単位の回の保存先の、PR の番号（`impl` の `pr` のステップが書く）と単位の範囲の指示（`unit_run` が書く）のファイル
 PR_NUMBER_FILE = Path(route.PR_NUMBER_FILE).name
 UNIT_FILE = "unit.md"
@@ -67,10 +73,16 @@ UNIT_FILE_ENV = identity.env_name("unit-file")
 
 
 class Lineup(NamedTuple):
-    """単位の経路の並び。`unit_ci` は単位の PR のマージ先（`base`）・待つチェックの名前（`required`）・その名前を読んだ設定のキー（`key`）。"""
+    """単位の経路の並び。`unit_ci` は単位の PR のマージ先（`base`）・待つチェックの名前（`required`）・その名前を読んだ設定のキー（`key`）。
+
+    `source` は担当タスクの本文を読むコミット（承認の記録の HEAD か、開始の HEAD）。実装計画の表から流すときは空。
+    `bodies` は開始前の確かめが `source` から読んだ本文（単位のキーごと）。`units.json` には書かず、読み直した並びでは None。
+    """
 
     units: tuple[Unit, ...]
     unit_ci: dict[str, Any]
+    source: str = ""
+    bodies: Optional[Mapping[str, Sequence[str]]] = None
 
 
 class RoundState(NamedTuple):
@@ -109,7 +121,8 @@ class Ports(NamedTuple):
 
 class Context(NamedTuple):
     """単位を流す間に変わらない値。`sprint` はスプリントの作業場所、`branch` はスプリントブランチ、`repo` は選んだリモートの
-    `<所有者>/<リポジトリ>`、`review` は単位の PR のレビューの起動（`--pr` を持たない）、`local_tests` は手元のテストを打つか。"""
+    `<所有者>/<リポジトリ>`、`review` は単位の PR のレビューの起動（`--pr` を持たない）、`local_tests` は手元のテストを打つか、
+    `source` は担当タスクの本文を読むコミット（`Lineup.source`）、`bodies` はそのコミットの単位のキーごとの本文。"""
 
     run: StageRun
     work_dir: Path
@@ -120,6 +133,18 @@ class Context(NamedTuple):
     unit_ci: dict[str, Any]
     review: tuple[str, ...]
     local_tests: bool
+    source: str = ""
+    bodies: Mapping[str, Sequence[str]] = MappingProxyType({})
+
+
+class _Seen(NamedTuple):
+    """コミット 1 つの、スプリントの課題の実装計画と、単位のファイルがあるか。"""
+
+    plans: list[PlanDoc]
+    unit_files: bool
+
+    def has_units(self) -> bool:
+        return self.unit_files or any(has_units(p.text) for p in self.plans)
 
 
 # --- 開始前の確かめ -----------------------------------------------------------------------------
@@ -131,6 +156,12 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
     これまでの経路では `units.json` に経路だけを書き、作業場所は変えない。止めるときは `UnitsStopped`（`units.json` を書かない）。
     git と GitHub の失敗のうちここで分けないものは、そのまま上げる（呼び手の `invoke.plan_failure` が分ける）。
     """
+    sprint = run.sprint if run.sprint is not None else SprintPlan()
+    if sprint.required and (sprint.record is None or sprint.differences is None):
+        raise UnitsStopped(
+            "precondition",
+            "設計承認ゲートの承認の記録が無いので、実装を始めない。ndf progress restore で状態を戻すか、利用者に判断を求める",
+        )
     location = _work_location(run, cwd)
     g = Git(location)
     root = Path(g.run("rev-parse", "--show-toplevel").strip())
@@ -138,39 +169,126 @@ def prepare(run: StageRun, work_dir: Path, cwd: Path) -> Optional[Lineup]:
     branch = _current_branch(g)
     remote = g.remote()
     fetched = _fetched_tip(g, remote, branch) if branch is not None else None
-    uncommitted = _uncommitted_plans(g, issues)
-    # 各コミットの実装計画は 1 度だけ読む（手元と取得先が同じコミットなら取得先を読まず、進めた後も読み直さない）
+    uncommitted = _uncommitted(g, issues)
+    # 各コミットは 1 度だけ読む（手元と取得先が同じコミットなら取得先を読まず、進めた後も読み直さない）
     head, tip = fetched if fetched is not None else ("HEAD", None)
     at_head = _plans_at(g, head, issues)
     at_tip = at_head if tip is None or tip == head else _plans_at(g, tip, issues)
-    seen = [*at_head, *(at_tip if at_tip is not at_head else []), *_worktree_plans(root, uncommitted)]
-    if not any(has_units(p.text) for p in seen):
+    left = _Seen(_worktree_plans(root, uncommitted), bool(units_files.paths_naming(uncommitted, issues)))
+    if not (sprint.required or at_head.has_units() or at_tip.has_units() or left.has_units()):
         return _plain_route(work_dir)
     if uncommitted:
-        detail = f"未コミットの実装計画がある: {', '.join(uncommitted)}。コミットするか取り消してから打ち直す"
+        detail = f"未コミットの実装計画か単位のファイルがある: {', '.join(uncommitted)}。コミットするか取り消してから打ち直す"
         raise UnitsStopped("precondition", detail)
     project = ndf_settings_in(root, PROJECT_FILE)
     branch = _checked_branch(run, branch, project)
     moved = tip is not None and _catch_up(g, remote, branch, head, tip)
-    plans = at_tip if moved else at_head
-    if not any(has_units(p.text) for p in plans):
+    seen = at_tip if moved else at_head
+    if not (sprint.required or seen.has_units()):
         return _plain_route(work_dir)
     if moved:
         # 単位の経路を続けるときだけ、進めた先のコミットの設定でリリース先（I4）と単位の PR で待つチェックを決め直す
         project = ndf_settings_in(root, PROJECT_FILE)
         branch = _checked_branch(run, branch, project)
-    units = _read_units(g, remote, plans, issues)
-    pushed = g.attempt("push", "-q", "--no-follow-tags", "--", remote, f"HEAD:{HEADS}{branch}")
-    if pushed.returncode != 0:
-        raise UnitsStopped("precondition", f"{remote} の {branch} へ送れない: {mask_urls(pushed.stderr.strip())}")
-    found = Lineup(units, _unit_ci(project, branch))
+    source, bodies = "", None
+    if sprint.required or seen.unit_files:
+        units, source, checked, bodies = _units_from_files(
+            g, root, sprint, issues, seen.plans, lambda ns: _count_sprint_criteria(g, remote, ns)
+        )
+        # 送るのは記録との比較と確かめを通ったコミットだけにする（止まる実装の手元のコミットを、共有のブランチに残さない）
+        _push_sprint(g, remote, branch, checked)
+    else:
+        if sprint.new_definition:
+            detail = "実装計画にレビューの単位の欄があるのに、単位のファイル（issues/issue-<番号>-plan.units.json）が無い"
+            raise UnitsStopped("invalid", detail)
+        units = _read_units(g, remote, seen.plans, issues)
+        _push_sprint(g, remote, branch, "HEAD")
+    return _announced(work_dir, branch, Lineup(units, _unit_ci(project, branch), source, bodies))
+
+
+def _announced(work_dir: Path, branch: str, found: Lineup) -> Lineup:
+    """単位の経路の並びを知らせ、`work_dir/units.json` に書いて返す。"""
     print(
         f"ndf progress: 単位の PR のマージ先 {branch}、待つチェック {', '.join(found.unit_ci['required']) or '無し'}"
         f"（{found.unit_ci['key']}）",
         file=sys.stderr,
     )
-    plan_files.write_json(work_dir / UNITS_FILE, {"route": "units", "units": [_unit_json(u) for u in units], "unit_ci": found.unit_ci})
+    units = [_unit_json(u) for u in found.units]
+    held = {"route": "units", "units": units, "unit_ci": found.unit_ci, "source": found.source}
+    plan_files.write_json(work_dir / UNITS_FILE, held)
     return found
+
+
+def _push_sprint(g: Git, remote: str, branch: str, commit: str) -> None:
+    """手元のコミット `commit` をスプリントブランチへ送る（単位の作業場所はリモートのスプリントブランチから切る）。"""
+    pushed = g.attempt("push", "-q", "--no-follow-tags", "--", remote, f"{commit}:{HEADS}{branch}")
+    if pushed.returncode != 0:
+        raise UnitsStopped("precondition", f"{remote} の {branch} へ送れない: {mask_urls(pushed.stderr.strip())}")
+
+
+def _units_from_files(
+    g: Git,
+    root: Path,
+    sprint: SprintPlan,
+    issues: Sequence[int],
+    plans: Sequence[PlanDoc],
+    counted: Callable[[Sequence[int]], dict[int, int]],
+) -> tuple[tuple[Unit, ...], str, str, dict[str, list[str]]]:
+    """単位のファイルから読んだ並び・担当タスクの本文を読むコミット・確かめたコミット（開始の HEAD）・読んだ本文。
+
+    読み元は開始の HEAD で、承認が要れば記録の値で確かめる。
+
+    `counted` は課題の受け入れ条件の数を数える（承認が要れば呼ばず、記録の数を使う）。
+    """
+    start_head = g.rev_parse("HEAD")
+    tree = units_files.Tree(root, start_head)
+    try:
+        if sprint.required:
+            record, source, targets = _approved(g, tree, sprint, start_head)
+            limits = ud.Limits(**record["limits"])
+            criteria = {int(n): count for n, count in record[ud.CRITERIA_KEY].items()}
+            report = units_files.check_collected(tree, targets, limits, criteria, False)
+        else:
+            source = start_head
+            collected = units_files.supplemented(tree, issues, sprint.omitted, plans)
+            limits = units_files.limits_of(units_files.project_of(tree))
+            criteria = counted(issues)
+            report = units_files.check_collected(tree, collected, limits, criteria, False)
+        bad = units_files.findings(report)
+        if bad:
+            reasons = "; ".join(f"{f.rule} {f.unit}: {f.reason}" for f in bad)
+            raise UnitsStopped("invalid", f"単位のファイルが確かめを通らない: {reasons}")
+        units = units_files.lineup_from_files(report.judgement.views, report.files)
+        bodies = units_files.task_texts(units_files.Tree(root, source), units)
+    except units_files.UnitsFileError as exc:
+        raise UnitsStopped("invalid", f"単位のファイルを読めない: {exc}") from None
+    return units, source, start_head, bodies
+
+
+def _approved(g: Git, tree: units_files.Tree, sprint: SprintPlan, start_head: str) -> tuple[Mapping[str, Any], str, units_files.Targets]:
+    """承認の記録・その HEAD・比較が読んだ対象。承認した文書がスプリントブランチに届き、中身が記録と同じことを確かめる。"""
+    record, differences = sprint.record, sprint.differences
+    assert record is not None and differences is not None, "prepare が先に確かめる"
+    head = str(record["review"]["head"])
+    _check_delivered(g, sprint.work_root, head, start_head)
+    compared = differences(tree)
+    if compared.differences:
+        raise UnitsStopped("refused", f"承認した分け方と今の中身が違うので、実装を始めない: {'; '.join(compared.differences)}")
+    assert compared.targets is not None, "違いが無い比較は、読んだ対象を返す"
+    return record, head, compared.targets
+
+
+def _check_delivered(g: Git, work_root: Optional[Path], record_head: str, start_head: str) -> None:
+    """記録の HEAD か、その文書を送ったコミット（`design-sync.json`）が、開始の HEAD と同じか祖先であることを確かめる。"""
+    candidates = [record_head]
+    synced = None if work_root is None else plan_files.read_json(work_root / DESIGN_SYNC_FILE)
+    if synced is not None and "record_head" in synced and synced["record_head"] == record_head and "commit" in synced:
+        candidates.append(str(synced["commit"]))
+    for commit in candidates:
+        if g.commit_or_none(commit) is not None and g.is_ancestor(commit, start_head):
+            return
+    detail = f"承認した文書（コミット {record_head}）がスプリントブランチの HEAD（{start_head}）に届いていない"
+    raise UnitsStopped("precondition", detail)
 
 
 def _work_location(run: StageRun, cwd: Path) -> Path:
@@ -206,24 +324,27 @@ def _is_sprint_plan(path: str, issues: Sequence[int]) -> bool:
     return bool(plan_issues(path) & set(issues))
 
 
-def _plans_at(g: Git, commit: str, issues: Sequence[int]) -> list[PlanDoc]:
-    """コミットにあるスプリントの課題の実装計画。"""
+def _plans_at(g: Git, commit: str, issues: Sequence[int]) -> _Seen:
+    """コミットにあるスプリントの課題の実装計画と、単位のファイルがあるか。"""
     names = [
         p for p in g.run("ls-tree", "-z", "--name-only", commit, "--", f"{facts.value('locations', 'issues', 'path')}/").split("\0") if p
     ]
     paths = [p for p in names if _is_sprint_plan(p, issues)]
     blobs = g.blobs(*(f"{commit}:{p}" for p in paths)) if paths else []
-    return [PlanDoc(p, plan_issues(p), b.decode("utf-8")) for p, b in zip(paths, blobs) if b is not None]
+    plans = [PlanDoc(p, plan_issues(p), b.decode("utf-8")) for p, b in zip(paths, blobs) if b is not None]
+    return _Seen(plans, bool(units_files.paths_naming(names, issues)))
 
 
-def _uncommitted_plans(g: Git, issues: Sequence[int]) -> list[str]:
-    """変更・削除がコミットされていないか、追跡されていない、スプリントの課題の実装計画のパス。"""
-    return sorted({p for p in g.status_paths() if _is_sprint_plan(p, issues)})
+def _uncommitted(g: Git, issues: Sequence[int]) -> list[str]:
+    """変更・削除がコミットされていないか、追跡されていない、スプリントの課題の実装計画と単位のファイルのパス。"""
+    changed = g.status_paths()
+    return sorted({p for p in changed if _is_sprint_plan(p, issues)} | units_files.paths_naming(changed, issues))
 
 
 def _worktree_plans(root: Path, paths: Sequence[str]) -> list[PlanDoc]:
     """worktree にある未コミットの実装計画（削除されたものは読まない）。"""
-    return [PlanDoc(p, plan_issues(p), (root / p).read_text(encoding="utf-8")) for p in paths if (root / p).is_file()]
+    found = (p for p in paths if plan_issues(p) and (root / p).is_file())
+    return [PlanDoc(p, plan_issues(p), (root / p).read_text(encoding="utf-8")) for p in found]
 
 
 def _plain_route(work_dir: Path) -> None:
@@ -286,14 +407,19 @@ def _catch_up(g: Git, remote: str, branch: str, head: str, tip: str) -> bool:
 
 
 def _read_units(g: Git, remote: str, plans: Sequence[PlanDoc], issues: Sequence[int]) -> tuple[Unit, ...]:
-    """課題の本文から受け入れ条件の数を数え、すべての実装計画の表を読む。本文は数えるためだけに使い、ほかへ渡さない。"""
-    hub = github.GitHub(g.remote_repo(remote), github.client())
-    bodies = hub.nodes(issues, "issueOrPullRequest", github.BODY_FIELDS)
-    counts = {n: _criteria_count(bodies[n]) for n in issues}
+    """すべての実装計画の表を読む。"""
+    counts = _count_sprint_criteria(g, remote, issues)
     try:
         return lineup(plans, counts, issues)
     except UnitsUnreadable as exc:
         raise UnitsStopped("invalid", "実装計画のレビューの単位を読めない: " + "; ".join(exc.reasons)) from None
+
+
+def _count_sprint_criteria(g: Git, remote: str, issues: Sequence[int]) -> dict[int, int]:
+    """課題の本文の受け入れ条件の数。本文は数えるためだけに使い、ほかへ渡さない。"""
+    hub = github.GitHub(g.remote_repo(remote), github.client())
+    bodies = hub.nodes(issues, "issueOrPullRequest", github.BODY_FIELDS)
+    return {n: _criteria_count(bodies[n]) for n in issues}
 
 
 def _criteria_count(node: Mapping[str, Any]) -> int:
@@ -314,7 +440,13 @@ def _unit_ci(project: Mapping[str, Any], branch: str) -> dict[str, Any]:
 
 
 def _unit_json(unit: Unit) -> dict[str, Any]:
-    return {**unit._asdict(), "tasks": list(unit.tasks), "criteria": [list(c) for c in unit.criteria]}
+    return {
+        **unit._asdict(),
+        "tasks": list(unit.tasks),
+        "criteria": [list(c) for c in unit.criteria],
+        "after": list(unit.after),
+        "task_ids": [list(t) for t in unit.task_ids],
+    }
 
 
 def unit_branch(sprint: str, unit: Unit) -> str:
@@ -467,9 +599,18 @@ def _held_lineup(held: Mapping[str, Any]) -> Optional[Lineup]:
     if held["route"] != "units":
         return None
     units = tuple(
-        Unit(**{**u, "tasks": tuple(u["tasks"]), "criteria": tuple((int(i), int(n)) for i, n in u["criteria"])}) for u in held["units"]
+        Unit(
+            **{
+                **u,
+                "tasks": tuple(u["tasks"]),
+                "criteria": tuple((int(i), int(n)) for i, n in u["criteria"]),
+                "after": tuple(u["after"] if "after" in u else ()),
+                "task_ids": tuple((str(t), int(i)) for t, i in (u["task_ids"] if "task_ids" in u else ())),
+            }
+        )
+        for u in held["units"]
     )
-    return Lineup(units, dict(held["unit_ci"]))
+    return Lineup(units, dict(held["unit_ci"]), str(held["source"]) if "source" in held else "")
 
 
 def _unit_context(run: StageRun, work_dir: Path, cwd: Path, found: Lineup) -> Context:
@@ -485,7 +626,12 @@ def _unit_context(run: StageRun, work_dir: Path, cwd: Path, found: Lineup) -> Co
     remote = g.remote()
     test = project["test"] if isinstance(project.get("test"), Mapping) else {}
     review = _review_command(project, f"{remote}/{branch}")
-    return Context(run, work_dir, root, branch, remote, g.remote_repo(remote), found.unit_ci, review, not scoped.ci_only(test))
+    repo = g.remote_repo(remote)
+    bodies = found.bodies
+    if bodies is None:
+        # `units.json` から読み直した並びは本文を持たないので、保存したコミットから読み直す
+        bodies = _task_texts(root, found.source, found.units) if found.source else {}
+    return Context(run, work_dir, root, branch, remote, repo, found.unit_ci, review, not scoped.ci_only(test), found.source, bodies)
 
 
 def _review_command(project: Mapping[str, Any], base: str) -> tuple[str, ...]:
@@ -686,7 +832,8 @@ def unit_run(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: O
     issued = issue_values.issue_values(ctx.run.inputs, ctx.work_dir, worktree, number=unit.issue, repo=ctx.repo)
     if issued is None:
         raise UnitsStopped("precondition", f"課題 #{unit.issue} の作成者に書き込み権限が無く、題と本文を作業へ渡さない")
-    unit_file = "" if unit.supplemented else str(_write_unit_file(round_dir, unit))
+    bodies = ctx.bodies[unit_key(unit.issue, unit.name)] if ctx.source and not unit.supplemented else []
+    unit_file = "" if unit.supplemented else str(_write_unit_file(round_dir, unit, ctx.source, bodies))
     overrides: dict[str, route.Value] = {
         **issued,
         "branch": unit_branch(ctx.branch, unit),
@@ -708,13 +855,26 @@ def unit_run(ctx: Context, unit: Unit, worktree: Path, round_dir: Path, start: O
     return replace(plain, inputs=inputs, overrides=overrides, template=template, env_extra=env, start=start)
 
 
-def _write_unit_file(round_dir: Path, unit: Unit) -> Path:
-    """単位の範囲の指示（決定 8）を回の保存先へ書き直す。条件は番号だけを書き、課題の本文は写さない。"""
+def _task_texts(root: Path, source: str, units: Sequence[Unit]) -> dict[str, list[str]]:
+    """全単位の担当タスクの本文を、コミット `source` の実装計画からまとめて読む（`units_files.task_texts`）。"""
+    try:
+        return units_files.task_texts(units_files.Tree(root, source), units)
+    except units_files.UnitsFileError as exc:
+        raise UnitsStopped("invalid", str(exc)) from None
+
+
+def _write_unit_file(round_dir: Path, unit: Unit, source: str, bodies: Sequence[str]) -> Path:
+    """単位の範囲の指示（決定 8）を回の保存先へ書き直す。条件は番号だけを書き、課題の本文は写さない。
+
+    単位のファイルから流す単位は、担当タスクの所属の課題と、コミット `source` の実装計画の本文（依存の順）を持つ（#3702）。
+    """
     criteria = "、".join(f"課題 #{i} の {n}" for i, n in unit.criteria) if unit.criteria else "無し"
+    owners = dict(unit.task_ids)
+    tasks = "、".join(f"Task {t}（課題 #{owners[f'T{t}']}）" if owners else f"Task {t}" for t in unit.tasks)
     text = f"""# レビューの単位: {unit.name}
 
 - 実装計画: {unit.plan}
-- 含むタスク: {"、".join(f"Task {t}" for t in unit.tasks)}
+- 含むタスク: {tasks}
 - 満たす受け入れ条件: {criteria}
 
 この PR は、上の単位のタスクだけを実装する。後の単位のタスクは実装しない。
@@ -723,6 +883,11 @@ def _write_unit_file(round_dir: Path, unit: Unit) -> Path:
 - 今の単位の変更が原因でない失敗（変更の前からある失敗、原因を確かめられない失敗）は直さない。直さない失敗が残る場合と、後の単位のタスクを実装しないと通らない場合は、理由を返して止まる
 - 例外: 今の差分に含まれる秘密・認証認可・利用者のデータ・戻せない操作の問題は、担当の単位にかかわらず指摘し、直す。後の単位を理由に見送らない
 """
+    if bodies:
+        text += (
+            f"\n## 担当タスクの作業内容\n\nコミット {source} の {unit.plan} の本文を、依存の順に写した。この本文を作業内容の正とし、"
+            "作業場所の実装計画の本文には従わない。\n\n" + "\n\n".join(bodies) + "\n"
+        )
     round_dir.mkdir(parents=True, exist_ok=True)
     with worker_paths.open_or_create(round_dir) as wd:
         worker_paths.write_file(wd, UNIT_FILE, text, private=True)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
 from ndf.adapters.git import Git, GitError
@@ -189,7 +189,14 @@ def reapproved_of(v: run_view.View) -> Optional[dict[str, Any]]:
     return _target_of(_latest_answer(v, IMPLEMENT_DEFINITION.stem))
 
 
-def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mapping[str, Any]) -> list[str]:
+class Compared(NamedTuple):
+    """承認の記録との比較の結果。`targets` は違いが無いときの、比較が `tree` から読んだ対象（`units_files.check_collected` に渡す）。"""
+
+    differences: list[str]
+    targets: Optional[units_files.Targets]
+
+
+def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mapping[str, Any]) -> Compared:
     """承認の記録と今の中身の違い（設計書の決定 11 の表の 4 つの比較）。`tree` はスプリントの作業場所の HEAD。
 
     スプリントの課題は全体を比べ、ほかの比較は記録の `targets.issues` に絞る。
@@ -200,15 +207,23 @@ def mismatches(record: Mapping[str, Any], tree: units_files.Tree, context: Mappi
     found = [] if now_issues == sorted(issues) else [f"スプリントの課題が違う（承認 {sorted(issues)}、今 {now_issues}）"]
     head = record["review"]["head"]
     if not _fetched(Git(tree.root), head):
-        return [*found, f"記録の HEAD {head} が手元に無く、取得もできないので照らせない"]
-    found += _file_mismatches(units_files.Tree(tree.root, head), tree, targets)
-    found += _handling_mismatches(targets["handling"], tree, issues)
+        return Compared([*found, f"記録の HEAD {head} が手元に無く、取得もできないので照らせない"], None)
+    listing = tree.listing()
+    differing, parsed = _file_mismatches(units_files.Tree(tree.root, head), tree, listing, targets)
+    found += differing
+    differing, handled = _handling_mismatches(targets["handling"], tree, listing, issues)
+    found += differing
     excluded = {int(n) for n, h in targets["handling"].items() if h["handling"] in units_files.EXCLUDED_HANDLINGS}
     held = context["plan_omitted"] if "plan_omitted" in context else []
     omitted = sorted((set(held) & set(issues)) - excluded)
     if omitted != sorted(targets["omitted"]):
         found.append(f"実装計画を省いた課題が違う（承認 {sorted(targets['omitted'])}、今 {omitted}）")
-    return found
+    if found:
+        return Compared(found, None)
+    try:
+        return Compared([], units_files.targets_from(tree, listing, issues, targets["omitted"], handled, parsed))
+    except units_files.UnitsFileError as exc:
+        return Compared([str(exc)], None)
 
 
 def _fetched(g: Git, head: str) -> bool:
@@ -224,48 +239,65 @@ def _fetched(g: Git, head: str) -> bool:
     return False
 
 
-def _file_mismatches(approved: units_files.Tree, now: units_files.Tree, targets: Mapping[str, Any]) -> list[str]:
-    """単位のファイルの違い。ファイルの増減は記録の全課題で見る。重複と中身は、記録を組むときに読む課題（実装計画を省かず、
-    独立した単位を持つ課題）のファイルだけを見る。"""
+def _file_mismatches(
+    approved: units_files.Tree,
+    now: units_files.Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    targets: Mapping[str, Any],
+) -> tuple[list[str], dict[str, ud.UnitFile]]:
+    """単位のファイルの違いと、`now` から読んで解析した単位のファイル。`listing` は `now.listing()`。
+
+    ファイルの増減は記録の全課題で見る。重複と中身は、記録を組むときに読む課題（実装計画を省かず、独立した単位を持つ課題）の
+    ファイルだけを見る。"""
     issues = targets["issues"]
     handled = targets["handling"]
     unread = {int(n) for n, h in handled.items() if h["handling"] in units_files.EXCLUDED_HANDLINGS} | set(targets["omitted"])
     read = [n for n in issues if n not in unread]
+    parsed: dict[str, ud.UnitFile] = {}
     try:
-        old_names, new_names = approved.names(), now.names()
+        old_listing = approved.listing()
+        old_names, new_names = sorted(old_listing), sorted(listing)
         old_read = set(units_files.find(approved, read, old_names).values())
         new_read = set(units_files.find(now, read, new_names).values())
     except units_files.UnitsFileError as exc:
-        return [str(exc)]
+        return [str(exc)], parsed
     before, after = units_files.paths_naming(old_names, issues), units_files.paths_naming(new_names, issues)
     found = [f"{path}: 承認した単位のファイルが無い" for path in sorted(before - after)]
     found += [f"{path}: 承認の時点に無い単位のファイルがある" for path in sorted(after - before)]
     common = sorted(old_read & new_read)
     try:
         # 読み取りは側ごとに 1 回にまとめる（git の起動をファイル数に比例させない）
-        old, new = approved.read_all(common), now.read_all(common)
+        old, new = approved.read_all(common, old_listing), now.read_all(common, listing)
     except units_files.UnitsFileError as exc:
-        return [*found, str(exc)]
+        return [*found, str(exc)], parsed
     for path in common:
         try:
-            if units_files.differs(units_files.parse_text(path, old[path]), units_files.parse_text(path, new[path])):
+            was = units_files.parse_text(path, old[path])
+            parsed[path] = units_files.parse_text(path, new[path])
+            if units_files.differs(was, parsed[path]):
                 found.append(f"{path}: 承認した単位のファイルと中身が違う")
         except units_files.UnitsFileError as exc:
             found.append(str(exc))
-    return found
+    return found, parsed
 
 
-def _handling_mismatches(approved: Mapping[str, Any], tree: units_files.Tree, issues: Sequence[int]) -> list[str]:
+def _handling_mismatches(
+    approved: Mapping[str, Any],
+    tree: units_files.Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    issues: Sequence[int],
+) -> tuple[list[str], dict[int, tuple[str, Optional[int]]]]:
+    """扱いと統合先の違いと、`tree` から読んだ扱い。"""
     try:
-        now = units_files.handlings(tree, issues)
+        now = units_files.handlings(tree, issues, listing)
     except units_files.UnitsFileError as exc:
-        return [str(exc)]
+        return [str(exc)], {}
     found = []
     for n in sorted(issues):
         was = (approved[str(n)]["handling"], approved[str(n)]["into"])
         if now[n] != was:
             found.append(f"#{n} の扱いか統合先が違う（承認 {was[0]} {was[1]}、今 {now[n][0]} {now[n][1]}）")
-    return found
+    return found, now
 
 
 def without_issues(record: Mapping[str, Any], drop: Sequence[int], files: Sequence[ud.UnitFile]) -> dict[str, Any]:

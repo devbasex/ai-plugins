@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -17,10 +18,12 @@ import strategy_fixture
 from ndf.adapters import git, github
 from ndf.contracts import result
 from ndf.core import durable
+from ndf.core.plan import review_units_decide, units_files
+from ndf.core.plan import units_decide as ud
 from ndf.core.plan import files as plan_files
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import Unit
-from ndf.progress import issue_values, plan_runs, units_invoke
+from ndf.progress import design_record, issue_values, plan_runs, units_invoke
 from ndf.progress.plan_runs import StageRun
 from ndf.progress.units_invoke import RoundState
 
@@ -446,3 +449,251 @@ def test_resume_of_follows_the_table(state, head, local_tests, expected):
     got = units_invoke.resume_of(state, head, local_tests)
 
     assert (got.action, got.new_round, got.start) == expected
+
+
+# --- 単位のファイルから流す（#3702） --------------------------------------------------------------
+
+UNIT_FILE_PATH = "issues/issue-3-plan.units.json"
+LIMITS = ud.Limits(target=400, max=1000)
+CRITERIA = {3: 2, 4: 1}
+FILE_PLAN = """# 3: 実装計画
+
+## タスク分解
+
+### Task 1: 読む
+- 読み手の本文
+
+### Task 2: 書く
+- 書き手の本文
+
+#### 注意
+- 書き手の注意
+
+### Task 3: 下ごしらえ
+- 下ごしらえの本文
+
+## レビューの単位
+"""
+
+
+def _task(tid: str, *after: str, criteria=(), lines: int = 10) -> dict:
+    return {"id": tid, "title": tid, "files": [f"src/{tid}.py"], "lines": lines, "criteria": list(criteria), "after": list(after)}
+
+
+def _unit_doc(lines: int = 10) -> dict:
+    """単位 2 つ。ファイルの並びは「書き手」が先だが、「書き手」は「読み手」を先に要る。読み手の中では T3 が T1 に先立つ。"""
+    return {
+        "version": 1,
+        "issues": [3],
+        "tasks": [_task("T1", "T3", criteria=["3:1"]), _task("T2", "T1", criteria=["3:2"], lines=lines), _task("T3")],
+        "units": [
+            {"name": "書き手", "tasks": ["T2"], "after": [{"unit": "読み手", "reason": "読んだ値を書く"}]},
+            {"name": "読み手", "tasks": ["T1", "T3"], "after": []},
+        ],
+    }
+
+
+def _commit_files(repo: Path, doc: dict | None = None, plan: str = FILE_PLAN) -> str:
+    (repo / "issues").mkdir(exist_ok=True)
+    (repo / PLAN).write_text(plan, encoding="utf-8")
+    if doc is not None:
+        (repo / UNIT_FILE_PATH).write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+    _git(repo, "add", "issues")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", "units")
+    return _git(repo, "rev-parse", "HEAD")
+
+
+def _approval(repo: Path, head: str, work_root: Path, *, omitted=(4,), context_omitted=None) -> plan_runs.SprintPlan:
+    """コミット `head` を確かめて承認した記録を持つスプリントの状態（記録の形は `design_record.build`）。"""
+    report = units_files.check(units_files.Tree(repo, head), [3, 4], list(omitted), LIMITS, CRITERIA, False)
+    assert units_files.findings(report) == []
+    units = units_files.design_units_of(report, head, BRANCH, [3, 4], LIMITS)
+    record = design_record.build({"repo": "o/r", "pr": 1, "head": head, "base": "main"}, units)
+    held = tuple(omitted if context_omitted is None else context_omitted)
+    context = {"issues": [3, 4], "plan_omitted": list(held)}
+    return plan_runs.SprintPlan(
+        required=True,
+        record=record,
+        differences=lambda tree: design_record.mismatches(record, tree, context),
+        omitted=held,
+        new_definition=True,
+        work_root=work_root,
+    )
+
+
+def _with(run: StageRun, sprint_plan: plan_runs.SprintPlan) -> StageRun:
+    return replace(run, sprint=sprint_plan)
+
+
+def _stopped(run: StageRun, work: Path, repo: Path) -> plan_runs.UnitsStopped:
+    with pytest.raises(plan_runs.UnitsStopped) as raised:
+        units_invoke.prepare(run, work, repo)
+    assert not (work / issue_values.UNITS_FILE).exists()
+    return raised.value
+
+
+def test_the_lineup_from_files_follows_the_merge_order_and_keeps_the_tasks_of_each_unit():
+    two = {**_unit_doc(), "issues": [3, 5]}
+    two["tasks"] = [{**t, "issue": 5 if t["id"] == "T2" else 3} for t in two["tasks"]]
+    files = [ud.parse(two, "issues/issue-3-5-plan.units.json"), ud.single(4)]
+    views = ud.judge(files, LIMITS, {3: 2, 4: 1, 5: 1}, propose=False).views
+
+    reader, omitted, writer = units_files.lineup_from_files(views, files)
+
+    assert (reader.name, reader.issue, reader.plan, reader.supplemented) == ("読み手", 3, "issues/issue-3-5-plan.md", False)
+    assert reader.tasks == (3, 1) and reader.task_ids == (("T3", 3), ("T1", 3))
+    assert reader.criteria == ((3, 1),) and reader.after == ()
+    assert (omitted.name, omitted.issue, omitted.plan, omitted.supplemented, omitted.tasks) == ("issue-4", 4, "", True, ())
+    assert (writer.name, writer.issue, writer.after) == ("書き手", 5, ("3:読み手",))
+    assert reader.merge < omitted.merge < writer.merge
+
+
+def test_unit_files_replace_the_table_and_an_issue_without_one_becomes_its_own_unit(sprint, tmp_path):
+    head = _commit_files(sprint, _unit_doc())
+    work = tmp_path / "w"
+
+    got = units_invoke.prepare(_run(sprint), work, sprint)
+
+    assert got is not None and got.source == head
+    assert [(u.name, u.issue, u.supplemented) for u in got.units] == [("読み手", 3, False), ("issue-4", 4, True), ("書き手", 3, False)]
+    assert units_invoke._held_lineup(_units_file(work)) == got._replace(bodies=None)
+    assert _remote_head(sprint) == head
+
+
+def test_a_sprint_made_after_this_change_stops_when_a_table_has_no_unit_file(sprint, tmp_path):
+    _commit_plan(sprint, PLAN_WITH_UNITS)
+    run = _with(_run(sprint), plan_runs.SprintPlan(new_definition=True))
+
+    stopped = _stopped(run, tmp_path / "w", sprint)
+
+    assert stopped.kind == "invalid" and "単位のファイル" in stopped.detail
+
+
+def test_a_table_beside_unit_files_of_other_issues_stops_instead_of_joining_it_into_one_unit(sprint, tmp_path):
+    _commit_files(sprint, _unit_doc())
+    (sprint / "issues" / "issue-4-plan.md").write_text(PLAN_WITH_UNITS, encoding="utf-8")
+    _git(sprint, "add", "issues")
+    _git(sprint, "commit", "-q", "-m", "plan 4")
+
+    stopped = _stopped(_run(sprint), tmp_path / "w", sprint)
+
+    assert stopped.kind == "invalid" and "#4" in stopped.detail
+
+
+def test_an_uncommitted_unit_file_stops(sprint, tmp_path):
+    (sprint / "issues").mkdir()
+    (sprint / UNIT_FILE_PATH).write_text(json.dumps(_unit_doc()), encoding="utf-8")
+
+    stopped = _stopped(_run(sprint), tmp_path / "w", sprint)
+
+    assert stopped.kind == "precondition" and UNIT_FILE_PATH in stopped.detail
+
+
+@pytest.mark.parametrize(
+    ("doc", "plan", "word"),
+    [
+        (_unit_doc(lines=1001), FILE_PLAN, "U6"),
+        ({"version": 1}, FILE_PLAN, UNIT_FILE_PATH),
+        (_unit_doc(), FILE_PLAN.replace("### Task 3: 下ごしらえ", "### 下ごしらえ"), "Task 3"),
+    ],
+    ids=["上限を超える", "形が違う", "タスクの本文が無い"],
+)
+def test_unit_files_that_fail_the_check_stop(sprint, tmp_path, git_calls, doc, plan, word):
+    _commit_files(sprint, doc, plan)
+
+    stopped = _stopped(_run(sprint), tmp_path / "w", sprint)
+
+    assert stopped.kind == "invalid" and word in stopped.detail
+    assert [c for c in git_calls if c[0] == "push"] == []
+
+
+def test_an_approval_without_a_record_stops_before_touching_the_remote(sprint, tmp_path, git_calls):
+    run = _with(_run(sprint), plan_runs.SprintPlan(required=True, new_definition=True))
+
+    stopped = _stopped(run, tmp_path / "w", sprint)
+
+    assert stopped.kind == "precondition" and "ndf progress restore" in stopped.detail
+    assert [c for c in git_calls if c[0] in ("fetch", "push")] == []
+
+
+def test_approved_omitted_plans_flow_as_one_unit_per_issue(sprint, tmp_path):
+    head = _commit_files(sprint, plan=PLAN_WITHOUT_UNITS)
+    run = _with(_run(sprint), _approval(sprint, head, tmp_path, omitted=(3, 4)))
+
+    got = units_invoke.prepare(run, tmp_path / "w", sprint)
+
+    assert got is not None and [(u.name, u.supplemented) for u in got.units] == [("issue-3", True), ("issue-4", True)]
+    assert _Hub.read == []
+
+
+def test_the_approved_documents_must_be_in_the_sprint_branch(sprint, tmp_path):
+    start = _git(sprint, "rev-parse", "HEAD")
+    head = _commit_files(sprint, _unit_doc())
+    approval = _approval(sprint, head, tmp_path)
+    # 承認した中身が、記録の head を祖先に持たない別のコミットとしてスプリントブランチに載った
+    _git(sprint, "reset", "-q", "--hard", start)
+    taken = _commit_files(sprint, _unit_doc(), FILE_PLAN + "\n")
+    _git(sprint, "push", "-q", "-f", "origin", f"HEAD:refs/heads/{BRANCH}")
+
+    stopped = _stopped(_with(_run(sprint), approval), tmp_path / "w", sprint)
+
+    assert stopped.kind == "precondition" and head in stopped.detail
+
+    # 承認した文書を送ったコミットの記録があれば通る
+    (tmp_path / "design-sync.json").write_text(json.dumps({"record_head": head, "commit": taken}), encoding="utf-8")
+
+    assert units_invoke.prepare(_with(_run(sprint), approval), tmp_path / "w", sprint) is not None
+
+
+@pytest.mark.parametrize("change", ["中身", "消す", "省いた課題"])
+def test_a_change_after_the_approval_stops(sprint, tmp_path, git_calls, change):
+    head = _commit_files(sprint, _unit_doc())
+    approval = _approval(sprint, head, tmp_path, context_omitted=() if change == "省いた課題" else None)
+    if change == "中身":
+        _commit_files(sprint, _unit_doc(lines=11))
+    elif change == "消す":
+        _git(sprint, "rm", "-q", UNIT_FILE_PATH, PLAN)
+        _git(sprint, "commit", "-q", "-m", "rm")
+
+    stopped = _stopped(_with(_run(sprint), approval), tmp_path / "w", sprint)
+
+    assert stopped.kind == "refused" and "承認" in stopped.detail
+    assert [c for c in git_calls if c[0] == "push"] == []
+
+
+def test_the_unit_instruction_holds_the_approved_task_bodies_in_dependency_order(sprint, tmp_path, monkeypatch):
+    head = _commit_files(sprint, _unit_doc())
+    approval = _approval(sprint, head, tmp_path)
+    # 承認の後に本文を書き換え、実際の行数を足す（どちらも開始は止めない）
+    done = _unit_doc()
+    done["units"][1]["actual_lines"] = 12
+    _commit_files(sprint, done, FILE_PLAN.replace("読み手の本文", "承認していない本文"))
+    work = tmp_path / "w"
+    found = units_invoke.prepare(_with(_run(sprint), approval), work, sprint)
+    assert found is not None and found.source == head
+    monkeypatch.setattr(issue_values, "issue_values", lambda *a, **k: {})
+    # 開始前の確かめで読んだ本文を引き継ぎ、起動のために読み直さない
+    monkeypatch.setattr(units_files, "task_texts", lambda *a: pytest.fail("本文を読み直した"))
+    ctx = units_invoke._unit_context(_run(sprint), work, sprint, found)
+
+    run = units_invoke.unit_run(ctx, found.units[0], sprint, tmp_path / "round", None)
+
+    text = Path(run.env_extra[units_invoke.UNIT_FILE_ENV]).read_text(encoding="utf-8")
+    assert "Task 3（課題 #3）、Task 1（課題 #3）" in text
+    assert text.index("下ごしらえの本文") < text.index("読み手の本文")
+    assert "承認していない本文" not in text and "書き手の本文" not in text
+    assert run.overrides["acceptance"] == ["--issue", "3", "--criteria", "3:1"]
+
+
+def test_the_task_bodies_are_cut_at_the_next_task():
+    bodies = review_units_decide.task_bodies(FILE_PLAN)
+
+    assert sorted(bodies) == [1, 2, 3]
+    assert bodies[2] == "### Task 2: 書く\n- 書き手の本文\n\n#### 注意\n- 書き手の注意"
+    assert bodies[3] == "### Task 3: 下ごしらえ\n- 下ごしらえの本文"
+
+
+def test_a_task_heading_that_appears_twice_has_no_body():
+    plan = FILE_PLAN.replace("### Task 2: 書く", "### Task 1: 書く")
+
+    assert review_units_decide.task_bodies(plan)[1] is None

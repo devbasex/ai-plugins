@@ -162,7 +162,7 @@ def split(files: Sequence[UnitFile], key: tuple[str, str], limits: Limits, crite
     """
     at = next(i for i, f in enumerate(files) if f.path == key[0])
     unit = next(u for u in files[at].units if u.name == key[1])
-    tasks = _in_dependency_order(_unit_tasks({t.id: t for t in files[at].tasks}, unit))
+    tasks = in_dependency_order(_unit_tasks({t.id: t for t in files[at].tasks}, unit))
     if any(t.lines is None for t in tasks):  # 実装計画を省いた課題の単位は行数が無く、区切れない
         return Proposal(key[0], unit.name, (), (), (), ())
     resplit = tuple(t.id for t in tasks if t.lines > limits.max)
@@ -179,7 +179,7 @@ def split(files: Sequence[UnitFile], key: tuple[str, str], limits: Limits, crite
     return Proposal(key[0], unit.name, units, (), remaining, repoint)
 
 
-def _in_dependency_order(tasks: Sequence[Task]) -> list[Task]:
+def in_dependency_order(tasks: Sequence[Task]) -> list[Task]:
     """単位の中の依存の深さの順、同じ深さはタスクの番号の順。輪（U1）で進めない残りは番号の順に並べる。"""
     left = sorted(tasks, key=lambda t: int(t.id[1:]))
     inside = {t.id for t in left}

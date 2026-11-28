@@ -35,7 +35,7 @@ from ndf.contracts import causes, facts, limits, result
 from ndf.core import durable
 from ndf.core.plan import cli as plan_cli
 from ndf.core.plan import runner as plan_runner
-from ndf.progress import command, definition, design_record, invoke, issue_values, model, stages, store
+from ndf.progress import command, definition, design_record, invoke, issue_values, model, plan_runs, stages, store
 from ndf.progress.folding import REQUEST_CHANGES, StepProgress, answer_word, step_progress
 from ndf.progress.records import Records, github_records, sync_records
 from ndf.progress.run_view import (
@@ -454,7 +454,7 @@ def _prepare(d: Drive, v: View, s: stages.StageDef, inputs: dict[str, Any]) -> O
     step = s.steps[0] if prog.redo else prog.next_step(s)
     if step is None or invoke.kind_of(step) != invoke.PLAN:
         return None
-    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name, d.st.root))
+    run = replace(invoke.stage_run(s, step, inputs), approved=approved_seen(v, s.name, d.st.root), sprint=sprint_plan(v, s, d.st.root))
     if invoke.template(run.name) is None:
         return None  # テンプレートの無いプランは、流すときの _call_plan が precondition で止める
     try:
@@ -804,6 +804,28 @@ def step_dir(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> Pat
     return work_root(d.st.root, v.machine_id) / s.id / step_location(step.id, step_progress(v, s.name))
 
 
+def sprint_plan(v: View, s: stages.StageDef, root: Path) -> Optional[plan_runs.SprintPlan]:
+    """単位ごとに流す工程の呼び出しに持たせる、承認の要否・承認の記録・省いた課題（#3702 の決定 11）。ほかの工程は None。
+
+    `root` は状態の保存先。比較の関数は、記録と今の文脈を持たせて渡す（単位を流す処理は `design_record` を import できない）。
+    """
+    if not s.per_unit:
+        return None
+    context = v.context()
+    omitted = tuple(context["plan_omitted"]) if "plan_omitted" in context else ()
+    required = design_record.required(v.snap)
+    record = design_record.approved_of(v) if required else None
+    compared = {"issues": context["issues"] if "issues" in context else [], "plan_omitted": list(omitted)}
+    return plan_runs.SprintPlan(
+        required=required,
+        record=record,
+        differences=None if record is None else lambda tree: design_record.mismatches(record, tree, compared),
+        omitted=omitted,
+        new_definition="plan_omitted" in s.optional_inputs,
+        work_root=work_root(root, v.machine_id),
+    )
+
+
 def approved_seen(v: View, stage: str, root: Path) -> Optional[dict[str, Any]]:
     """工程 `stage` の承認ゲートの最新の承認の回答が見た対象（事象の `seen`）。無ければ None（#4409 の決定 5）。
 
@@ -838,6 +860,7 @@ def _run_step(d: Drive, v: View, s: stages.StageDef, step: stages.StepDef) -> li
         return [_failed(s, step.id, v.rev, exc.kind, str(exc))]
     approved = approved_seen(v, s.name, d.st.root)
     run = replace(invoke.stage_run(s, step, inputs), notes=prog.notes, retries=prog.retries, approved=approved)
+    run = replace(run, sprint=sprint_plan(v, s, d.st.root))
     if run.kind == invoke.SCRIPT:
         run = replace(run, env_extra={"NDF_MACHINE_ID": v.machine_id})
     waited = prog.waiting is not None and prog.waiting["step"] == step.id

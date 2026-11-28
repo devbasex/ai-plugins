@@ -12,6 +12,7 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any, NamedTuple, Optional
 
 from ndf import contracts
@@ -20,6 +21,7 @@ from ndf.contracts import limits
 from ndf.core.production_merge import PROJECT_FILE
 from ndf.core.plan import inputs_decide, review_units_decide
 from ndf.core.plan import units_decide as ud
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, has_units, task_bodies, unit_key
 
 SCHEMA = "workflow/review-units.schema.json"
 LIMITS_SCHEMA = "schemas/ndf-settings/project.schema.json#/$defs/ReviewUnits"
@@ -161,6 +163,13 @@ class Collected(NamedTuple):
     handlings: Mapping[int, tuple[str, Optional[int]]]
 
 
+class Targets(NamedTuple):
+    """読み元から 1 度集めた、`issues/` の項目の一覧（`Tree.listing`）と課題の振り分け。"""
+
+    listing: Mapping[str, Optional[tuple[str, str, str]]]
+    found: Collected
+
+
 class TaskGap(NamedTuple):
     """実装計画と単位のファイルのタスクの食い違い。`duplicated` は実装計画で 2 回以上現れる番号。"""
 
@@ -268,15 +277,36 @@ def collect(tree: Tree, issues: Sequence[int], omitted: Sequence[int]) -> Collec
     return _collect(tree, tree.listing(), issues, omitted)
 
 
-def _collect(tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int], omitted: Sequence[int]) -> Collected:
+def targets_from(
+    tree: Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    issues: Sequence[int],
+    omitted: Sequence[int],
+    handled: Mapping[int, tuple[str, Optional[int]]],
+    parsed: Mapping[str, ud.UnitFile],
+) -> Targets:
+    """同じ `tree` から読み済みの項目の一覧・扱い・解析済みの単位のファイルで対象を組む（読んだものは読み直さない）。"""
+    return Targets(listing, _collect(tree, listing, issues, omitted, handled, parsed))
+
+
+def _collect(
+    tree: Tree,
+    listing: Mapping[str, Optional[tuple[str, str, str]]],
+    issues: Sequence[int],
+    omitted: Sequence[int],
+    handled: Optional[Mapping[int, tuple[str, Optional[int]]]] = None,
+    parsed: Mapping[str, ud.UnitFile] = MappingProxyType({}),
+) -> Collected:
     wanted = tuple(sorted(set(issues)))
-    handled, excluded = _handlings(tree, listing, wanted)
+    if handled is None:
+        handled = _handlings(tree, listing, wanted)
+    excluded = tuple(n for n in wanted if handled[n][0] in EXCLUDED_HANDLINGS)
     skipped = tuple(n for n in wanted if n in set(omitted) and n not in excluded)
     rest = [n for n in wanted if n not in excluded and n not in skipped]
     found = find(tree, rest, sorted(listing))
     paths = list(dict.fromkeys(found[n] for n in rest if n in found))
-    texts = tree.read_all(paths, listing)
-    files = tuple(parse_text(path, texts[path]) for path in paths)
+    texts = tree.read_all([path for path in paths if path not in parsed], listing)
+    files = tuple(parsed[path] if path in parsed else parse_text(path, texts[path]) for path in paths)
     return Collected(files, skipped, excluded, tuple(n for n in rest if n not in found), handled)
 
 
@@ -298,8 +328,8 @@ def _design_rows(
 
 def _handlings(
     tree: Tree, listing: Mapping[str, Optional[tuple[str, str, str]]], issues: Sequence[int]
-) -> tuple[dict[int, tuple[str, Optional[int]]], tuple[int, ...]]:
-    """課題ごとの（扱い, 統合先）と、独立した単位を持たない課題。
+) -> dict[int, tuple[str, Optional[int]]]:
+    """課題ごとの（扱い, 統合先）。
 
     扱いが割れる課題は独立した単位を持つ扱いを取り、設計書に行の無い課題は「実装する」である。
     """
@@ -308,12 +338,14 @@ def _handlings(
     for issue in issues:
         found = rows[issue] if issue in rows else [(IMPLEMENT_HANDLING, None)]
         out[issue] = next((row for row in found if row[0] not in EXCLUDED_HANDLINGS), found[0])
-    return out, tuple(n for n in issues if out[n][0] in EXCLUDED_HANDLINGS)
+    return out
 
 
-def handlings(tree: Tree, issues: Sequence[int]) -> dict[int, tuple[str, Optional[int]]]:
-    """課題ごとの、設計書の「設計の結果」の（扱い, 統合先）。"""
-    return _handlings(tree, tree.listing(), tuple(sorted(set(issues))))[0]
+def handlings(
+    tree: Tree, issues: Sequence[int], listing: Optional[Mapping[str, Optional[tuple[str, str, str]]]] = None
+) -> dict[int, tuple[str, Optional[int]]]:
+    """課題ごとの、設計書の「設計の結果」の（扱い, 統合先）。`listing` に `tree.listing()` を渡すと、一覧を取り直さない。"""
+    return _handlings(tree, tree.listing() if listing is None else listing, tuple(sorted(set(issues))))
 
 
 def project_of(tree: Tree) -> dict[str, Any]:
@@ -340,7 +372,12 @@ def check(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: ud.
     実装計画を省いた課題は、課題全体の 1 単位（`units_decide.single`）として判定に加える。
     """
     listing = tree.listing()
-    found = _collect(tree, listing, issues, omitted)
+    return check_collected(tree, Targets(listing, _collect(tree, listing, issues, omitted)), limits, criteria, docs)
+
+
+def check_collected(tree: Tree, targets: Targets, limits: ud.Limits, criteria: Mapping[int, int], docs: bool) -> Report:
+    """`check` を、同じ `tree` から集め済みの対象（`supplemented`）に当てる。単位のファイルは読み直さない。"""
+    listing, found = targets
     files = [*found.files, *map(ud.single, found.omitted)]
     judged = _report(tree, listing, files, ud.judge(files, limits, criteria), criteria, docs)
     return judged._replace(missing=found.missing, handlings=found.handlings)
@@ -401,6 +438,70 @@ def rendered(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: 
         new = render_tables(text, views, files[plan])
         if new != _newlines(text):
             out[plan] = Rewrite(text, new)
+    return out
+
+
+# --- 流す単位の並び ------------------------------------------------------------------------------
+
+
+def supplemented(tree: Tree, issues: Sequence[int], omitted: Sequence[int], plans: Sequence[PlanDoc]) -> Targets:
+    """単位のファイルも単位の欄も無い課題を、実装計画を省いた課題と同じ課題 1 つの 1 単位にした対象（`check_collected` に渡す）。
+
+    単位の欄があるのにファイルが無い課題は、分けたはずの変更を 1 本にしないために止める（#3702 の決定 10）。
+    """
+    listing = tree.listing()
+    found = _collect(tree, listing, issues, omitted)
+    split = [n for n in found.missing if any(n in p.issues and has_units(p.text) for p in plans)]
+    if split:
+        names = "、".join(f"#{n}" for n in split)
+        raise UnitsFileError(f"{names} は実装計画にレビューの単位の欄があるのに、単位のファイルが無い")
+    return Targets(listing, found._replace(omitted=tuple(sorted((*found.omitted, *found.missing))), missing=()))
+
+
+def lineup_from_files(views: Sequence[ud.View], files: Sequence[ud.UnitFile]) -> tuple[Unit, ...]:
+    """単位のファイルの判定の結果を、流す単位の並び（マージの順）にする。代表の課題は、担当タスクの課題の最小の番号。"""
+    keys = {(v.file, v.name): unit_key(min(v.issues), v.name) for v in views}
+    tasks = {(f.path, t.id): t for f in files if not f.whole for t in f.tasks}
+    units = []
+    for v in sorted(views, key=lambda view: view.merge):
+        # 実装計画を省いた課題の単位はファイルのパスが空で、担当タスクを持たない
+        held = ud.in_dependency_order([tasks[(v.file, tid)] for tid in v.tasks]) if v.file else []
+        criteria = (c.split(":") for c in v.criteria)
+        units.append(
+            Unit(
+                v.name,
+                min(v.issues),
+                paired_plan(v.file) if v.file else "",
+                tuple(int(t.id[1:]) for t in held),
+                tuple((int(issue), int(number)) for issue, number in criteria),
+                not v.file,
+                tuple(keys[(file, name)] for file, name, _ in v.after),
+                v.merge,
+                tuple((t.id, t.issue) for t in held),
+            )
+        )
+    return tuple(units)
+
+
+def task_texts(tree: Tree, units: Sequence[Unit]) -> dict[str, list[str]]:
+    """単位のキー（`unit_key`）ごとの、担当タスクの「タスク分解」の本文（依存の順）。補った単位は入らない。
+
+    実装計画はまとめて 1 回で読み、1 度だけ解析する。本文が無いか、見出しが 2 つ以上あるタスクがあれば止める。
+    """
+    held = [u for u in units if not u.supplemented]
+    texts = tree.read_all(list(dict.fromkeys(u.plan for u in held)))
+    parsed = {path: task_bodies(text) if text is not None else {} for path, text in texts.items()}
+    out: dict[str, list[str]] = {}
+    for unit in held:
+        bodies = parsed[unit.plan]
+        lack = [f"Task {n}" for n in unit.tasks if n not in bodies]
+        if lack:
+            raise UnitsFileError(f"{unit.plan}: 単位 {unit.name} の {'、'.join(lack)} の本文が無い（コミット {tree.commit}）")
+        found = [(n, bodies[n]) for n in unit.tasks]
+        twice = [f"Task {n}" for n, body in found if body is None]
+        if twice:
+            raise UnitsFileError(f"{unit.plan}: 単位 {unit.name} の {'、'.join(twice)} の見出しが 2 つ以上ある（コミット {tree.commit}）")
+        out[unit_key(unit.issue, unit.name)] = [body for _, body in found if body is not None]
     return out
 
 
