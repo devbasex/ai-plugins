@@ -32,7 +32,6 @@ TEST_FILE = re.compile(r"^(?:test_.+|.+_test\.[^.]+|.+\.test\.[^.]+|.+\.spec\.[^
 BARE_TEST = re.compile(r"^(?:test|Test|TEST)(?:_\w*[A-Za-z0-9]|[A-Z0-9]\w*)$")
 PATH_LIKE = re.compile(r"^[\w./@+-]+$")
 ARGS = re.compile(r"\[.*\]$")
-_FENCE = re.compile(r"^\s{0,3}(```|~~~)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+\.)\s+|\*\*")
 
@@ -110,8 +109,8 @@ def classify(span: str, section: str) -> Optional[Span]:
 
 
 def _outside_fences(text: str) -> list[tuple[int, str]]:
-    """囲みの外の行を `(行番号 1 始まり, 行)` で返す。囲みは字下げ 3 つまでを許す（`_FENCE`）。"""
-    return [(i + 1, line) for i, line in inputs.outside_fences(text.splitlines(), _FENCE)]
+    """囲みの外の行を `(行番号 1 始まり, 行)` で返す。"""
+    return [(i + 1, line) for i, line in inputs.outside_fences(text.splitlines())]
 
 
 def _next_section(heading: re.Match[str], section: Optional[str]) -> Optional[str]:

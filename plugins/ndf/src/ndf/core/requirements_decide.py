@@ -18,8 +18,10 @@ from ndf.core.plan import inputs_decide
 
 # 条件と条件一覧のハッシュ値・実行を指す値・確認対象を指す値の桁数。ほかのモジュールはここを読む
 DIGEST_CHARS = 12
-# チェックボックスの記号（`- [ ] `）と先頭の番号（`1. `）。番号は後ろに空白があるものだけ（`11.0` は文の一部）
-_MARKS = re.compile(r"^\s*(?:(?:-\s+)?\[[ xX]\]\s*)?(?:\d+\.(?:\s+|$))?")
+# 行頭のチェックボックスの記号（`- [ ] `）。条件の本文の `[x]`・`[ ]` は記号でない
+_CHECKBOX = re.compile(r"^\s*-\s+\[[ xX]\](?=\s|$)")
+# 条件の先頭の番号（`1. `）。後ろに空白があるものだけ（`11.0` は文の一部）
+_NUMBER = re.compile(r"^\d+\.(?:\s+|$)")
 # 要求仕様書を持たないモード
 _WITHOUT_REQUIREMENTS = "legacy-refactor"
 
@@ -66,14 +68,14 @@ def _digest(text: str) -> str:
 
 
 def _sentence(text: str) -> str:
-    """チェックボックスの記号と先頭の番号を除き、各行の前後の空白と空行を落とした条件の文。"""
+    """チェックボックスの記号より後ろの文を、各行の前後の空白と空行を落とし、先頭の番号を除いた条件の文にする。"""
     joined = "\n".join(line.strip() for line in text.split("\n") if line.strip())
-    return _MARKS.sub("", joined, count=1).strip()
+    return _NUMBER.sub("", joined, count=1)
 
 
 def criterion_digest(text: str) -> str:
-    """条件のハッシュ値。"""
-    return _digest(_sentence(text))
+    """条件のハッシュ値。`text` は `- [ ] ` から始まる条件の行（続きの行を含めてよい）か、その記号より後ろの文。"""
+    return _digest(_sentence(_CHECKBOX.sub("", text, count=1)))
 
 
 def criteria_of(body: str) -> tuple[Criterion, ...]:

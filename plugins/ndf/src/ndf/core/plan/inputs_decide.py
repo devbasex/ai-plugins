@@ -20,7 +20,8 @@ CHECKS_HEADING = "## 受け入れ条件の確認"
 CHECKS_HEAD = ("条件", "区分")
 KINDS = ("マージ前", "リリース後")
 _BOX = re.compile(r"- \[[ xX]\](?=[ \t\r]|$)\s*(.*)")
-_FENCE = re.compile(r"^(```|~~~)")
+# コードブロックの開閉の行（字下げは 3 つまで）
+_FENCE = re.compile(r"^\s{0,3}(```|~~~)")
 # セクションの終わり（`#` か `##` の見出し）
 SECTION_END = re.compile(r"^#{1,2} ")
 _CODE = re.compile(r"`([^`]+)`")
@@ -71,14 +72,14 @@ def section_lines(body: str, heading: str) -> Optional[list[str]]:
     return out
 
 
-def outside_fences(lines: Iterable[str], fence: re.Pattern[str] = _FENCE) -> Iterator[tuple[int, str]]:
-    """囲み（`fence` に当たる行で開く）の外の行を `(添字 0 始まり, 行)` で返す。囲みの開閉の行は返さない。
+def outside_fences(lines: Iterable[str]) -> Iterator[tuple[int, str]]:
+    """囲み（`_FENCE` に当たる行で開く）の外の行を `(添字 0 始まり, 行)` で返す。囲みの開閉の行は返さない。
 
-    閉じるのは、開いた行と同じ記号が同じ数以上並び、後ろが空白だけの行。`fence` の 1 つ目の組は記号の始まりを指す。
+    閉じるのは、開いた行と同じ記号が同じ数以上並び、後ろが空白だけの行。
     """
     opened = ""
     for i, line in enumerate(lines):
-        found = fence.match(line)
+        found = _FENCE.match(line)
         if found:
             rest = line[found.start(1) :]
             after = rest.lstrip(rest[0])
@@ -102,19 +103,27 @@ def criteria_blocks(body: str) -> list[str]:
     """受け入れ条件のセクションのチェックボックスを、字下げした継続の行を含めて返す（上から。番号の数え方は `criteria` と同じ）。
 
     先頭の行はチェックボックスの後ろの文、続く行は書かれたままで、改行でつなぐ。空行では終わらず、字下げの無い行で終わる。
+    字下げしたコードブロックの行も条件の続きに含める。コードブロックの中の行は、条件の始まりにもセクションの終わりにもしない。
     空白と空行の整え方は、呼び手が決める。
     """
+    lines = body_lines(body)
+    at = heading_at(lines, HEADING)
+    if at is None:
+        return []
+    rest = lines[at + 1 :]
+    outside = {i for i, _ in outside_fences(rest)}
     blocks: list[list[str]] = []
     inside = False
-    found = section_lines(body, HEADING)
-    if found is None:
-        return []
-    for line in found:
-        box = _BOX.match(line)
-        if box:
-            blocks.append([box.group(1)])
-            inside = True
-        elif inside:
+    for i, line in enumerate(rest):
+        if i in outside:
+            if SECTION_END.match(line):
+                break
+            box = _BOX.match(line)
+            if box:
+                blocks.append([box.group(1)])
+                inside = True
+                continue
+        if inside:
             inside = not line.strip() or line.startswith((" ", "\t"))
             if inside:
                 blocks[-1].append(line)

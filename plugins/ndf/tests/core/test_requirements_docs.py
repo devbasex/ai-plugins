@@ -25,7 +25,7 @@ def test_criterion_digest_is_the_head_of_the_sha256_of_the_sentence() -> None:
     assert rd.DIGEST_CHARS == 12
 
 
-@pytest.mark.parametrize("text", ["  甲が動く  ", "1. 甲が動く", "- [ ] 甲が動く", "- [x] 12. 甲が動く", "[X] 甲が動く"])
+@pytest.mark.parametrize("text", ["  甲が動く  ", "1. 甲が動く", "- [ ] 甲が動く", "- [x] 12. 甲が動く"])
 def test_criterion_digest_ignores_the_mark_the_number_and_the_spaces(text: str) -> None:
     assert rd.criterion_digest(text) == rd.criterion_digest("甲が動く")
 
@@ -53,10 +53,23 @@ def test_criteria_digests_change_with_the_continuation_lines(operation: str, out
     assert rd.criteria_list_digest(before) != rd.criteria_list_digest(after)
 
 
+def test_criteria_keep_the_brackets_of_the_sentence() -> None:
+    lines = ["- [ ] [x] を表示する", "- [ ] [ ] を表示する"]
+    got = rd.criteria_of(_doc_text(criteria="".join(f"{line}\n" for line in lines)))
+    assert [c.text for c in got] == ["[x] を表示する", "[ ] を表示する"]
+    assert [c.digest for c in got] == [rd.criterion_digest(line) for line in lines]
+
+
+def test_criteria_include_the_indented_code_block() -> None:
+    got = rd.criteria_of(_doc_text(criteria="- [ ] 次を出力する\n  ```\n  - [ ] OK\n  ## OK\n  ```\n- [ ] 乙\n"))
+    assert [c.text for c in got] == ["次を出力する\n```\n- [ ] OK\n## OK\n```", "乙"]
+
+
 @pytest.mark.parametrize(
     "example",
     [
         "```markdown\n## 受け入れ条件\n\n- [ ] 例\n```\n\n",
+        "  ```markdown\n## 受け入れ条件\n\n- [ ] 例\n   ```\n\n",
         # 別の記号の行・短い並び・後ろに語のある行は、囲みを閉じない
         "```text\n~~~\n```\n\n",
         "````markdown\n```\n## 受け入れ条件\n\n- [ ] 例\n````\n\n",
