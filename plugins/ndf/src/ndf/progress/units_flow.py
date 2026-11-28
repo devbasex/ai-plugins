@@ -6,7 +6,7 @@
 
 - 単位は、先に要る単位をすべてマージしたら始める。依存していない単位の終了は待たない
 - 失敗で始めないのは、その単位に依存する単位（間接を含む）だけである。利用上限（`usage_limit`）の後は何も始めず、
-  実行中を待って成功した単位をマージする
+  実行中を待って成功した単位をマージする。`impl` が利用上限で終わっていれば、その結果を受ける前でも始めない
 - 単位のファイルから流すとき、補った単位（`Unit.supplemented`。触るファイルが分からない）は、単位のファイルの単位に
   実行中も起動できるものも無くなった後に、課題の番号の順に 1 つずつ流す。キューの待ちで止まった単位がある間は始めない
   （その PR が後からマージされると競合しうる）
@@ -112,10 +112,12 @@ class Order:
 
 
 class Ops(NamedTuple):
-    """単位 1 つの操作。`start` は単位を始め、`failed` は単位の例外を停止にする（分けられない例外は上げ直す）。"""
+    """単位 1 つの操作。`start` は単位を始め、`failed` は単位の例外を停止にする（分けられない例外は上げ直す）。`limited` は
+    `impl` の結果が利用上限の停止かを、結果を受ける（マージする）前に読む。"""
 
     start: Callable[[Unit], Started]
     failed: Callable[[Unit, Exception], UnitsStopped]
+    limited: Callable[[Any], bool]
 
 
 class Workers(NamedTuple):
@@ -137,8 +139,16 @@ class _Flow:
         self.running: dict[Any, tuple[str, Started]] = {}
 
     def halted(self) -> bool:
-        """利用上限は全単位に効くので、以後の単位を始めない。"""
-        return any(e.kind == USAGE_LIMIT for e in self.failures.values())
+        """利用上限は全単位に効くので、以後の単位を始めない。終わってまだ受けていない `impl` の停止理由も読む。"""
+        if any(e.kind == USAGE_LIMIT for e in self.failures.values()):
+            return True
+        return any(f.done() and self._limited(f) for f in self.running)
+
+    def _limited(self, future: Any) -> bool:
+        error = future.exception()
+        if error is not None:
+            return isinstance(error, UnitsStopped) and error.kind == USAGE_LIMIT
+        return self.ops.limited(future.result())
 
     def fill(self, executor: Any, limit: int) -> None:
         """空いた本数だけ単位を始める。"""
@@ -155,7 +165,10 @@ class _Flow:
         except Exception as exc:  # noqa: BLE001 外部コマンド: 単位の失敗にして依存しない単位を流す（分けられない例外は上げ直す）
             self.failures[key] = self.ops.failed(self.order.units[key], exc)
             return
-        if started.call is None:
+        if self.halted():
+            # 用意の間に利用上限が分かった単位は投入せず、始めていない単位に戻す
+            self.order.started.discard(key)
+        elif started.call is None:
             self.land(key, started, None)
         else:
             self.running[executor.submit(started.call)] = (key, started)

@@ -39,6 +39,7 @@ from ndf.core.plan import inputs_decide, units_files
 from ndf.core.plan import units_decide as ud
 from ndf.core.plan import runner as plan_runner
 from ndf.core.plan.review_units_decide import PlanDoc, Unit, UnitsUnreadable, acceptance_args, has_units, lineup, unit_key
+from ndf.core.plan.transition_decide import USAGE_LIMIT
 from ndf.progress import issue_values, plan_runs, refactor_values, units_flow
 from ndf.progress.command import PROJECT_FILE, ndf_settings_in
 from ndf.progress.issue_values import UNITS_DIR, UNITS_FILE
@@ -113,12 +114,14 @@ class Ports(NamedTuple):
     """単位を流す処理が外へ出す呼び出し（`invoke` が渡し、テストが差し替える）。
 
     `call_plan` は呼び出しを保存先でプランとして流し、`command` は argv を作業ディレクトリと環境で打つ。`failure` は
-    単位を流す間の例外を停止の結果 JSON にする（分けられない例外は None）。`call_plan` だけが並列に呼ばれる。
+    単位を流す間の例外を停止の結果 JSON にする（分けられない例外は None）。`call_plan` だけが並列に呼ばれ、`workers` は
+    それを流すプールと待ちである。
     """
 
     call_plan: Callable[[StageRun, Path], StageResult]
     command: Callable[[list[str], Path, dict[str, str]], "subprocess.CompletedProcess[str]"]
     failure: Callable[[Exception], Optional[dict[str, Any]]] = lambda exc: None
+    workers: units_flow.Workers = units_flow.Workers()
 
 
 class Context(NamedTuple):
@@ -573,8 +576,8 @@ def run_stage(run: StageRun, work_dir: Path, cwd: Path, ports: Ports) -> Optiona
         return _unit_stop_of(report, "単位を流せない")
 
     order = units_flow.Order(found.units, frozenset(done), chained=not found.source)
-    ops = units_flow.Ops(lambda u: _start_unit(ctx, u, branches[units_flow.key_of(u)], ports), failed)
-    flowed = units_flow.flow(order, ops, limit)
+    ops = units_flow.Ops(lambda u: _start_unit(ctx, u, branches[units_flow.key_of(u)], ports), failed, _usage_limited)
+    flowed = units_flow.flow(order, ops, limit, ports.workers)
     items = dict(flowed.items)
     for unit in found.units:
         key = units_flow.key_of(unit)
@@ -674,6 +677,11 @@ def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_fl
         return units_flow.unit_item(unit, number, "merged"), github_pulls.MergedPull(number, _merge_sha(report))
 
     return units_flow.Started(call, land)
+
+
+def _usage_limited(got: StageResult) -> bool:
+    """`impl` の結果が利用上限の停止か。"""
+    return got.status != result.OK and _unit_stop_of(got.report, "").kind == USAGE_LIMIT
 
 
 def _merge_sha(report: Mapping[str, Any]) -> str:
@@ -915,7 +923,7 @@ def sprint_pr(ctx: Context, ports: Ports, landed: Sequence[github_pulls.MergedPu
     """
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
-    head = _catch_up_to(g, ctx, landed)
+    head = _catch_up_to(g, ctx, landed, tip)
     if tip != head:
         _check_sprint_branch(g, ctx)
         raise UnitsStopped("precondition", _tip_mismatch(g, ctx, tip, head))
@@ -966,19 +974,24 @@ def _tip_mismatch(g: Git, ctx: Context, tip: str, head: str) -> str:
     )
 
 
-def _catch_up_to(g: Git, ctx: Context, landed: Sequence[github_pulls.MergedPull]) -> str:
+def _catch_up_to(g: Git, ctx: Context, landed: Sequence[github_pulls.MergedPull], tip: str) -> str:
     """スプリントの作業場所を、単位のマージコミットのうち手元の HEAD から最も先のものまで fast-forward で進め、進めた後の
-    HEAD を返す。並列に流すとマージの順は並びと違いうるので、祖先の関係で選ぶ。
+    HEAD を返す。並列に流すとマージの順は並びと違いうるので、祖先の関係で選ぶ。取得済みのリモートの HEAD（`tip`）が
+    マージコミットの 1 つで、手元から進められれば、ほかの候補は調べない（Git の起動を単位の数に比例させない）。
 
     手元で読めるマージコミットが無いか、手元がその祖先でなければ進めない（違いは呼び手が利用者に知らせる）。進める直前に、
     作業場所が今もスプリントブランチにいることを確かめる（別のブランチをスプリントのマージ結果まで進めない）。
     """
     head = g.rev_parse("HEAD")
     target, number = head, 0
-    for pull in landed:
-        sha = pull.merge_sha
-        if sha and sha != target and g.commit_or_none(sha) is not None and g.is_ancestor(target, sha):
-            target, number = sha, pull.number
+    newest = next((p for p in landed if p.merge_sha == tip), None)
+    if newest is not None and (tip == head or g.is_ancestor(head, tip)):
+        target, number = tip, newest.number
+    else:
+        for pull in landed:
+            sha = pull.merge_sha
+            if sha and sha != target and g.commit_or_none(sha) is not None and g.is_ancestor(target, sha):
+                target, number = sha, pull.number
     if target == head:
         return head
     _check_sprint_branch(g, ctx)

@@ -1,14 +1,14 @@
 """単位を依存の順に並列で流す処理（#3702 の決定 9・受け入れ条件 3）のテスト。
 
 並びを流す順（`units_flow.flow`）は、プールと待ちを偽にして、終わる順をテストが決める（スレッドも本物の待ちも使わない）。
-`run_stage` を通すテストは、`test_units_run.py` の `World`（手元の git は本物、プランとコマンドは偽）を使う。
+`run_stage` を通すテストは、`test_units_run.py` の `World`（手元の git は本物、プランとコマンドは偽）を使い、プールと待ちは
+同じ偽に差し替える。
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
-import threading
 from concurrent.futures import Future
 from pathlib import Path
 
@@ -37,26 +37,14 @@ def _unit(name: str, *after: str, issue: int = 3, whole: bool = False) -> Unit:
     return Unit(name, issue, "", (), (), whole, tuple(unit_key(3, a) for a in after))
 
 
-class Fake:
-    """偽のプール・待ち・単位の操作。`finish` は待ち 1 回ごとに終える単位の名前の並び（尽きれば起動の順に 1 つ終える）。
+class FakePool:
+    """偽のプールと待ち。投入した呼び出しは待たれるまで走らず、待ち 1 回ごとに `pick` が選んだものを終える
+    （既定は後に投入したもの 1 つ）。"""
 
-    `log` は起動（`start`）・マージ（`merge`）・止まった単位（`fail`）の順。`stops` は単位の名前 → `impl` の停止理由、
-    `merge_stops` はマージの停止理由。
-    """
-
-    def __init__(self, units, *finish, stops=None, merge_stops=None, merge_only=()) -> None:
-        self.units = tuple(units)
-        self.script = [list(f) for f in finish]
-        self.stops = stops or {}
-        self.merge_stops = merge_stops or {}
-        self.merge_only = set(merge_only)
-        self.log: list[tuple[str, str]] = []
-        self.running: dict[Future, str] = {}
-        self.calls: dict[Future, object] = {}
+    def __init__(self) -> None:
+        self.running: dict[Future, object] = {}
         self.widest = 0
         self.limit = 0
-
-    # --- プール ---
 
     def pool(self, max_workers: int):
         self.limit = max_workers
@@ -70,28 +58,68 @@ class Fake:
 
     def submit(self, call):
         future: Future = Future()
-        self.calls[future] = call
-        self.running[future] = call.name
+        self.running[future] = call
         self.widest = max(self.widest, len(self.running))
         return future
 
+    def finish(self, future: Future) -> None:
+        """呼び出しを走らせて終わらせる（終わっていれば何もしない）。"""
+        if future.done():
+            return
+        try:
+            future.set_result(self.running[future]())
+        except Exception as exc:  # noqa: BLE001
+            future.set_exception(exc)
+
+    def pick(self) -> list[Future]:
+        return [list(self.running)[-1]]
+
     def wait(self, waiting, return_when):
         assert waiting, "待つ相手が無いのに待った"
-        names = self.script.pop(0) if self.script else [next(iter(self.running.values()))]
-        done = {f for f, n in self.running.items() if n in names}
-        assert len(done) == len(names), f"{names} は実行中でない: {list(self.running.values())}"
+        done = set(self.pick())
         for future in done:
+            self.finish(future)
             del self.running[future]
-            try:
-                future.set_result(self.calls[future]())
-            except Exception as exc:  # noqa: BLE001
-                future.set_exception(exc)
         return done, set(waiting) - done
+
+    def workers(self) -> units_flow.Workers:
+        return units_flow.Workers(self.pool, self.wait)
+
+
+class Fake(FakePool):
+    """偽のプール・待ち・単位の操作。`finish` は待ち 1 回ごとに終える単位の名前の並び（尽きれば起動の順に 1 つ終える）。
+
+    `log` は起動（`start`）・マージ（`merge`）・止まった単位（`fail`）の順。`stops` は単位の名前 → `impl` の停止理由、
+    `merge_stops` はマージの停止理由。`during` は (`start` か `merge`, 単位の名前) → その操作の間に `impl` が終わる単位。
+    """
+
+    def __init__(self, units, *finish, stops=None, merge_stops=None, merge_only=(), during=None) -> None:
+        super().__init__()
+        self.during = during or {}
+        self.units = tuple(units)
+        self.script = [list(f) for f in finish]
+        self.stops = stops or {}
+        self.merge_stops = merge_stops or {}
+        self.merge_only = set(merge_only)
+        self.log: list[tuple[str, str]] = []
+
+    # --- 待ち ---
+
+    def pick(self) -> list[Future]:
+        names = self.script.pop(0) if self.script else [next(iter(self.running.values())).name]
+        done = [f for f, call in self.running.items() if call.name in names]
+        assert len(done) == len(names), f"{names} は実行中でない: {[c.name for c in self.running.values()]}"
+        return done
+
+    def meanwhile(self, kind: str, name: str) -> None:
+        if (kind, name) in self.during:
+            self.finish(next(f for f, call in self.running.items() if call.name == self.during[kind, name]))
 
     # --- 単位の操作 ---
 
     def start(self, unit: Unit) -> units_flow.Started:
         self.log.append(("start", unit.name))
+        self.meanwhile("start", unit.name)
 
         def call():
             if unit.name in self.stops:
@@ -108,6 +136,7 @@ class Fake:
             if unit.name in self.merge_stops:
                 raise UnitsStopped(self.merge_stops[unit.name], f"{unit.name} をマージできない")
             self.log.append(("merge", unit.name))
+            self.meanwhile("merge", unit.name)
             return {"name": unit.name, "status": "merged"}, github_pulls.MergedPull(1, unit.name)
 
         return units_flow.Started(None if unit.name in self.merge_only else call, land)
@@ -120,7 +149,8 @@ class Fake:
             return UnitsStopped("precondition", str(exc))
 
         order = units_flow.Order(self.units, frozenset(unit_key(3, m) for m in merged), chained=chained)
-        return units_flow.flow(order, units_flow.Ops(self.start, failed), limit, units_flow.Workers(self.pool, self.wait))
+        ops = units_flow.Ops(self.start, failed, lambda got: got == "usage_limit")
+        return units_flow.flow(order, ops, limit, self.workers())
 
     def at(self, kind: str, name: str) -> int:
         return self.log.index((kind, name))
@@ -180,6 +210,25 @@ def test_a_usage_limit_starts_nothing_more_but_merges_the_running_units():
     assert fake.names("start") == ["A", "B"] and fake.names("merge") == ["B"]
     assert [u.name for u, _ in got.waiting] == ["C", "D", "whole"]
     assert all("利用上限" in why for _, why in got.waiting)
+
+
+@pytest.mark.parametrize(
+    ("during", "started", "waiting"),
+    [
+        # A のマージの間に B の impl が利用上限で終わる。C は用意もしない
+        (("merge", "A"), ["A", "B"], ["C"]),
+        # C の用意の間に終わる。用意した C は投入しない
+        (("start", "C"), ["A", "B", "C"], ["C"]),
+    ],
+)
+def test_a_usage_limit_that_is_not_received_yet_starts_nothing_more(during, started, waiting):
+    fake = Fake([_unit("A"), _unit("B"), _unit("C")], ["A"], stops={"B": "usage_limit"}, during={during: "B"})
+
+    got = fake.flow(limit=2)
+
+    assert fake.names("start") == started and fake.names("merge") == ["A"]
+    assert [(u.name, e.kind) for u, e in got.failures] == [("B", "usage_limit")]
+    assert [u.name for u, _ in got.waiting] == waiting and "利用上限" in got.waiting[0][1]
 
 
 def test_the_supplemented_units_run_alone_after_the_file_units_in_the_issue_order():
@@ -282,7 +331,7 @@ def _doc() -> dict:
 
 
 class Parallel(World):
-    """単位のファイルから流す `World`。`gates` は単位の名前 → `impl` が終わる前に待つ出来事、`meet` は同時に走るはずの単位。
+    """単位のファイルから流す `World`。`impl` は偽のプール（`fake_pool`）が、後に投入したものから終える。
 
     マージは、スプリントブランチをマージしたコミットを送る（先にマージされた別の単位があっても進められる。GitHub の代わり）。
     """
@@ -294,10 +343,7 @@ class Parallel(World):
         (self.sprint / UNITS_PATH).write_text(json.dumps(_doc(), ensure_ascii=False), encoding="utf-8")
         _git(self.sprint, "add", "issues")
         _git(self.sprint, "commit", "-q", "-m", "units")
-        self.lock = threading.Lock()
-        self.meet: threading.Barrier | None = None
-        self.gates: dict[str, threading.Event] = {}
-        self.landed: dict[str, threading.Event] = {}
+        self.fake_pool = FakePool()
         self.order: list[str] = []
 
     def unit_names(self) -> dict[str, str]:
@@ -307,15 +353,8 @@ class Parallel(World):
     def name_of(self, branch: str) -> str:
         return next(n for n, b in self.unit_names().items() if b == branch)
 
-    def call_plan(self, run, round_dir):
-        if run.name == "impl":
-            name = self.name_of(run.overrides["branch"])
-            if self.meet is not None and name != "issue-4":
-                self.meet.wait()
-            if name in self.gates:
-                assert self.gates[name].wait(20), f"{name} の待ちが解けない"
-        with self.lock:
-            return super().call_plan(run, round_dir)
+    def ports(self) -> units_invoke.Ports:
+        return super().ports()._replace(workers=self.fake_pool.workers())
 
     def land(self, worktree, branch, number):
         _git(worktree, "fetch", "-q", "origin")
@@ -323,8 +362,6 @@ class Parallel(World):
         got = super().land(worktree, branch, number)
         name = self.name_of(branch)
         self.order.append(name)
-        if name in self.landed:
-            self.landed[name].set()
         return got
 
 
@@ -351,14 +388,11 @@ def parallel_world(tmp_path, monkeypatch) -> Parallel:
 
 def test_independent_units_run_at_the_same_time_and_the_sprint_pr_follows_the_last_merge(parallel_world):
     w = parallel_world
-    # 2 つが同時に走らなければ、バリアが時間切れになる。並びで先の甲は、後の乙のマージより後に終わる
-    w.meet = threading.Barrier(2, timeout=20)
-    w.landed["乙"] = threading.Event()
-    w.gates["甲"] = w.landed["乙"]
-
+    # 並びで先の甲は、後の乙のマージより後に終わる
     got = w.run()
 
     assert got is not None and got.status == "ok", got.report
+    assert w.fake_pool.limit == 6 and w.fake_pool.widest == 2
     assert w.order == ["乙", "甲", "issue-4"]
     # 結果の項目は、終わった順でなくマージの順の並びで返す
     assert [i["name"] for i in got.report["items"]] == ["甲", "乙", "issue-4"]
@@ -372,7 +406,7 @@ def test_the_limit_of_one_runs_the_units_one_by_one(parallel_world, monkeypatch)
 
     assert w.run().status == "ok"
 
-    assert w.order == ["甲", "乙", "issue-4"]
+    assert w.order == ["甲", "乙", "issue-4"] and w.fake_pool.widest == 1
 
 
 def test_a_broken_limit_stops_before_any_unit(parallel_world, monkeypatch):
@@ -409,7 +443,7 @@ def test_a_failure_the_caller_classifies_stops_only_that_unit(parallel_world):
             raise OSError("書けない")
         return original(run, round_dir)
 
-    ports = units_invoke.Ports(broken, w.command, lambda exc: result.stopped("plan", "precondition", f"分類: {exc}"))
+    ports = w.ports()._replace(call_plan=broken, failure=lambda exc: result.stopped("plan", "precondition", f"分類: {exc}"))
 
     got = units_invoke.run_stage(w.stage_run(), w.work, w.sprint, ports)
 
@@ -427,7 +461,7 @@ def test_invoke_classifies_an_error_of_one_unit_with_the_plan_failures_and_flows
         return w.call_plan(run, round_dir)
 
     def run_stage(r, wd, cwd, ports):
-        return original(r, wd, cwd, ports._replace(call_plan=broken))
+        return original(r, wd, cwd, ports._replace(call_plan=broken, workers=w.fake_pool.workers()))
 
     monkeypatch.setattr(units_invoke, "run_stage", run_stage)
 
