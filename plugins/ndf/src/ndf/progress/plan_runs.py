@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +15,24 @@ from ndf.core.plan import runner as plan_runner
 
 # 変更要求の指摘の本文を作業へ渡す環境変数
 NOTES_ENV = "NDF_STAGE_NOTES"
+
+
+@dataclass(frozen=True)
+class SprintPlan:
+    """単位ごとに流す工程が読む、スプリントの保存した状態（#3702 の決定 10・11）。ステートマシンを持たない呼び出しは既定のまま。"""
+
+    # 分け方の承認が要るか（`design_record.required`）
+    required: bool = False
+    # 承認の記録（`design_record.approved_of`）。承認が要らないか、取れなければ None
+    record: Optional[Mapping[str, Any]] = None
+    # 承認の記録と、読み元（`units_files.Tree`）の中身の違い（`design_record.mismatches`）。記録が無ければ None
+    differences: Optional[Callable[[Any], list[str]]] = None
+    # 実装計画を省いた課題（文脈の `plan_omitted`）
+    omitted: tuple[int, ...] = ()
+    # 保存した定義がこの変更より後のものか（工程の `optional_inputs` に `plan_omitted` がある）
+    new_definition: bool = False
+    # ステートマシンの作業の保存先（承認した文書を送るコミットの記録 `design-sync.json` を持つ）
+    work_root: Optional[Path] = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +66,8 @@ class StageRun:
     env_extra: Mapping[str, str] = field(default_factory=dict)
     # 前の回の開始点が無いときの `--from`
     start: Optional[str] = None
+    # 単位ごとに流す工程だけが持つ、スプリントの保存した状態（#3702）
+    sprint: Optional[SprintPlan] = None
 
     def plain(self) -> StageRun:
         """単位に分けない呼び出し。入力の `branch` は除く（残すと差し込みの `branch` になり、作業場所の今のブランチを使わない）。"""

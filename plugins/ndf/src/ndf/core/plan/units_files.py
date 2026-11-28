@@ -20,6 +20,7 @@ from ndf.contracts import limits
 from ndf.core.production_merge import PROJECT_FILE
 from ndf.core.plan import inputs_decide, review_units_decide
 from ndf.core.plan import units_decide as ud
+from ndf.core.plan.review_units_decide import PlanDoc, Unit, has_units, task_bodies, unit_key
 
 SCHEMA = "workflow/review-units.schema.json"
 LIMITS_SCHEMA = "schemas/ndf-settings/project.schema.json#/$defs/ReviewUnits"
@@ -402,6 +403,64 @@ def rendered(tree: Tree, issues: Sequence[int], omitted: Sequence[int], limits: 
         if new != _newlines(text):
             out[plan] = Rewrite(text, new)
     return out
+
+
+# --- 流す単位の並び ------------------------------------------------------------------------------
+
+
+def supplemented(tree: Tree, issues: Sequence[int], omitted: Sequence[int], plans: Sequence[PlanDoc]) -> list[int]:
+    """課題 1 つの 1 単位にする課題（実装計画を省いた課題と、単位のファイルも単位の欄も無い課題）。
+
+    単位の欄があるのにファイルが無い課題は、分けたはずの変更を 1 本にしないために止める（#3702 の決定 10）。
+    """
+    missing = collect(tree, issues, omitted).missing
+    split = [n for n in missing if any(n in p.issues and has_units(p.text) for p in plans)]
+    if split:
+        names = "、".join(f"#{n}" for n in split)
+        raise UnitsFileError(f"{names} は実装計画にレビューの単位の欄があるのに、単位のファイルが無い")
+    return [*omitted, *missing]
+
+
+def lineup_from_files(views: Sequence[ud.View], files: Sequence[ud.UnitFile]) -> tuple[Unit, ...]:
+    """単位のファイルの判定の結果を、流す単位の並び（マージの順）にする。代表の課題は、担当タスクの課題の最小の番号。"""
+    keys = {(v.file, v.name): unit_key(min(v.issues), v.name) for v in views}
+    tasks = {(f.path, t.id): t for f in files if not f.whole for t in f.tasks}
+    units = []
+    for v in sorted(views, key=lambda view: view.merge):
+        # 実装計画を省いた課題の単位はファイルのパスが空で、担当タスクを持たない
+        held = ud.in_dependency_order([tasks[(v.file, tid)] for tid in v.tasks]) if v.file else []
+        criteria = (c.split(":") for c in v.criteria)
+        units.append(
+            Unit(
+                v.name,
+                min(v.issues),
+                paired_plan(v.file) if v.file else "",
+                tuple(int(t.id[1:]) for t in held),
+                tuple((int(issue), int(number)) for issue, number in criteria),
+                not v.file,
+                tuple(keys[(file, name)] for file, name, _ in v.after),
+                v.merge,
+                tuple((t.id, t.issue) for t in held),
+            )
+        )
+    return tuple(units)
+
+
+def task_texts(tree: Tree, unit: Unit) -> list[str]:
+    """担当タスクの「タスク分解」の本文（依存の順）。読めないタスクがあれば止める。"""
+    text = tree.read(unit.plan)
+    bodies = task_bodies(text) if text is not None else {}
+    lack = [f"Task {n}" for n in unit.tasks if n not in bodies]
+    if lack:
+        raise UnitsFileError(f"{unit.plan}: 単位 {unit.name} の {'、'.join(lack)} の本文が無い（コミット {tree.commit}）")
+    return [bodies[n] for n in unit.tasks]
+
+
+def check_bodies(tree: Tree, units: Sequence[Unit]) -> None:
+    """担当タスクの本文がすべて読めることを、単位を始める前に確かめる。"""
+    for unit in units:
+        if not unit.supplemented:
+            task_texts(tree, unit)
 
 
 # --- 結果の項目 ---------------------------------------------------------------------------------

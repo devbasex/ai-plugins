@@ -49,7 +49,9 @@ class PlanDoc(NamedTuple):
 class Unit(NamedTuple):
     """レビューの単位 1 つ。`issue` は代表の課題、`criteria` は (課題, 条件の番号) の並び。
 
-    `supplemented` は単位の見出しを持たない課題を課題 1 つの 1 単位として補ったもので、`plan` は空になる。
+    `supplemented` は単位の見出しを持たない課題と実装計画を省いた課題を、課題 1 つの 1 単位として補ったもので、`plan` は空になる。
+    `after`（先に要る単位のキー。`unit_key`）・`merge`（マージの順）・`task_ids`（担当タスクと所属の課題。依存の順）は、
+    単位のファイルから流すときだけ持つ（#3702）。
     """
 
     name: str
@@ -58,6 +60,14 @@ class Unit(NamedTuple):
     tasks: tuple[int, ...]
     criteria: tuple[tuple[int, int], ...]
     supplemented: bool
+    after: tuple[str, ...] = ()
+    merge: int = 0
+    task_ids: tuple[tuple[str, int], ...] = ()
+
+
+def unit_key(issue: int, name: str) -> str:
+    """単位のキー（代表の課題と名前）。名前は単位のファイルをまたいで重なりうる。"""
+    return f"{issue}:{name}"
 
 
 class UnitsUnreadable(Exception):
@@ -171,6 +181,20 @@ def _task_numbers(doc: _Doc) -> list[int]:
     section = _named_section(doc, TASKS_HEADING)
     titles = (_TASK_TITLE.match(h.title) for h in doc.headings if h.at in section and h.level == 3)
     return [int(m.group(1)) for m in titles if m]
+
+
+def task_bodies(text: str) -> dict[int, str]:
+    """「タスク分解」の `### Task N` ごとの本文（見出しの行を含み、次の同じか上のレベルの見出しの手前まで）。同じ番号は最初のもの。"""
+    doc = _parse(text)
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    section = _named_section(doc, TASKS_HEADING)
+    out: dict[int, str] = {}
+    for h in doc.headings:
+        found = _TASK_TITLE.match(h.title) if h.at in section and h.level == 3 else None
+        if found:
+            body = lines[h.at : min(_section(doc, h).stop, len(lines))]
+            out.setdefault(int(found.group(1)), "\n".join(body).rstrip())
+    return out
 
 
 def table_slot(text: str, title: str, columns: Sequence[str]) -> Optional[Slot]:
