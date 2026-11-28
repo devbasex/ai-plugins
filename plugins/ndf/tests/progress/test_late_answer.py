@@ -536,3 +536,27 @@ def test_a_later_approval_withdraws_only_the_same_writers_rejection(approver, st
     rows = merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer())
 
     assert (merge_approval.merge_judgment(rows, target) is None) is stops
+
+
+@pytest.mark.parametrize("order", [("rejected", "mvv"), ("mvv", "rejected")])
+def test_withdrawing_a_rejection_does_not_revive_an_earlier_mvv_approval(order):
+    """却下の前後に書かれた MVV の承認は、別のアカウントが却下を取り下げても数えない。取り下げ後の記録は数える。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+
+    def user(answer: str, record: str) -> Authored:
+        row = merge_approval.render_merge_row(merge_approval.MergeRow(answer, "user", target, True, record))
+        return Authored("someone", "COLLABORATOR", row, author_id=2)
+
+    def mvv(record: str) -> Authored:
+        row = merge_approval.render_merge_row(merge_approval.MergeRow("approved", "mvv", target, True, record))
+        return Authored(hub.login, "OWNER", f"{merge_approval.MVV_NOTE_HEADING}design）\n\n{row}", author_id=hub.account_id)
+
+    posted = {"rejected": user("rejected", "a"), "mvv": mvv("mvv:1")}
+    hub.comments_of[DESIGN_PR] = [*(posted[name] for name in order), user("approved", "b")]
+    assert merge_approval.merge_judgment(merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer()), target) is None
+
+    hub.comments_of[DESIGN_PR].append(mvv("mvv:2"))
+    found = merge_approval.merge_judgment(merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer()), target)
+
+    assert found is not None and found.record_id == "mvv:2"

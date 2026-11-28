@@ -48,8 +48,12 @@ class MergeTarget(NamedTuple):
     base: str
     head: str
 
+    def key(self) -> tuple[str, int, str, str]:
+        """比べるための値（リポジトリ名は小文字にする）。"""
+        return (self.repo.lower(), self.number, self.base, self.head)
+
     def same(self, other: "MergeTarget") -> bool:
-        return (self.repo.lower(), self.number, self.base, self.head) == (other.repo.lower(), other.number, other.base, other.head)
+        return self.key() == other.key()
 
 
 class MergeRow(NamedTuple):
@@ -165,12 +169,16 @@ def _counted(found: Iterable[tuple[Authored, MergeRow]], viewer: Viewer) -> list
     利用者が単発プランを別のアカウントで打っても、その却下の後は MVV 判定の承認を数えず、同じアカウントで承認し直せば
     却下は残らない。別のアカウントの承認はマージを許さず、却下も利用者の承認は取り消さない。"""
     rows: list[MergeRow] = []
+    rejected: set[tuple[int, tuple[str, int, str, str]]] = set()  # 別のアカウントが却下した（書き手の ID, 対象）
     for c, row in found:
         if same_writer(c, viewer):
             rows.append(row)
         elif row.by == USER_BY and c.author_id > 0 and _of_repository(c):
             # 承認は、その書き手が先に同じ対象を却下したときだけ数える（却下を取り下げる回答）
-            if row.answer == REJECTED or any(r.foreign == c.author_id and r.target.same(row.target) for r in rows):
+            key = (c.author_id, row.target.key())
+            if row.answer == REJECTED:
+                rejected.add(key)
+            if key in rejected:
                 rows.append(row._replace(foreign=c.author_id))
     return rows
 
@@ -203,18 +211,24 @@ def _live_approvals(rows: Sequence[MergeRow], now: MergeTarget) -> list[MergeRow
     """`now` への「本番へ反映される: はい」の承認のうち、後の却下で取り消されていないもの（古い順）。
 
     却下は本番へ反映されない期間のものも先の承認をすべて取り消す。失効の行（`voids` を持つ却下）は、指した承認だけを外す。
-    利用者の却下が残っていれば、その却下より後の MVV 判定の承認も数えない（`_user_rejected`）。"""
+    利用者の却下（別のアカウントのものを含む）は、それより前の MVV 判定の承認を外し、残っている間に書かれた MVV 判定の
+    承認も数えない。却下を取り下げても戻さず、取り下げた後に書かれた MVV 判定の承認だけを数える。"""
     live: list[MergeRow] = []
+    standing: set[int] = set()
     for r in rows:
         if not r.target.same(now):
             continue
+        if r.by == USER_BY:
+            _follow_user(standing, r)
+            if r.answer == REJECTED:
+                live = [kept for kept in live if kept.by != MVV_BY]
         if r.foreign:
             continue
         if r.answer == REJECTED:
             live = [kept for kept in live if not _points_at(r.voids, kept)] if r.voids else []
-        elif r.production:
+        elif r.production and not (r.by == MVV_BY and standing):
             live.append(r)
-    return [r for r in live if r.by != MVV_BY] if _user_rejected(rows, now) else live
+    return live
 
 
 def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
@@ -250,20 +264,24 @@ def write_merge_row(
 
 
 def _user_rejected(rows: Sequence[MergeRow], target: MergeTarget) -> bool:
-    """`target` への利用者の却下が残っているか（`rows` は古い順）。
-
-    token の利用者の承認はどの却下も取り下げ、別のアカウントの承認は同じ書き手の却下だけを取り下げる。"""
+    """`target` への利用者の却下が残っているか（`rows` は古い順）。"""
     standing: set[int] = set()
     for r in rows:
-        if r.by != USER_BY or not r.target.same(target):
-            continue
-        if r.answer == REJECTED:
-            standing.add(r.foreign)
-        elif r.foreign:
-            standing.discard(r.foreign)
-        else:
-            standing.clear()
+        if r.by == USER_BY and r.target.same(target):
+            _follow_user(standing, r)
     return bool(standing)
+
+
+def _follow_user(standing: set[int], row: MergeRow) -> None:
+    """利用者の行 `row` を、却下が残っている書き手（`MergeRow.foreign` の値）の集まり `standing` へ反映する。
+
+    token の利用者の承認はどの却下も取り下げ、別のアカウントの承認は同じ書き手の却下だけを取り下げる。"""
+    if row.answer == REJECTED:
+        standing.add(row.foreign)
+    elif row.foreign:
+        standing.discard(row.foreign)
+    else:
+        standing.clear()
 
 
 def _already_written(rows: Sequence[MergeRow], row: MergeRow, latest_only: bool | None) -> bool:
