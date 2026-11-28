@@ -18,7 +18,7 @@ from collections import defaultdict
 from typing import Callable, Iterable, Iterator, NamedTuple, Sequence
 
 from ndf import identity
-from ndf.adapters.github import Authored, GitHub, Viewer, same_repo
+from ndf.adapters.github import OWNER_ASSOCIATION, PERMISSION_CHECKED_ASSOCIATIONS, Authored, GitHub, Viewer, same_repo
 from ndf.adapters.publish import Publisher
 from ndf.core.approval_words import ANSWERS, APPROVED, BY_CHOICES, BY_LINE, MVV_BY, REJECTED, REOPEN_BY, USER_BY, By  # noqa: F401
 
@@ -65,6 +65,8 @@ class MergeRow(NamedTuple):
     record_id: str
     url: str = ""
     voids: frozenset[str] = frozenset()
+    # 別のアカウントが書いた利用者の却下。MVV 判定の承認を無効にすることにだけ数える（`_counted`）
+    foreign: bool = False
 
 
 class Revocation(NamedTuple):
@@ -149,10 +151,30 @@ def same_writer(c: Authored, viewer: Viewer) -> bool:
 def merge_rows(hub: GitHub, number: int, viewer: Viewer) -> list[MergeRow]:
     """PR のコメントから数える証跡を古い順に返す。書き手が `viewer`（`ndf ci merge` を打つ token の利用者）と同じ
     アカウントで、編集されていないコメントだけを数える（書き込み権限を持つだけの別の人のコメントは数えない）。
+    例外は別のアカウントの利用者の却下で、`foreign` を付けて返す（`_counted`）。
 
     `viewer` のアカウント ID が読めていない（0）なら、数えずに `TrailError`（理由は `NO_LOGIN`）。"""
     _require_login(viewer)
-    return [row for c, row in _unedited_rows(hub.comments(number)) if same_writer(c, viewer)]
+    return _counted(_unedited_rows(hub.comments(number)), viewer)
+
+
+def _counted(found: Iterable[tuple[Authored, MergeRow]], viewer: Viewer) -> list[MergeRow]:
+    """数える行（古い順）。token の利用者の行と、別のアカウントの利用者の却下（`foreign`）。
+
+    利用者が単発プランを別のアカウントで打っても、その却下の後は MVV 判定の承認を数えない。別のアカウントの承認は数えず、
+    却下も利用者の承認は取り消さないので、起きるのは人への問い直しだけである。"""
+    rows = []
+    for c, row in found:
+        if same_writer(c, viewer):
+            rows.append(row)
+        elif row.by == USER_BY and row.answer == REJECTED and _of_repository(c):
+            rows.append(row._replace(foreign=True))
+    return rows
+
+
+def _of_repository(c: Authored) -> bool:
+    """書き手がリポジトリの関係者か GitHub App のボットか（外部の人のコメントで自動の承認を止めさせない）。権限は照会しない。"""
+    return c.association == OWNER_ASSOCIATION or c.association in PERMISSION_CHECKED_ASSOCIATIONS or c.author.endswith("[bot]")
 
 
 def _require_login(viewer: Viewer) -> None:
@@ -177,16 +199,19 @@ def merge_judgment(rows: Sequence[MergeRow], now: MergeTarget) -> MergeRow | Non
 def _live_approvals(rows: Sequence[MergeRow], now: MergeTarget) -> list[MergeRow]:
     """`now` への「本番へ反映される: はい」の承認のうち、後の却下で取り消されていないもの（古い順）。
 
-    却下は本番へ反映されない期間のものも先の承認をすべて取り消す。失効の行（`voids` を持つ却下）は、指した承認だけを外す。"""
+    却下は本番へ反映されない期間のものも先の承認をすべて取り消す。失効の行（`voids` を持つ却下）は、指した承認だけを外す。
+    利用者の最新の回答が却下なら、その却下より後の MVV 判定の承認も数えない（`_user_rejected`）。"""
     live: list[MergeRow] = []
     for r in rows:
         if not r.target.same(now):
+            continue
+        if r.foreign:
             continue
         if r.answer == REJECTED:
             live = [kept for kept in live if not _points_at(r.voids, kept)] if r.voids else []
         elif r.production:
             live.append(r)
-    return live
+    return [r for r in live if r.by != MVV_BY] if _user_rejected(rows, now) else live
 
 
 def _points_at(approvals: frozenset[str], row: MergeRow) -> bool:
@@ -209,9 +234,12 @@ def write_merge_row(
     `viewer` のアカウント ID が読めていなければ、重なりを確かめられないので投稿せずに `TrailError`（`merge_rows` が投げる）。"""
     if row.answer not in ANSWERS or row.by not in BY_CHOICES:
         raise TrailError(f"#{row.target.number} の証跡の回答 {row.answer!r}・担い手 {row.by!r} を書けない")
-    rows = merge_rows(hub, row.target.number, viewer)
+    _require_login(viewer)
+    found = list(_unedited_rows(hub.comments(row.target.number)))
+    rows = _counted(found, viewer)
     if yield_to_user and _user_rejected(rows, row.target):
-        raise UserRejected(f"#{row.target.number} の同じ承認の対象（マージ先と HEAD）に利用者の却下がある")
+        posted = frozenset(pointer for _, r in found if r.answer == APPROVED for pointer in (r.record_id, r.url) if pointer)
+        raise UserRejected(f"#{row.target.number} の同じ承認の対象（マージ先と HEAD）に利用者の却下がある", posted)
     if _already_written(rows, row, latest_only):
         return False
     Publisher(hub).comment(row.target.number, preface + render_merge_row(row))
@@ -230,6 +258,7 @@ def _already_written(rows: Sequence[MergeRow], row: MergeRow, latest_only: bool 
     真（DB に無い新しい回答）は、同じ対象の最新の行の識別子と回答が同じときだけ。後に別の識別子の却下があれば、承認を
     もう一度書く。偽（DB に記録済みの回答の送り直し）は、識別子・回答・対象が同じ行が 1 件でもあるとき（古い回答を最新の
     行にしない）。None は、同じ識別子の行があるとき。"""
+    rows = [r for r in rows if not r.foreign]
     if latest_only is None:
         return any(r.record_id == row.record_id for r in rows)
     same = [r for r in rows if r.target.same(row.target)]
@@ -273,7 +302,7 @@ def write_revocations(hub: GitHub, revocations: Sequence[Revocation], viewer: Vi
         if unconfirmed and not _traced(found, target, approvals, record_id):
             continue
         applied.append(target)
-        mine = [row for c, row in found if same_writer(c, viewer)]
+        mine = _counted(found, viewer)
         live = _live_approvals(mine, target)
         holders = _other_holders(found, viewer, target, approvals)
         others.update(dict.fromkeys(holders))
@@ -310,7 +339,7 @@ def _queued_on_another(
 ) -> Callable[[str, str], bool]:
     """PR をキューに残すかを、今のマージ先と HEAD（キューに入っている PR はこれが対象）から決める関数（`GitHub.dequeue` の `keep`）。
     その組が取り消す対象 `revoked` のどれとも一致せず、token の利用者の有効な承認を持つなら残す。"""
-    mine = [row for c, row in found if same_writer(c, viewer)]
+    mine = _counted(found, viewer)
 
     def keep(base: str, head: str) -> bool:
         now = MergeTarget(repo, number, base, head)
@@ -343,4 +372,10 @@ class TrailError(Exception):
 
 
 class UserRejected(TrailError):
-    """利用者が同じ対象を却下しているので、利用者でない担い手の承認を書かない。"""
+    """利用者が同じ対象を却下しているので、利用者でない担い手の承認を書かない。
+
+    `posted` は、PR に載っている承認の行を指す値（記録の識別子とコメントの URL）。"""
+
+    def __init__(self, message: str, posted: frozenset[str]) -> None:
+        super().__init__(message)
+        self.posted = posted

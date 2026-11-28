@@ -137,17 +137,20 @@ def _pass_by_mvv(d: Hands, v: View, m: Move) -> None:
             d.env.forget()
         elif approval_decide.skip_barred(v.stage_events(m.stage.name), m.step.gate, m.stage.mvv_before(m.step.id)):
             _back_to_waiting(d, v, m, "MVV 判定の後に承認でない回答が記録されたので、人へ問う")
-        elif (why := d.env.mvv_trail(event_payload(m.event))) is not None:
-            _back_to_waiting(d, v, m, why)
+        elif (withheld := d.env.mvv_trail(event_payload(m.event))) is not None:
+            _back_to_waiting(d, v, m, withheld.why, withheld)
         else:
             d.write_if_unchanged(v, _passed(v, m, m.event))
 
 
-def _back_to_waiting(d: Hands, v: View, m: Move, why: str) -> None:
-    """工程の承認を取り消して、承認ゲートを待ちへ戻す。呼び手は回答と共有する排他を持つ。"""
+def _back_to_waiting(d: Hands, v: View, m: Move, why: str, withheld: Optional[approval_decide.Withheld] = None) -> None:
+    """工程の承認を取り消して、承認ゲートを待ちへ戻す。呼び手は回答と共有する排他を持つ。
+
+    証跡を書かなかった（`withheld`）なら、その PR は載っている承認だけを取り消す。"""
     assert m.stage is not None and m.step is not None and m.progress is not None
     wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
-    d.env.revoke(approval_decide.stage_revocations(v, m.stage.name))
+    revocations = approval_decide.stage_revocations(v, m.stage.name)
+    d.env.revoke(revocations if withheld is None else approval_decide.only_posted(revocations, withheld))
     d.write(model.EventDraft(STEP_EVENT, ACTOR, m.stage.name, payload=wait, rev=v.rev))
     d.warn(why)
 

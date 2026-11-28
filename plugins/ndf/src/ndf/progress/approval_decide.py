@@ -248,6 +248,25 @@ def stage_revocations(v: View, stage: str) -> list[merge_approval.Revocation]:
     return revocations({stage: [ev for ev in rows if ev.seq > cut]}, v.machine_id, [stage])
 
 
+class Withheld(NamedTuple):
+    """MVV 判定の承認の証跡を書かなかった結果。`posted` は PR `number` に載っている承認の行を指す値。"""
+
+    why: str
+    number: int
+    posted: frozenset[str]
+
+
+def only_posted(revocations: Sequence[merge_approval.Revocation], withheld: Withheld) -> list[merge_approval.Revocation]:
+    """`withheld` の PR の取り消しを、PR に載っている承認だけにする（投稿していない承認のために PR とキューを読まない）。"""
+    kept = []
+    for r in revocations:
+        if r.target.number != withheld.number:
+            kept.append(r)
+        elif r.approvals & withheld.posted:
+            kept.append(r._replace(approvals=r.approvals & withheld.posted))
+    return kept
+
+
 def content_differences(now: Mapping[str, Any], seen: Mapping[str, Any]) -> list[str]:
     """見た対象 `seen` と今の対象 `now`（事象の `seen` の形）の中身の違い（今の側が分かる項目だけを比べる）。
 

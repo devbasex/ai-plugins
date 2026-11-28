@@ -330,8 +330,8 @@ class Env:
     # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
     revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None
     # MVV 判定の承認を確定する前に、判定した対象の PR へ承認の証跡を書く口（GitHub へ書くのは `ndf.progress.gate`）。
-    # 利用者の却下があって書かなければ、人へ問う理由を返す
-    mvv_trail: Callable[[Mapping[str, Any]], Optional[str]] = lambda _answered: None
+    # 利用者の却下があって書かなければ、その理由を返す
+    mvv_trail: Callable[[Mapping[str, Any]], Optional[approval_decide.Withheld]] = lambda _answered: None
     # 回答を対象と照らす口（作業の排他の中で読んだ記録と、読む回答の事象の番号。回答を読まない最初の手は None）。作業の排他の中で打ち、
     # 待ちへ戻したか繰り上げたら理由を返す
     verify: Callable[[View, Optional[int]], Optional[str]] = lambda _view, _seq: None

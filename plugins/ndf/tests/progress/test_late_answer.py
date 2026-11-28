@@ -14,9 +14,10 @@ import pytest
 from result_json import last_result
 
 from ndf import contracts
+from ndf.adapters.github import Authored
 from ndf.contracts import result
 from ndf.core import merge_approval
-from ndf.progress import command, gate, invoke, model, run, store
+from ndf.progress import approval_decide, command, gate, invoke, model, run, store
 from ndf.progress.gate import answering, entry, finishing
 
 
@@ -472,11 +473,14 @@ def test_an_objection_after_the_judgement_stops_the_mvv_approval(repo, st, env, 
 def test_a_rejection_in_the_pr_trail_stops_the_mvv_approval(repo, st, env, board, capsys):
     """ステートマシンの記録に無い利用者の却下が PR にあれば、承認ゲートを済ませず人へ問う。"""
     tid = _approved_by_mvv(repo, st, env, capsys)
-    env.env = replace(env.env, mvv_trail=lambda _answered: "利用者の却下がある")
+    withheld = approval_decide.Withheld("利用者の却下がある", DESIGN_PR, frozenset())
+    revoked: list = []
+    env.env = replace(env.env, mvv_trail=lambda _answered: withheld, revoke=revoked.extend)
 
     out = manual._next(st, tid, repo, env)
 
     assert out["status"] == "gate" and out["metrics"]["stage"] == DESIGN, out
+    assert [r for r in revoked if r.target.number == DESIGN_PR] == []  # 投稿していない承認は取り消さない
 
 
 def test_an_mvv_row_is_not_written_over_a_user_rejection():
@@ -493,3 +497,20 @@ def test_an_mvv_row_is_not_written_over_a_user_rejection():
         )
 
     assert len(hub.comments(DESIGN_PR)) == 1
+
+
+@pytest.mark.parametrize(("account", "association", "stops"), [(1, "OWNER", True), (2, "COLLABORATOR", True), (2, "NONE", False)])
+def test_an_mvv_approval_posted_after_a_user_rejection_does_not_merge(account, association, stops):
+    """投稿と重なって却下の後に載った MVV の承認は、別のアカウントの却下でも数えない。外部の人の却下は数えない。"""
+    hub = merge_hub.MergeHub()
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+    rejected = merge_approval.render_merge_row(merge_approval.MergeRow("rejected", "user", target, True, "plan:answer:1"))
+    approved = merge_approval.render_merge_row(merge_approval.MergeRow("approved", "mvv", target, True, "mvv:1"))
+    hub.comments_of[DESIGN_PR] = [
+        Authored("someone", association, rejected, author_id=account),
+        Authored(hub.login, "OWNER", f"{merge_approval.MVV_NOTE_HEADING}design）\n\n{approved}", author_id=hub.account_id),
+    ]
+
+    found = merge_approval.merge_judgment(merge_approval.merge_rows(hub, DESIGN_PR, hub.viewer()), target)
+
+    assert (found is None) is stops
