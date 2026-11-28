@@ -68,15 +68,18 @@ def latest_answer(rows: Sequence[model.Event], gate: Optional[str], after: int) 
     return found
 
 
+def rejection_posted_after(rows: Sequence[model.Event], gate: Optional[str], seq: int) -> bool:
+    """事象 `seq` の後に、承認ゲート `gate` への却下か変更要求の投稿を試みた記録があるか。"""
+    posting = (event_payload(ev) for ev in rows if ev.seq > seq and ev.draft.kind == APPROVAL_POSTING)
+    return any("rejecting" in held and held["rejecting"] == gate for held in posting)
+
+
 def counted_approval(rows: Sequence[model.Event], gate: Optional[str], gate_step: str) -> Optional[model.Event]:
     """対象を読まずに決まる承認の候補。境界より後の最新の回答が、数える承認でなければ None。
 
     その回答の後に却下か変更要求の投稿を試みた記録があれば None。PR に却下が載っていて回答の確定だけが失敗した可能性がある。"""
     found = latest_answer(rows, gate, approval_boundary(rows, gate_step))
-    if found is None:
-        return None
-    posting = (event_payload(ev) for ev in rows if ev.seq > found.seq and ev.draft.kind == APPROVAL_POSTING)
-    if any("rejecting" in held and held["rejecting"] == gate for held in posting):
+    if found is None or rejection_posted_after(rows, gate, found.seq):
         return None
     p = event_payload(found)
     return None if p.get("answer") != invoke.APPROVED or closes_only(p) or model.mvv_answer_void(p, gate) else found

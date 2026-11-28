@@ -387,7 +387,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `write_merge_row` | `core/merge_approval.py` | 変更 | `(hub, row: MergeRow, viewer, *, latest_only: bool \| None = None) -> bool` | 真（DB に無い新しい回答）では、対象の最新の行の識別子と回答が同じときだけ書かない。偽（記録済みの回答の送り直し）では、識別子・回答・対象が同じ行が 1 件でもあれば書かない。指定しない `ndf ci answer` は、今と同じく識別子が同じ行があれば書かない |
 
 - `answer`
-  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション。証跡を投稿する回答は、確かめと回答の追記を 2 つのトランザクションに分け、投稿をその間で行う。1 つ目で投稿前の記録（`approval_posting`）を確定する。本番へ反映されない承認は記録しない）、`gate-rejections`、進み具合の表
+  - 副作用: PR の証跡 1 件、リクエストのファイルの削除、事象の追記（1 トランザクション。証跡を投稿する回答は、確かめと回答の追記を 2 つのトランザクションに分け、投稿をその間で行う。1 つ目で投稿前の記録（`approval_posting`）を確定する）、`gate-rejections`、進み具合の表。本番へ反映されない承認は、PR に証跡を投稿せず、`approval_posting` も追記しない。回答は `answered` として保存する
 - 開き直しを起こす回答は、却下の証跡の後に `revoke_approvals` を呼ぶ
 
 ### 異常系の処理

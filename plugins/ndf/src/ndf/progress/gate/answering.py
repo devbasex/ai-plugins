@@ -454,6 +454,7 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
 
     担い手は記録した回答した者（事象の `by`）から決める。送り直しの `a.by` は `_same` が記録と同じことを確かめている。
     承認の境界（`approval_decide.approval_boundary`）より前の回答には書かない（取り消した承認を、送り直しで PR へ戻さない）。
+    同じ承認ゲートへの却下か変更要求の投稿前の記録より古い承認にも書かない（別のアカウントの証跡として承認が戻らない）。
     工程を閉じるだけの承認（`closes_only`）にも書かない。"""
     p = run.event_payload(held)
     rows = [ev for ev in v.events if ev.draft.row_key == held.draft.row_key]
@@ -463,6 +464,8 @@ def _ensure_trail(conn: Any, v: run.View, held: model.Event, a: Answer, post: Po
         return _no_trail
     seen = Target.from_dict(p.get("seen"))
     gate = p.get("gate")
+    if p.get("answer") == run.APPROVED and approval_decide.rejection_posted_after(rows, gate, held.seq):
+        return _no_trail
     if seen.binding() is None or not isinstance(p.get("gate_id"), str):
         return _no_trail
     q = Question(
