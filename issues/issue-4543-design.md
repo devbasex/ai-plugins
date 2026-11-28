@@ -147,8 +147,10 @@ graph TD
   - コピーの本文から写した範囲は、AI が書き写さず、書いた本文を読み出したコマンドの出力で置き換える。実装計画など、コピーにしか無いセクションは残す
   - レビュー対象が設計 PR（head のブランチ名が `design/` で始まる）で、本文に直す前の文が写っていれば、同じように直す。工程のプランは PR を作るときに課題の本文を PR の本文にし、その後は書き直さないためである
   - 設計 PR でなければ、PR の本文を編集しない
-  - 課題の本文とコピーが一致することと、PR の本文を書いた場合は読み直した全文が書いた本文と一致することを確かめてから、直した指摘（`fixed`）にする
-  - 本文を書き替えられないときと、そろったことを確かめられないときは、利用者の判断が要る指摘（`needs_user`）として返す。直す案は見送りの理由に書く
+  - PR の本文は、送る前に読んだ本文と送信案を比べ、直す箇所がすべて置き換わり、ほかの行が変わっていないことを確かめてから書く
+  - 課題の本文とコピーが一致することと、PR の本文を書いた場合は読み直した全文が送った案と一致することを確かめてから、直した指摘（`fixed`）にする
+  - 課題の本文の読み書きと PR の本文の読み書きには、指示で渡すレビュー対象のリポジトリを指定する
+  - 本文を書き替えられないときと、そろったことを確かめられないときは、利用者の判断が要る指摘（`needs_user`）として返す。直す案は見送りの理由に書く。ある課題の本文だけを書き替えられないときは、その課題の指摘だけを返し、ほかの課題の反映は進める
 - 採らなかった案: コピーを通常のファイルとして直す（設計 PR の要求仕様と課題の本文が食い違う）
 - 採らなかった案: コピーへの指摘をすべて利用者へ返す（文の直しだけでも工程が止まる）
 - 採らなかった案: コピーを作り直すプログラムを足す（コピーを作る処理はこれまでプログラムに無く、設計の工程でも AI が手順書に従って作る。作り方をプログラムへ移すのは、書き分けを扱うこの変更の範囲を超える）
@@ -318,6 +320,7 @@ graph TD
 | `plugins/ndf/src/ndf/core/worker.py` と `plugins/ndf/contracts/worker/kinds.json` | 決定 6 の表の「渡すとき」の 4 つの作業の定義にだけ、小見出しを渡す値を持たせる。ほかの作業へ渡す全文からは外す | 6 |
 | `plugins/ndf/src/ndf/core/issue_docs.py` と `plugins/ndf/src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` に置く。`drive.py` の `REQUIREMENTS_FILE` は定義をやめ、`issue_docs.py` の定義を参照する | 6 |
 | `plugins/ndf/src/ndf/domains/crossreview/drive.py`・`fixer.py` | 変更に設計書も要求仕様のコピーも無ければ、文書の基準の全文から小見出しを外す。変更に要求仕様のコピーがあれば、修正担当への指示に決定 7 の扱いを足す | 6・7 |
+| `plugins/ndf/src/ndf/domains/crossreview/cli.py`・`settings.py` | 解決した対象のリポジトリを起動の引数に持たせ、修正担当への指示に渡せるようにする | 7 |
 | `plugins/ndf/contracts/data/review-criteria.json` と `plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py` | 修正担当へ足す、要求仕様のコピーへの指摘の扱いの文を JSON に置き、`criteria_decide.py` がそれを読む | 7 |
 | `plugins/ndf/skills/document-rebuild/SKILL.md` | `prompt` の JSON の説明に、確定仕様、変更履歴、README・利用者への案内では `distinction` を `false` にすると足す | 6 |
 | `plugins/ndf/skills/design/references/design-template.md` | 「承認する人が読む欄」のセクションに「要約の段落と解き方の全体像は書き分けの小見出しに従って書く」という指示を足し、その小見出しを指す。テンプレート本体のコードブロックにある「解き方の全体像」の説明は、「この設計では〜」と分かる形で書くように直す。`legacy-refactor` の「目的」「目指す姿」にも同じ指示を足す | 1 |
@@ -345,7 +348,7 @@ graph TD
 
 | 課題 | 扱い | 統合先 | 触るファイル |
 | --- | --- | --- | --- |
-| #4543 | 実装する | — | `plugins/ndf/contracts/data/writing-criteria.md`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/writing.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/decision-request/SKILL.md`、`plugins/ndf/skills/document-style/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md` |
+| #4543 | 実装する | — | `plugins/ndf/contracts/data/writing-criteria.md`、`plugins/ndf/contracts/worker/kinds.json`、`plugins/ndf/src/ndf/contracts/writing.py`、`plugins/ndf/src/ndf/domains/records/reading.py`、`plugins/ndf/src/ndf/core/worker.py`、`plugins/ndf/src/ndf/core/issue_docs.py`、`plugins/ndf/src/ndf/domains/docrebuild/drive.py`、`plugins/ndf/contracts/data/review-criteria.json`、`plugins/ndf/src/ndf/domains/crossreview/drive.py`、`plugins/ndf/src/ndf/domains/crossreview/fixer.py`、`plugins/ndf/src/ndf/domains/crossreview/criteria_decide.py`、`plugins/ndf/src/ndf/domains/crossreview/cli.py`、`plugins/ndf/src/ndf/domains/crossreview/settings.py`、`plugins/ndf/skills/design/references/design-template.md`、`plugins/ndf/skills/pr/SKILL.md`、`plugins/ndf/skills/requirements-design/SKILL.md`、`plugins/ndf/skills/development-workflow/references/approval-request.md`、`plugins/ndf/skills/decision-request/SKILL.md`、`plugins/ndf/skills/document-style/SKILL.md`、`plugins/ndf/skills/document-rebuild/SKILL.md` |
 
 ## 未確認のまま残ること
 

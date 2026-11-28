@@ -31,6 +31,7 @@
 | `src/ndf/core/issue_docs.py`、`src/ndf/domains/docrebuild/drive.py` | 要求仕様のコピーの名前の形を `issue_docs.py` の 1 か所にする | 5 |
 | `src/ndf/domains/crossreview/drive.py`、`src/ndf/domains/crossreview/fixer.py` | 小見出しの渡し分けと、要求仕様のコピーの扱いの指示 | 5・6 |
 | `contracts/data/review-criteria.json` | 要求仕様のコピーへの指摘の扱いの文 | 6 |
+| `src/ndf/domains/crossreview/cli.py`、`src/ndf/domains/crossreview/settings.py` | 解決した対象のリポジトリを起動の引数に持たせる | 6 |
 | `src/ndf/domains/crossreview/criteria_decide.py` | 上の文を読み出す関数。指摘の基準の表を読むのがこのモジュールで、`fixer.py` から表を直接読まないため（今の `fixer_ci_only` と同じ形） | 6 |
 | `skills/design/references/design-template.md`、`skills/pr/SKILL.md`、`skills/requirements-design/SKILL.md`、`skills/development-workflow/references/approval-request.md`、`skills/decision-request/SKILL.md`、`skills/document-style/SKILL.md` | 小見出しを指す指示を足す | 7 |
 | `tests/contracts/test_writing.py`、`tests/domains/records/test_reading.py`、`tests/worker/test_rules.py`、`tests/domains/crossreview/test_crossreview_documents.py`（足す） | 理由は、設計書の「テスト設計」の渡し分けと決定 7 をテストで確かめるためである | 1・3〜6 |
@@ -105,10 +106,12 @@
   - `src/ndf/domains/crossreview/criteria_decide.py`
   - `src/ndf/domains/crossreview/fixer.py`
   - `src/ndf/domains/crossreview/drive.py`
+  - `src/ndf/domains/crossreview/cli.py`
+  - `src/ndf/domains/crossreview/settings.py`
   - `tests/domains/crossreview/test_crossreview_documents.py`
-- **変更内容:** 決定 7 の扱い（詳細設計の「cross-review の指示」の手順と、`needs_user` で返す場合）を `review-criteria.json` に置き、PR の変更に要求仕様のコピーがあるときだけ修正担当の指示に足す。JSON の `summary` にも、足したキーの説明を書く
+- **変更内容:** 決定 7 の扱い（詳細設計の「cross-review の指示」の手順と、`needs_user` で返す場合）を `review-criteria.json` に置き、PR の変更に要求仕様のコピーがあるときだけ修正担当の指示に足す。JSON の `summary` にも、足したキーの説明を書く。コピーがあるときは、解決した対象のリポジトリを修正担当への指示の 1 行目に入れる（`cli.py` が解決し、`RunConfig.repo` で渡す）
 - **満たす受け入れ条件:** 5（決定 7。受け入れ条件には対応する番号が無い）
-- **進め方:** 失敗するテスト → 通す最小実装 → 整理。コピーがあるときだけ指示に入ることを見る
+- **進め方:** 失敗するテスト → 通す最小実装 → 整理。コピーがあるときだけ扱いの文と対象のリポジトリが指示に入ることを見る
 
 ### Task 7: 手順書から小見出しを指す
 
