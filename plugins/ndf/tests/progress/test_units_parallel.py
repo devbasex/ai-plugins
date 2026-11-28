@@ -479,6 +479,23 @@ def test_a_unit_merged_before_the_run_holds_its_dependents_until_it_is_taken_in(
     assert not got.failures and not got.waiting
 
 
+def test_a_take_in_that_goes_over_the_limit_during_the_read_is_not_tried_again(tmp_path):
+    (tmp_path / "ingest.json").write_text(json.dumps({unit_key(3, "A"): {"sha": "A", "merged_at": -3585}}), encoding="utf-8")
+    fake = Waiting(tmp_path, [_unit("A"), _unit("B")], queue=["B"], states={"B": [MERGED]}, visible={"A": 10**9})
+    read = fake.read
+
+    def slow_read(numbers):
+        fake.now += 10
+        return read(numbers)
+
+    fake.read = slow_read
+
+    got = fake.flow(landed=["A"])
+
+    assert [t for t, names in fake.advances if "A" in names] == [0]
+    assert [(u.name, e.kind) for u, e in got.failures] == [("A", "ci_pending")]
+
+
 def test_the_wait_for_a_take_in_is_counted_from_the_recorded_time(tmp_path):
     (tmp_path / "ingest.json").write_text(json.dumps({unit_key(3, "A"): {"sha": "A", "merged_at": -3590}}), encoding="utf-8")
     units = [_unit("A"), _unit("w4", issue=4, whole=True)]

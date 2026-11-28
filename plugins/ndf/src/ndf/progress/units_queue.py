@@ -163,11 +163,16 @@ class Board:
         self._arm()
         return True
 
-    def taken(self, key: str) -> None:
-        """作業場所へ反映できた単位を一覧と記録から消す。"""
-        self.ingest.pop(key, None)
+    def taken(self, *keys: str) -> None:
+        """作業場所へ反映できた単位を一覧と記録から消す。記録の読み書きは、単位の数によらずそれぞれ 1 回までである。"""
+        if not keys:
+            return
         held = self._ingest_records()
-        if held.pop(key, None) is not None:
+        found = False
+        for key in keys:
+            self.ingest.pop(key, None)
+            found = held.pop(key, None) is not None or found
+        if found:
             self._write_ingest(held)
 
     def _ingest_records(self) -> dict[str, Any]:

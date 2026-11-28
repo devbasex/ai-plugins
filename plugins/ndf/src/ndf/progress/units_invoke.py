@@ -503,10 +503,7 @@ def _to_take_in(
     含む単位は反映を通らないので、反映待ちの記録（前の起動の後に手元へ入ったもの）をここで消す。
     """
     held = Git(ctx.sprint).contained((p.merge_sha for p in done.values()), "HEAD")
-    board = units_queue.Board(watching)
-    for key, pull in done.items():
-        if pull.merge_sha in held:
-            board.taken(key)
+    units_queue.Board(watching).taken(*(k for k, p in done.items() if p.merge_sha in held))
     return {k: p for k, p in done.items() if p.merge_sha and p.merge_sha not in held}
 
 
@@ -586,7 +583,7 @@ def advance(ctx: Context, pulls: Mapping[str, github_pulls.MergedPull]) -> froze
     g = Git(ctx.sprint)
     tip = _fetch_sprint(g, ctx)
     head = _catch_up_to(g, ctx, known, tip)
-    reached = g.contained((p.merge_sha for p in known), head)
+    reached = {head} | g.contained((p.merge_sha for p in known if p.merge_sha != head), head)
     taken = frozenset(k for k, p in pulls.items() if not p.merge_sha or p.merge_sha in reached)
     if g.contained((p.merge_sha for k, p in pulls.items() if k not in taken), tip):
         _check_sprint_branch(g, ctx)
@@ -964,7 +961,7 @@ def _catch_up_to(g: Git, ctx: Context, landed: Sequence[github_pulls.MergedPull]
     if newest is not None and (tip == head or g.is_ancestor(head, tip)):
         target, number = tip, newest.number
     else:
-        in_tip = g.contained((p.merge_sha for p in landed), tip)
+        in_tip = g.contained((p.merge_sha for p in landed if p.merge_sha != head), tip)
         for pull in landed:
             sha = pull.merge_sha
             if sha in in_tip and sha != target and g.is_ancestor(target, sha):

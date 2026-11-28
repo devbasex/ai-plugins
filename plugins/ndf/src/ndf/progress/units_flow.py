@@ -350,14 +350,14 @@ class _Flow:
             return
         for key in [k for k in self.board.queued if self.board.expired(k)]:
             self._expired_in_queue(key, self.board.queued.pop(key).number)
-        for key in [k for k in self.board.ingest if self.board.expired(k)]:
-            self._expired_in_ingest(key, self.board.ingest.pop(key))
+        self._drop_expired_ingest()
         if not self.board.read_due():
             self.board.rest()
             return
         states = self.board.read()
         for key in sorted(states, key=self.order.position.__getitem__):
             self._apply(key, states[key])
+        self._drop_expired_ingest()  # 問い合わせと打ち直しの間に上限を超えた反映待ちは、反映し直さない
         self.take_in(retry=True)
         self.board.schedule(states)
 
@@ -392,6 +392,11 @@ class _Flow:
         wait = self.board.resets_after_deadline(key)
         kind = github_merge.MERGE_QUEUE_PENDING if wait is None else "infra_wait"
         self.failures[key] = UnitsStopped(kind, detail, retry_after=wait)
+
+    def _drop_expired_ingest(self) -> None:
+        """上限を超えた反映待ちを外して失敗にする。"""
+        for key in [k for k in self.board.ingest if self.board.expired(k)]:
+            self._expired_in_ingest(key, self.board.ingest.pop(key))
 
     def _expired_in_ingest(self, key: str, pull: github_pulls.MergedPull) -> None:
         """反映を待つ上限を超えたマージを失敗にする。"""
