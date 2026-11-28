@@ -181,6 +181,7 @@ def test_the_comment_mark_in_an_attribute_does_not_hide_the_following_criteria(v
         '<details><!--\n\n--> <!-- 注記\n--> <span title="説明\n<!-- 補足">本文</span>',
         '<!-- 注 --> <span title="閉じ記号 --> の例\n<!-- 開き記号の例">本文</span>',
         "<details><!--\n\n--> `\n~~~markdown\n<!-- `\n~~~",
+        '<!-- 注\n--> `<span title="` の例 <span title="\n補足\n<!-- 記号の例">本文</span>',
     ],
 )
 def test_the_comment_mark_in_a_multiline_attribute_does_not_hide_the_following_criteria(block: str) -> None:
@@ -215,9 +216,9 @@ def test_the_lines_of_a_long_attribute_are_searched_once(monkeypatch: pytest.Mon
     pattern = inputs_decide._UNFINISHED_TAG
 
     class Counting:
-        def search(self, text: str):
-            searched.append(len(text))
-            return pattern.search(text)
+        def match(self, text: str, pos: int):
+            searched.append(len(text) - pos)
+            return pattern.match(text, pos)
 
     monkeypatch.setattr(inputs_decide, "_UNFINISHED_TAG", Counting())
     body = '<!-- 注 --> <span title="説明\n' + ' a" b="説明\n' * 100 + '<!-- 記号の例">本文</span>\n\n## 後'

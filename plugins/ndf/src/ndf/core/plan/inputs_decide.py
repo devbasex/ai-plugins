@@ -163,16 +163,14 @@ def _scan_line(
     return kept, head, inside, closed
 
 
-def _unfinished_tag(text: str) -> Optional[str]:
-    """`text` が閉じていないタグで終わるとき、続きの行の判定に足りる短い書き出し。閉じていれば None。
+def _unfinished_tags(text: str) -> set[str]:
+    """`text` の末尾で閉じていないタグの候補すべての、続きの行の判定に足りる短い書き出し。候補が無ければ空。
 
-    次の行は `書き出し + "\\n" + 行` で判定する。読み終えた行を読み直さない。
+    どの `<` が本物のタグの開きかは続きの行まで読むまで決まらない（コード表記の中の書き方の例もある）ので、
+    すべての開始位置の候補を残す。次の行は `書き出し + "\\n" + 行` で判定する。読み終えた行を読み直さない。
     """
-    found = _UNFINISHED_TAG.search(text)
-    if not found:
-        return None
-    equals, value = found.groups()
-    return "<a b" + (equals or "") + (value or "")[:1]
+    found = (_UNFINISHED_TAG.match(text, mark.start()) for mark in re.finditer("<", text))
+    return {"<a b" + (tag[1] or "") + (tag[2] or "")[:1] for tag in found if tag}
 
 
 def _breaks_block(state: StateBlock, line: int, end: int) -> bool:
@@ -226,10 +224,10 @@ def _holding_comment(rule: Callable[[StateBlock, int, int, bool], bool]) -> Call
 
         def read_after(at: int, tail: str, spans_of: Callable[[str], list[tuple[int, int]]]) -> None:
             nonlocal reach
-            parts, head, stop = [tail], _unfinished_tag(tail), at + 1
-            while head is not None and stop < end and not _breaks_block(state, stop, end):
+            parts, heads, stop = [tail], _unfinished_tags(tail), at + 1
+            while heads and stop < end and not _breaks_block(state, stop, end):
                 parts.append(full(stop))
-                head = _unfinished_tag(f"{head}\n{parts[-1]}")
+                heads = {found for head in heads for found in _unfinished_tags(f"{head}\n{parts[-1]}")}
                 stop += 1
             text = "\n".join(parts)
             if "<!--" not in text:
