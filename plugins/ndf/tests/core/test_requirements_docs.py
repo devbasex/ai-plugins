@@ -141,6 +141,30 @@ def test_the_fences_in_comments_are_parsed_once(opening: str, monkeypatch: pytes
     assert len(parsed) == 1
 
 
+@pytest.mark.parametrize(
+    "opening, closing",
+    [("<details><!--", "--> `<!--`"), ("<details><!--", "--> \\<!--"), ("文\n      <!-- 前置き --> <!--", "-->")],
+)
+def test_the_comment_ends_at_its_close(opening: str, closing: str) -> None:
+    body = f"- [ ] 甲\n\n{opening}\n\n```\n{closing}\n\n- [ ] 乙\n"
+    assert [c.text.split("\n")[0] for c in rd.criteria_of(_doc_text(criteria=body))] == ["甲", "乙"]
+
+
+def test_a_comment_line_inside_a_paragraph_does_not_change_the_digest() -> None:
+    rest = "\n      a\n        b"
+    assert rd.criterion_digest(f"- [ ] 甲\n      <!-- メモ -->{rest}") == rd.criterion_digest(f"- [ ] 甲{rest}")
+
+
+@pytest.mark.parametrize("body", ["甲\n      <!--\n\nx\n-->", "甲 <!-- a --> と\n      <!--\n\n-->"])
+def test_a_paragraph_is_parsed_inline_once(body: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    parsed: list[str] = []
+    parse = inputs_decide._INLINE.inline.parse
+    monkeypatch.setattr(inputs_decide._INLINE.inline, "parse", lambda src, *rest: parsed.append(src) or parse(src, *rest))
+    list(inputs_decide.outside_fences(body.split("\n")))
+
+    assert len(parsed) == 1
+
+
 def test_a_comment_line_before_the_code_does_not_change_the_digest() -> None:
     code = "\n      a\n      b"
     assert rd.criterion_digest(f"- [ ] 甲\n<!-- メモ -->{code}") == rd.criterion_digest(f"- [ ] 甲{code}")
