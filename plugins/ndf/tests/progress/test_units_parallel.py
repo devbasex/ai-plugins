@@ -492,8 +492,28 @@ def test_a_take_in_that_goes_over_the_limit_during_the_read_is_not_tried_again(t
 
     got = fake.flow(landed=["A"])
 
-    assert [t for t, names in fake.advances if "A" in names] == [0]
+    # 上限を超えた A は、B の反映に含めて確かめるだけで、取り込まれていなければ失敗のまま
+    assert [(t, sorted(names)) for t, names in fake.advances if "A" in names] == [(0, ["A"]), (20, ["A", "B"])]
     assert [(u.name, e.kind) for u, e in got.failures] == [("A", "ci_pending")]
+
+
+def test_an_overdue_merge_taken_in_with_a_new_merge_is_no_longer_a_failure(tmp_path):
+    (tmp_path / "ingest.json").write_text(json.dumps({unit_key(3, "A"): {"sha": "A", "merged_at": -3585}}), encoding="utf-8")
+    units = [_unit("A"), _unit("B"), _unit("C", "A")]
+    fake = Waiting(tmp_path, units, queue=["B"], states={"B": [MERGED]}, visible={"A": 15})
+    read = fake.read
+
+    def slow_read(numbers):
+        fake.now += 10
+        return read(numbers)
+
+    fake.read = slow_read
+
+    got = fake.flow(landed=["A"])
+
+    assert not got.failures and not got.waiting
+    assert fake.names("start") == ["B", "C"]
+    assert json.loads((tmp_path / "ingest.json").read_text()) == {}
 
 
 def test_the_wait_for_a_take_in_is_counted_from_the_recorded_time(tmp_path):

@@ -233,6 +233,7 @@ class _Flow:
         self.running: dict[Any, tuple[str, Started]] = {}
         self.board = units_queue.Board(ops.watching)
         self.fresh: dict[str, github_pulls.MergedPull] = {}  # マージが分かり、まだ作業場所へ反映していない単位
+        self.overdue: dict[str, github_pulls.MergedPull] = {}  # 反映を待つ上限を超えて失敗にしたマージ
         self.resent: set[str] = set()  # この起動で `ndf ci merge` を打ち直した単位
         self.stuck: set[str] = set()  # 打ち直しの後にマージを確かめられずに止まった単位（PR がキューに残りうる）
         self.broken: Optional[UnitsStopped] = None
@@ -323,16 +324,24 @@ class _Flow:
         return True
 
     def take_in(self, retry: bool = False) -> bool:
-        """分かったマージ（`retry` なら反映待ちも）を 1 回でまとめて作業場所へ反映する。反映を試したら真。"""
+        """分かったマージ（`retry` なら反映待ちも）を 1 回でまとめて作業場所へ反映する。反映を試したら真。
+
+        上限を超えたマージだけでは反映し直さないが、ほかのマージの反映に含めて確かめ、取り込まれていれば失敗を取り消す。
+        """
         batch = {**(self.board.ingest if retry else {}), **self.fresh}
         self.fresh.clear()
         if not batch or self.broken is not None:
             return False
         try:
-            taken = set(self.ops.watching.advance(batch))
+            taken = set(self.ops.watching.advance({**self.overdue, **batch}))
         except UnitsStopped as exc:
             self.broken = exc
             return True
+        for key in [k for k in self.overdue if k in taken]:
+            del self.overdue[key]
+            del self.failures[key]
+            self.board.taken(key)
+            self.order.finish(key)
         for key, pull in batch.items():
             if key in taken:
                 self.board.taken(key)
@@ -400,6 +409,7 @@ class _Flow:
 
     def _expired_in_ingest(self, key: str, pull: github_pulls.MergedPull) -> None:
         """反映を待つ上限を超えたマージを失敗にする。"""
+        self.overdue[key] = pull
         detail = f"PR #{pull.number} のマージ {pull.merge_sha} を、上限の時間内にスプリントの作業場所へ反映できない"
         self.failures[key] = UnitsStopped(github_merge.MERGE_QUEUE_PENDING, detail)
 
