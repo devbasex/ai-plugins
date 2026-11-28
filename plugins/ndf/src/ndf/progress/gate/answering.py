@@ -88,7 +88,8 @@ def github_observe(cwd: Path, root: Path, hub: Optional[Callable[[], GitHub]] = 
 
     def observe(q: Question, *, material: bool = True, config: bool = False) -> Target:
         # 渡された読み手が無ければ、毎回読み直す
-        got = (held if held is not None else TargetReader(shared_hub(cwd, hub))).read(q, config=material or config).target
+        reading = (held if held is not None else TargetReader(shared_hub(cwd, hub))).read(q, config=material or config)
+        got = replace(reading.target, merged=reading.merged)
         if not material:
             return got
         path = material_path(root, replace(q, target=Target(got.head)))

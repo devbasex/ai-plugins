@@ -18,6 +18,7 @@ from result_json import last_result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, gate, invoke, model, run, store
 from ndf.progress.gate import answering, asking, finishing, rechecking, release, targets
+from ndf.progress.run_view import APPROVAL_POSTING
 
 ISSUE = 4520
 DESIGN = "設計"
@@ -196,6 +197,7 @@ def test_a_head_merged_after_the_approval_is_asked_again(repo, st, env, capsys):
     out = _next(st, tid, repo, env)
 
     assert out["status"] == "gate" and out["metrics"]["gate"]["id"] != shown["metrics"]["gate"]["id"], out
+    assert any("マージされた" in w and merge_hub.OTHER in w for w in out["warnings"]), out
     assert _state(st, tid, DESIGN) == "running" and _state(st, tid, DETAIL) == "pending"
 
 
@@ -720,6 +722,20 @@ def test_a_rejection_voids_an_approval_whose_answer_was_not_recorded(repo, st, e
     assert [r.unconfirmed for r in approval_decide.stage_revocations(run.read(st, tid), DESIGN)] == [True]
 
 
+def test_a_posted_rejection_stops_the_merge_from_reading_the_earlier_approval(repo, st, env, capsys):
+    """却下の投稿を試みて回答の確定に失敗しても、先の承認のコミットをマージに渡さない。"""
+    tid = _held_design(st, capsys, repo, env)
+    _answer(st, tid, repo, env, _next(st, tid, repo, env))
+    assert gate.approved_head(run.read(st, tid), "design") == merge_hub.HEAD
+
+    payload = {"rejecting": "design", "record": "r-1"}
+    run._write(st, tid, model.EventDraft(APPROVAL_POSTING, run.CONDUCTOR, DESIGN, payload=payload, rev=1))
+
+    v = run.read(st, tid)
+    assert gate.approved_head(v, "design") is None
+    assert run.approved_seen(run.StageAnswers(v, DESIGN), st.root) is None
+
+
 def test_an_approval_is_written_again_after_a_rejection_of_the_same_target(repo, st, env, capsys):
     """未確定の承認の後に別の識別子の却下があれば、打ち直した承認を書き、PR の判定が承認になる。"""
     tid = _new(capsys)
@@ -777,5 +793,6 @@ def test_the_verifier_takes_the_reply_once_after_dropping_the_earlier_reads(st, 
         lambda: calls.append("take") or "書いた",
     )
 
-    assert (verify(tid, None), verify(tid, None)) == ("書いた", None)
+    v = run.read(st, tid)
+    assert (verify(v, None), verify(v, None)) == ("書いた", None)
     assert calls == ["forget", "take", "forget"]

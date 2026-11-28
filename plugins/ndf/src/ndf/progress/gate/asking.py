@@ -55,6 +55,7 @@ class Target:
     反映され得るか（判定の部品の `reaches_production`）。マージの承認の証跡はこの組に結び付ける（#4409 の決定 7）。
     `presentation` は資料を書いた（出し直した）ときに発行した提示の識別子（`write_material`）。分からなければ None。
     `body`・`title` は PR の本文と題の sha256（承認の質問の文は題から作る。#4446）。分からなければ None。
+    `merged` は今の対象を読んだときだけ入る。
     """
 
     head: Optional[str] = None
@@ -66,6 +67,8 @@ class Target:
     presentation: Optional[str] = None
     body: Optional[str] = None
     title: Optional[str] = None
+    # 今読んだ PR がマージ済みか。見た対象の中身ではないので、記録にも比較にも使わない
+    merged: bool = field(default=False, compare=False)
 
     def binding(self) -> Optional[merge_approval.MergeTarget]:
         """承認の対象の 4 つの値がそろえば `merge_approval.MergeTarget`、欠ければ None。"""

@@ -160,7 +160,7 @@ def consume_held(d: Hands, v: View, m: Move) -> Optional[dict[str, Any]]:
     if got.differences:
         why = "承認の後に対象が変わった: " + " / ".join(got.differences)
         if got.merged:
-            why = f"{why}（承認と違う内容がマージされた。今の head {got.head}）"
+            why += approval_decide.merged_otherwise(got.head)
         wait = {"step": m.step.id, "status": "waiting", "report": None, "generation": m.progress.generation, "reason": why}
         # 取り消してから境界を進めるまでは、回答の送り直しが取り消した承認を PR へ戻さないように、回答と共有する排他を持つ
         with store.approval_lock(d.st, v.machine_id):
@@ -192,6 +192,9 @@ def approved_seen(answers: StageAnswers, root: Path) -> Optional[dict[str, Any]]
         return None
     p = event_payload(ev)
     if closes_only(p) or approval_decide.saw_another_pr(answers.view, answers.stage, p):
+        return None
+    rows = [e for e in answers.view.events if e.draft.row_key == answers.stage]
+    if approval_decide.rejection_posted_after(rows, p.get("gate"), ev.seq):
         return None
     seen = p.get("seen")
     if not isinstance(seen, dict):

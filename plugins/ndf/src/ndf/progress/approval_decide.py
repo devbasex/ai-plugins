@@ -26,6 +26,11 @@ class Standing(NamedTuple):
     head: Optional[str] = None
 
 
+def merged_otherwise(head: Optional[str]) -> str:
+    """承認と違う対象になった PR がマージ済みのときに、質問し直す理由へ足す警告。"""
+    return f"（承認と違う内容がマージされた。今の head {head}）"
+
+
 # 照らす口（ステートマシン・承認ゲートの区分・対象の PR・承認の回答の事象）
 StandingOf = Callable[[View, Optional[str], Optional[int], model.Event], Standing]
 

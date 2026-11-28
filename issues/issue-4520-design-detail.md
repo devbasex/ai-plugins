@@ -54,7 +54,7 @@ docs/                    glossary/glossary.json  glossary/ndf-workflow.md  gloss
 | `progress/command.py` | 変更 | サブコマンドのうち、移さずに残るもの | `model` | `_cmd_finish`・`_cmd_check`・`_cmd_retry` を `gate/finishing.py` へ移す |
 | `progress/gate/asking.py` | 変更 | 質問と承認資料 | `run_view` | 新設 `off_wait_question`。変更 `material` |
 | `progress/gate/answering.py` | 変更 | 回答の記録と、回答する対象の読み取り | `asking`・`targets`・`reopening` | 新設 `_find_question`・`_effects`・`_drafts`。変更 `answer`・`_refusal`・`_trail_by`・`_ensure_trail`・`github_observe` |
-| `progress/gate/rechecking.py` | 新設 | 回答を読む前の確かめと、承認ゲートの待ちへの戻し・出し直し | `answering`・`asking`・`targets`・`approval_decide` | `answering.py` から移動: `recheck`・`verifier`・`standing`・`reread`。`recheck` は変更、`verifier`・`standing` は新設 |
+| `progress/gate/rechecking.py` | 新設 | 回答を読む前の確かめと、承認ゲートの待ちへの戻し・出し直し | `answering`・`asking`・`targets`・`approval_decide` | `answering.py` から `recheck` と `reread` を移し、`recheck` を変更する。`verifier` と `standing` を新設する |
 | `progress/gate/records.py` | 変更 | 回答を読む口 | `approval_decide` | 変更 `approved_head`・`answers` |
 | `progress/gate/release.py` | 変更 | リリースのリクエストを出す | `requests` | 変更 `request_release` |
 | `progress/gate/entry.py`・`progress/gate/__init__.py` | 変更 | サブコマンドと引数の登録、`Env` の口の差し込み | `finishing` | `question`・`request-status`・新しい引数の登録 |

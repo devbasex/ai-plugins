@@ -324,9 +324,9 @@ class Env:
     forget: Callable[[], None] = lambda: None
     # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
     revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None
-    # 回答を対象と照らす口（ステートマシンと、読む回答の事象の番号。回答を読まない最初の手は None）。作業の排他の中で打ち、
+    # 回答を対象と照らす口（作業の排他の中で読んだ記録と、読む回答の事象の番号。回答を読まない最初の手は None）。作業の排他の中で打ち、
     # 待ちへ戻したか繰り上げたら理由を返す
-    verify: Callable[[str, Optional[int]], Optional[str]] = lambda _machine_id, _seq: None
+    verify: Callable[[View, Optional[int]], Optional[str]] = lambda _view, _seq: None
 
 
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:
@@ -535,7 +535,7 @@ def _compared_move(d: Drive, first: bool) -> tuple[View, Move]:
         v = read(d.st, d.machine_id)
         m = decide(v)
         seq = m.event.seq if m.action == Action.CONSUME and m.event is not None else None
-        why = d.env.verify(d.machine_id, seq) if first or seq is not None else None
+        why = d.env.verify(v, seq) if first or seq is not None else None
         if why is None:
             return v, m
         d.warn(why)

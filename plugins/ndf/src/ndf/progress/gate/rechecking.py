@@ -121,6 +121,7 @@ class Recheck:
     advancing: bool = True
     checked: Optional[set[int]] = None
     locked: bool = False
+    view: Optional[run.View] = None  # 呼び手が作業の排他の中で読んだ記録。無ければ読む
 
 
 def recheck(
@@ -143,7 +144,7 @@ def recheck(
     設計 PR に結び付けずに記録した設計の承認（#4495 の直しの前のバージョンの承認）は、対象と比べる前に、消費済みでもマージの前なら同じ取り消しで
     待ちへ戻す（`_unbound_approval`・`_reopen_unbound`。#4495）。
     """
-    v = run.read(st, machine_id)
+    v = how.view if how.view is not None else run.read(st, machine_id)
     later = f"。ndf progress next {machine_id} で承認の待ちへ戻す"
     if _unbound_approval(v) is not None:
         return _reopen_unbound(st, machine_id, revoke, how.locked) if how.advancing else UNBOUND_REASON + later
@@ -174,6 +175,9 @@ def recheck(
     if not changed:
         return None
     why = "回答した後に対象が変わった: " + " / ".join(changed)
+    # 手で終えた工程はここで待ちへ戻り `consume_held` に届かないので、マージ済みの警告をここでも足す
+    if m.progress.held_finish is not None and now.merged:
+        why += approval_decide.merged_otherwise(now.head)
     if not how.advancing:
         return why + later
     return why if _send_back(st, v, m, why, revoke, how.locked) else None
@@ -186,22 +190,25 @@ def verifier(
     revoke: Callable[[list[merge_approval.Revocation]], None],
     forget: Callable[[], None],
     take: Callable[[], Optional[str]] = lambda: None,
-) -> Callable[[str, Optional[int]], Optional[str]]:
+) -> Callable[[run.View, Optional[int]], Optional[str]]:
     """`run.Env.verify`: 工程を進める操作の `recheck` を、作業の排他の中で打つ。排他を待つ間や、回答が作業の排他を取らずに
     書かれる間に対象が変わりうるためである。照らす前に読んだ対象を捨て、ここで読んだ結果を後の判定が使う。同じ回答は
     照らし直さない。
 
     `take`（リリースのリクエストへの回答を承認ゲートの回答として書く）は初回に 1 度だけ、照らす前に打つ。`take` が読んだ対象を
-    `recheck` も使い、`take` の知らせと `recheck` の理由をまとめて返す。"""
+    `recheck` も使い、`take` の知らせと `recheck` の理由をまとめて返す。
+
+    `recheck` は呼び手が読んだ記録を使う。`take` が何かを知らせたときは、事象が増えうるので読み直す。"""
     checked: set[int] = set()
     pending = [take]
 
-    def verify(machine_id: str, seq: Optional[int]) -> Optional[str]:
+    def verify(v: run.View, seq: Optional[int]) -> Optional[str]:
         if seq in checked:
             return None
         forget()
         took = pending.pop()() if pending else None
-        why = recheck(st, machine_id, observe, docs_only, revoke, Recheck(checked=checked, locked=True))
+        how = Recheck(checked=checked, locked=True, view=v if took is None else None)
+        why = recheck(st, v.machine_id, observe, docs_only, revoke, how)
         found = [text for text in (took, why) if text is not None]
         if not found:
             return None
