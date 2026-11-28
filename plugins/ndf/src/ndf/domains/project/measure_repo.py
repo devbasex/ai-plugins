@@ -15,7 +15,7 @@ import subprocess
 import time
 import tomllib
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterator, NamedTuple, Optional
+from typing import Any, Callable, NamedTuple, Optional
 
 from ndf.adapters import git
 from ndf.contracts import facts, limits
@@ -238,34 +238,22 @@ def dependencies(tree: Tree) -> dict[str, dict[str, str]]:
     return {s.language: s.read(tree) for s in DEP_SOURCES}
 
 
-def top_level_block(text: str, key: str, strip: Callable[[str], str]) -> Iterator[tuple[int, str]]:
-    """YAML を読まずに字下げで、トップレベルの `<key>:` の中の行を (字下げ, 行) で返す。各行へ先に `strip`（コメントの
-    落とし方）を当て、空になった行は飛ばす。"""
+def compose_services(text: str) -> list[str]:
+    """compose のファイルの `services:` の直下の名前（YAML を読まずに字下げで拾う）。空行と行頭がコメントの行は飛ばす。"""
+    names: list[str] = []
     inside = False
-    for line in (strip(raw) for raw in text.splitlines()):
-        if not line.strip():
+    indent: Optional[int] = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
             continue
         lead = len(line) - len(line.lstrip())
         if lead == 0:
-            inside = line.rstrip() == f"{key}:"
+            inside = line.rstrip() == "services:"
         elif inside:
-            yield lead, line
-
-
-def _drop_comment_line(line: str) -> str:
-    """行頭のコメントの行を空にする（行末のコメントは残す）。"""
-    return "" if line.lstrip().startswith("#") else line
-
-
-def compose_services(text: str) -> list[str]:
-    """compose のファイルの `services:` の直下の名前（YAML を読まずに字下げで拾う）。"""
-    names: list[str] = []
-    indent: Optional[int] = None
-    for lead, line in top_level_block(text, "services", _drop_comment_line):
-        indent = lead if indent is None else indent
-        stripped = line.strip()
-        if lead == indent and stripped.endswith(":"):
-            names.append(stripped[:-1].strip("'\""))
+            indent = lead if indent is None else indent
+            if lead == indent and stripped.endswith(":"):
+                names.append(stripped[:-1].strip("'\""))
     return names
 
 
