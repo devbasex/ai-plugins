@@ -561,13 +561,7 @@ def _start_unit(ctx: Context, unit: Unit, branch: str, ports: Ports) -> units_fl
             units_flow.write_round_record(round_dir, units_flow.STOPPED_HEAD_FILE, g.rev_parse("HEAD") + "\n")
             if got.status != result.OK:
                 raise _unit_stop_of(got.report, "impl が止まった", _ci_note(ctx, got.report))
-        try:
-            report = merge_unit(ctx, branch, worktree, round_dir, ports)
-        except UnitsStopped as exc:
-            # 最新化を必須とするスプリントブランチは、別の単位のマージで古くなった HEAD を断る
-            if exc.kind == "not_ci" and not g.is_ancestor(_fetch_sprint(g, ctx), "HEAD"):
-                raise units_flow.Outdated(exc.kind, exc.detail, retry_after=exc.retry_after) from exc
-            raise
+        report = merge_unit(ctx, branch, worktree, round_dir, ports)
         number = _pr_number(round_dir)
         assert number is not None, "merge_unit は PR の番号が無ければマージせずに止まる"
         return units_flow.unit_item(unit, number, "merged"), github_pulls.MergedPull(number, _merge_sha(report))
@@ -789,6 +783,7 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     """`ndf ci merge` で単位の PR をマージし、結果の種類を `merge.json` に残す。
 
     PR の番号とレビューした HEAD は、同じ回の保存先から読む。どちらかが無ければマージを打たずに止める。
+    head が最新でないので断られ、単位を始め直せば進むときは `units_flow.Outdated` で止める。
     スプリントの作業場所はここでは進めない（次の単位の作業場所はリモートのスプリントブランチから切る。進めるのは `sprint_pr`）。
     """
     number, reviewed = _pr_number(round_dir), units_flow.saved_head(round_dir / units_flow.REVIEWED_HEAD_FILE)
@@ -805,7 +800,13 @@ def merge_unit(ctx: Context, branch: str, worktree: Path, round_dir: Path, ports
     if report is None:
         raise UnitsStopped("bad_report", f"ndf ci merge が結果 JSON を返さない（終了コード {done.returncode}）")
     if not ok:
-        raise _unit_stop_of(report, f"PR #{number} をマージできない")
+        stop = _unit_stop_of(report, f"PR #{number} をマージできない")
+        g = Git(worktree)
+        # 最新化を必須とするスプリントブランチは、別の単位のマージで古くなった HEAD を断る。HEAD がスプリントブランチの HEAD を
+        # 含むのに `behind` なら、始め直しても変わらないので失敗にする
+        if report["metrics"].get("behind") is True and not g.is_ancestor(_fetch_sprint(g, ctx), "HEAD"):
+            raise units_flow.Outdated(stop.kind, stop.detail, retry_after=stop.retry_after)
+        raise stop
     return report
 
 

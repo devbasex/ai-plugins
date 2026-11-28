@@ -422,7 +422,8 @@ def test_independent_units_run_at_the_same_time_and_the_sprint_pr_follows_the_la
     assert _git(w.sprint, "rev-parse", "HEAD") == _git(w.sprint, "rev-parse", "origin/sprint/s1")
 
 
-def test_a_unit_refused_as_behind_the_sprint_branch_is_updated_reviewed_and_merged_again(parallel_world):
+@pytest.mark.parametrize(("behind", "starts"), [(True, [None, "test"]), (False, [None])])
+def test_only_a_unit_refused_as_behind_the_sprint_branch_is_started_again(parallel_world, behind, starts):
     w = parallel_world
     original = w.command
 
@@ -430,7 +431,7 @@ def test_a_unit_refused_as_behind_the_sprint_branch_is_updated_reviewed_and_merg
         if "merge" in argv and "ci" in argv:
             _git(cwd, "fetch", "-q", "origin")
             if _git(cwd, "rev-list", "--count", "HEAD..origin/sprint/s1") != "0":
-                refused = result.stopped("ci", "not_ci", "behind")
+                refused = result.stopped("ci", "not_ci", "断った", metrics={"behind": True} if behind else {})
                 return subprocess.CompletedProcess(argv, 1, json.dumps(refused) + "\n", "")
         return original(argv, cwd, env)
 
@@ -438,10 +439,11 @@ def test_a_unit_refused_as_behind_the_sprint_branch_is_updated_reviewed_and_merg
 
     got = w.run()
 
-    assert got.status == "ok", got.report
-    assert w.order == ["乙", "甲", "issue-4"]
+    # 始め直した単位は、スプリントブランチのマージで HEAD が変わるので、手元のテストから流し直す
     again = [r for r, _ in w.runs if r.name == "impl" and w.name_of(r.overrides["branch"]) == "甲"]
-    assert [r.start for r in again] == [None, "test"]  # スプリントブランチのマージで HEAD が変わるので、手元のテストから流し直す
+    assert [r.start for r in again] == starts
+    assert got.status == ("ok" if behind else "stopped"), got.report
+    assert w.order == (["乙", "甲", "issue-4"] if behind else ["乙", "issue-4"])
 
 
 def test_the_limit_of_one_runs_the_units_one_by_one(parallel_world, monkeypatch):

@@ -103,6 +103,7 @@ def test_merge_proceeds_when_premerge_risk_is_checked() -> None:
     [
         (405, _pull(mergeable_state="dirty"), "base_conflict"),
         (405, _pull(mergeable_state="blocked"), "not_ci"),
+        (405, _pull(mergeable_state="behind"), "not_ci"),
         (405, _pull(mergeable_state="clean"), "unknown"),
         (409, _pull(head=OTHER), "refused"),
     ],
@@ -114,7 +115,7 @@ def test_merge_refusal_is_classified_from_merge_state(status: int, after: dict, 
         ("PUT", f"/repos/{REPO}/pulls/7/merge"): [httpx.Response(status, json={"message": "no"})],
     })  # fmt: skip
     out = _hub(server).merge(7)
-    assert (out.merged, out.kind) == (False, kind)
+    assert (out.merged, out.kind, out.behind) == (False, kind, after["mergeable_state"] == "behind")
 
 
 @pytest.mark.parametrize(("in_queue", "enqueued", "jump"), [(False, 1, False), (False, 1, True), (True, 0, True)])

@@ -554,7 +554,8 @@ def _merged(
             metrics["approved_by"] = approved_by
         return result.result(TOOL, result.OK, outcome.detail, items=_pr_item_list(target.number, outcome.merge_sha), metrics=metrics)
     kind = outcome.kind if outcome.kind is not None else "unknown"
-    return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items)
+    metrics = {"behind": True} if outcome.behind else {}
+    return result.stopped(TOOL, kind, outcome.detail, instance=outcome.head_sha, items=items, metrics=metrics)
 
 
 class _Rejudge:

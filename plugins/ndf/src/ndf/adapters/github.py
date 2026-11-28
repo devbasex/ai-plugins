@@ -809,7 +809,8 @@ class GitHub:
             if queued is not None:
                 return queued
             after = self.pull(number)
-            return MergeOutcome(False, refusal_kind(after, pull.head_sha), str(exc), after.head_sha)
+            kind = refusal_kind(after, pull.head_sha)
+            return MergeOutcome(False, kind, str(exc), after.head_sha, behind=after.merge_state == "behind")
         return MergeOutcome(True, None, f"#{number} を {chosen} で{route.how}マージした", pull.head_sha, landed)
 
     def _enqueue(
