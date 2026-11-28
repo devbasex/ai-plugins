@@ -460,7 +460,8 @@ def _cmd_units(a: argparse.Namespace) -> int:
 
 
 _DESIGN_GATE_HELP = (
-    f"承認ゲートの前の確かめ。{STAGE_INPUT_ENV} に issues、worktree、スプリントブランチを示す branch、レビュー結果の reviewed を渡す。"
+    f"承認ゲートの前の確かめ。{STAGE_INPUT_ENV} に issues、絶対パスの worktree、スプリントブランチ名の branch、"
+    "cross-review run の結果の outputs.reviewed の値を入れた reviewed を渡す。実装計画を省いた課題があれば、その番号を plan_omitted に渡す。"
     "位置引数、--issue、--omitted は指定しない。作業場所の HEAD が reviewed.head と一致し、そのコミットの検査を通ると "
     "outputs.design_units を返す"
 )
