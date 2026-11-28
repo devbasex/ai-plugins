@@ -18,7 +18,14 @@ from ndf.adapters.github import GitHub, GitHubError
 from ndf.contracts import limits, result
 from ndf.core import merge_approval
 from ndf.progress import approval_decide, command, definition, model, reopening, run, stages, store
-from ndf.progress.gate.answering import forget_posted, shared_hub, standing, waiting_revocations
+from ndf.progress.gate.answering import (
+    forget_posted,
+    revoked_records,
+    shared_hub,
+    standing,
+    waiting_revocations,
+    with_unrecorded,
+)
 from ndf.progress.gate.targets import TargetReader
 from ndf.progress.run_view import FINISH_HELD
 from ndf.progress.records import github_records, sync_records
@@ -74,18 +81,23 @@ def _reopen_stage(a: argparse.Namespace, cwd: Path, st: store.Store) -> dict[str
 
 
 def _append_reopen(a: argparse.Namespace, st: store.Store, revoke: reopening.Revoke) -> tuple[reopening.Reopen, list[int]]:
-    """承認を取り消してから開き直しを追記する。追記がぶつかって打ち直すときは、取り消す対象が変わった場合だけ PR を読み直す。"""
+    """承認を取り消してから開き直しを追記する。追記がぶつかって打ち直すときは、取り消す対象が変わった場合だけ PR を読み直す。
+
+    開き直す工程の承認には、投稿しただけで回答が DB に記録されていないものも含める（`with_unrecorded`）。"""
     attempts = command.append_attempts()
     revoked: list[merge_approval.Revocation] = []
     for attempt in range(1, attempts + 1):
         v = run.read(st, a.machine_id)
         planned = reopening.plan_reopen(v, a.stage, later=a.later, reason=a.reason, trigger=_trigger(a))
+        planned = replace(planned, revoke=with_unrecorded(st.root, v, planned.stages, planned.revoke))
         if planned.revoke != revoked:
             reopening.revoke_approvals(planned, revoke)
             revoked = planned.revoke
         try:
             with store.transaction(st) as conn:
-                return planned, store.append_events(conn, a.machine_id, planned.drafts, v.events[-1].seq)
+                seqs = store.append_events(conn, a.machine_id, planned.drafts, v.events[-1].seq)
+            forget_posted(st.root, a.machine_id, revoked_records(planned.revoke))
+            return planned, seqs
         except store.Conflict:
             if attempt == attempts:
                 raise
@@ -298,7 +310,7 @@ def _append_hand_finish(a: argparse.Namespace, cwd: Path, st: store.Store, read:
             raise store.Conflict("排他を待つ間に事象が増えた")  # 確定した回答を読み直して、取り消す前に決め直す
         revoked = waiting_revocations(st.root, v, a.stage)
         revoker(shared_hub(cwd), "回答待ちを書かない")(revoked)
-        forget_posted(st.root, a.machine_id, revoked)
+        forget_posted(st.root, a.machine_id, revoked_records(revoked))
         return append()
 
 

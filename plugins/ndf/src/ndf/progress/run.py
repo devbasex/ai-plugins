@@ -324,6 +324,8 @@ class Env:
     forget: Callable[[], None] = lambda: None
     # 承認の境界が移る前に、PR の証跡の承認を取り消す口（GitHub へ書くのは `ndf.progress.gate`）
     revoke: Callable[[list[merge_approval.Revocation]], None] = lambda _revocations: None
+    # 読む直前の承認の回答（ステートマシンと事象の番号）を、作業の排他の中で対象と照らす口。待ちへ戻したか繰り上げたら理由を返す
+    verify: Callable[[str, int], Optional[str]] = lambda _machine_id, _seq: None
 
 
 def resync(st: store.Store, machine_id: str, cwd: Path, env: Env) -> dict[str, Any]:

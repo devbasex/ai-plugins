@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -500,7 +501,7 @@ def test_a_refused_finish_and_a_non_advancing_recheck_revoke_nothing(repo, st, e
     assert _finish(capsys, repo, tid, DESIGN, {"design_pr": DESIGN_PR})["cause"]["kind"] == "refused"
     env.reader.forget()
     observe = answering.github_observe(repo, st.root, reader=env.reader)
-    why = gate.recheck(st, tid, observe, revoke=lambda r: pytest.fail("取り消した"), advancing=False)
+    why = gate.recheck(st, tid, observe, revoke=lambda r: pytest.fail("取り消した"), how=answering.Recheck(advancing=False))
 
     assert why is not None and "ndf progress next" in why
     assert env.hub.dequeued == [] and _kinds(st, tid, DESIGN) == before
@@ -588,3 +589,42 @@ def test_a_hand_finish_revokes_an_unrecorded_approval_after_the_material_was_pre
     target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
     rows = merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer())
     assert out["status"] == "ok" and merge_approval.merge_judgment(rows, target) is None, out
+
+
+def test_a_reopen_revokes_an_approval_whose_answer_was_not_recorded(repo, st, env, capsys, monkeypatch):
+    monkeypatch.setattr(finishing, "github_records", lambda cwd: lanes._NoRecords())
+    tid = _held_design(st, capsys, repo, env)
+    _fail_answer(st, tid, repo, env, _next(st, tid, repo, env), answering.github_post(repo, hub=lambda: env.hub))
+
+    finishing.main(["retry", tid, DESIGN, "--reason", "直す", "--later", "reopen"])
+
+    out = last_result(capsys.readouterr().out)
+    target = merge_approval.MergeTarget(merge_hub.REPO, DESIGN_PR, "main", merge_hub.HEAD)
+    rows = merge_approval.merge_rows(env.hub, DESIGN_PR, env.hub.viewer())
+    assert out["status"] == "ok" and merge_approval.merge_judgment(rows, target) is None, out
+    assert env.hub.dequeued == [DESIGN_PR] and answering.read_posted(st.root, tid) == []
+
+
+def test_a_recorded_approval_leaves_no_posted_note(repo, st, env, capsys):
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+
+    _answer(st, tid, repo, env, _next(st, tid, repo, env), post=answering.github_post(repo, hub=lambda: env.hub))
+
+    assert env.hub.comments_of and answering.read_posted(st.root, tid) == []
+
+
+def test_an_answer_written_after_the_recheck_is_compared_before_it_is_consumed(repo, st, env, capsys):
+    """回答は作業の排他を取らないので、`recheck` の後に書かれた回答は `consume` が対象と照らす。"""
+    tid = _new(capsys)
+    _before_design(capsys, repo, tid)
+    _answer(st, tid, repo, env, _next(st, tid, repo, env))
+    env.hub.files["develop"] = env.hub.files["main"]
+    env.hub.pulls_of[DESIGN_PR] = merge_hub.pull(DESIGN_PR, base="develop")
+    observe = answering.github_observe(repo, st.root, reader=env.reader)
+    verify = answering.verifier(st, observe, answering.never_docs_only, lambda r: None, env.reader.forget, set())
+
+    lanes.turn(st, tid, repo, replace(env.env, verify=verify))
+
+    m = run.decide(run.read(st, tid))
+    assert (m.action, m.stage.name) == (run.Action.GATE, DESIGN)

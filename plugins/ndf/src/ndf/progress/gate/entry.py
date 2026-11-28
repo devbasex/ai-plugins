@@ -46,6 +46,7 @@ from ndf.progress.gate.answering import (
     Answer,
     Observe,
     Post,
+    Recheck,
     answer,
     git_docs_only,
     github_observe,
@@ -56,6 +57,7 @@ from ndf.progress.gate.answering import (
     reread,
     shared_hub,
     standing,
+    verifier,
 )
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
@@ -603,8 +605,10 @@ def _progress(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Option
     took = _took(st, a.machine_id, seen, github_post(cwd, hub) if observe is None else no_post)
     revoke = finishing.revoker(hub, "承認の待ちを書き直さない")
     # 承認の取り消しと待ちの書き直しは、工程を進める操作だけで行う
-    why = recheck(st, a.machine_id, seen, git_docs_only(cwd), revoke, a.action in ("next", "work"))
-    out = run.COMMANDS[a.action](run.with_env(a, _drive_env(st, reader, revoke)), cwd, st)
+    docs_only, checked = git_docs_only(cwd), set()
+    why = recheck(st, a.machine_id, seen, docs_only, revoke, Recheck(a.action in ("next", "work"), checked))
+    env = replace(_drive_env(st, reader, revoke), verify=verifier(st, seen, docs_only, revoke, reader.forget, checked))
+    out = run.COMMANDS[a.action](run.with_env(a, env), cwd, st)
     if a.action in ("wait", "work"):
         reader.forget()  # 待ちと作業の間に PR が変わりうるので、承認資料は読み直した対象で作る
     return command.with_warnings(present(st, a.machine_id, cwd, out, seen), before=[w for w in (took, why) if w])
@@ -623,7 +627,9 @@ def _cmd_reread(a: argparse.Namespace, cwd: Path, st: store.Store, observe: Opti
     """`ndf progress reread <ID>`: 承認の前の確認をやり直し、承認ゲートの待ちを今の対象（head・本文・題）で出し直す（#4446）。"""
     seen = observe if observe is not None else github_observe(cwd, st.root)
     hub = shared_hub(cwd)
-    out = reread(st, a.machine_id, cwd, _drive_env(st, TargetReader(hub), finishing.revoker(hub, "承認の待ちを書き直さない")))
+    reader, revoke = TargetReader(hub), finishing.revoker(hub, "承認の待ちを書き直さない")
+    verify = verifier(st, seen, git_docs_only(cwd), revoke, reader.forget, set())
+    out = reread(st, a.machine_id, cwd, replace(_drive_env(st, reader, revoke), verify=verify))
     return present(st, a.machine_id, cwd, out, seen)
 
 
