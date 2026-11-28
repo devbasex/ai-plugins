@@ -6,6 +6,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from ndf.core.converge import oscillation
 from ndf.domains.crossreview import carry, cli, drive, leftover_decide, prior_decide, report_decide, store, threads
 from ndf.domains.crossreview import finish_decide as fin
@@ -488,6 +490,29 @@ def test_issue_3780_an_unconfirmed_url_is_published_and_restored_apart_from_a_co
     journal.carry(prior_decide.recorded([_record([row], {}, "2026-11-20T00:00:00Z")])[0])
     [carried] = journal.rows.values()
     assert carried["prior_issue"] == url and "issue" not in carried
+
+
+def test_issue_3780_an_unconfirmed_url_comes_back_through_a_thread() -> None:
+    url = "https://github.com/o/r/issues/100"
+    row = {**_OPEN_NO_THREAD, "prior_issue": url}
+    _, marks = prior_decide.recorded([_record([row], {"r1-1": {"comment": 77}}, "2026-11-20T00:00:00Z")])
+    thread = prior_decide.Thread(77, OPENING, False, "doc.md", None, True)
+    [carried] = prior_decide.carried([thread], set(), marks)
+    assert carried.prior_issue == url and carried.issue is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://token@github.com/o/r/issues/100", id="credentials"),
+        pytest.param("https://github.com/o/r/issues/100?token=x", id="query"),
+        pytest.param("https://github.com/other/r/issues/100", id="other-repo"),
+    ],
+)
+def test_issue_3780_only_an_issue_url_of_the_target_is_published(url: str) -> None:
+    row = {**_OPEN_NO_THREAD, "outcome": fin.UNRESOLVED, "prior_issue": url, "issue": url}
+    [item] = report_decide.open_items(report_decide.open_block({"target_repo": "o/r", "findings": [row]}))
+    assert "prior_issue" not in item and "issue" not in item
 
 
 def test_broken_leftover_fields_in_the_record_are_ignored() -> None:

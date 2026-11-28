@@ -660,24 +660,33 @@ def test_issue_3780_2_nothing_is_filed_unless_the_primary_is_github(
     assert ("issue_error" in store.read_object(path)["findings"][0]) is noted
 
 
-def test_issue_3780_a_rerun_with_the_same_skip_reason_reuses_the_comment(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:
+def test_issue_3780_a_rerun_checks_the_target_once_and_reuses_the_comment_while_skipped(tmp_path: Path, monkeypatch, hub) -> None:
     from ndf.domains.crossreview import cli
 
-    github = _filing(monkeypatch, hub, repos, None)
+    github = FakeGitHub()
+    port = leftover.GitHubIssues(github, publish.Publisher(github, frozenset()), GitHubError, github.viewer, sleep=lambda s: None)
+    hub.leftovers, hub.clean = lambda pr: port, list
+    checked: list[str] = []
+    monkeypatch.setattr(cli.leftover, "unconfirmed_target", lambda *a: checked.append("target"))
     state_dir = tmp_path / "st"
     store.write_object(state_dir / store.STATE_NAME.format(pr=7), _left_state())
-    _report_of(state_dir, capsys)
-    written = len(hub.comments)
-    cfg = types.SimpleNamespace(state_dir=state_dir, pr=7, main=repos.main)
-    review = types.SimpleNamespace(findings=[], final=fin.CONVERGED)
-    got = types.SimpleNamespace(review=review, warnings=[], reused=True)
-    _, warnings = cli._report(cfg, got, lambda: cli.HUB(None, "o/r", repos.main))
-    assert len(hub.comments) == written and any("issues.primary" in w for w in warnings)
-    # 設定を直せば、公開し直して起票する
-    (repos.main / ".ndf").mkdir(exist_ok=True)
-    (repos.main / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
-    cli._report(cfg, got, lambda: cli.HUB(None, "o/r", repos.main))
-    assert len(hub.comments) == written + 1 and len(github.issues) == 1
+    cfg = types.SimpleNamespace(state_dir=state_dir, pr=7, main=tmp_path)
+    got = types.SimpleNamespace(review=types.SimpleNamespace(findings=[], final=fin.CONVERGED), warnings=[], reused=True)
+
+    def rerun() -> list[str]:
+        return cli._report(cfg, got, lambda: cli.HUB(None, "o/r", tmp_path))[1]
+
+    rerun()
+    warnings = rerun()
+    assert len(hub.comments) == 1 and any("issues.primary" in w for w in warnings) and checked == []
+    # 設定を直せば公開し直して起票する。作成に失敗した後の打ち直しは、公開の中で 1 回だけ照合する
+    (tmp_path / ".ndf").mkdir()
+    (tmp_path / ".ndf" / "project.json").write_text(json.dumps({"issues": {"primary": "github"}}), encoding="utf-8")
+    github.fail[("POST", "repos/o/r/issues")] = 422
+    rerun()
+    checked.clear()
+    rerun()
+    assert checked == ["target"] and len(hub.comments) == 3 and len(github.issues) == 1
 
 
 def test_filing_after_a_rewind_also_takes_the_lock_of_the_origin_pr(repos: Repos, tmp_path: Path, capsys, monkeypatch, hub) -> None:

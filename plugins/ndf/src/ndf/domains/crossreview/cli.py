@@ -545,10 +545,11 @@ def _file_leftovers(ref: store.StateRef, data: dict[str, Any], hub: Hub, filer: 
         return []
     primary, note = _filing_target(data, filer)
     if primary != leftover.GITHUB or note is not None:
-        leftover.hold(rows, note)
+        leftover.hold(data, rows, note)
         # 記録のコメントを書けずに止まっても、打ち直しが起票を試みるように残す
         store.write_object(ref.path, data)
         return [note] if note else []
+    data.pop(leftover.SKIPPED, None)
     origin = hub.publishing(ref.origin_pr) if ref.origin_pr != ref.current_pr else contextlib.nullcontext()
     with origin:
         save = lambda: store.write_object(ref.path, data)  # noqa: E731
@@ -726,14 +727,15 @@ def _report(
     previous = data.get(report_decide.COMMENT_KEY)
     # 今回の注意で比べる（状態ファイルへ残せなかった失敗も、前に載せた注意と違えば書き直す）
     now = report_decide.published_state(ref.current_pr, data, got.review.final, _mvv_notices(warnings))
-    # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由で見送るだけなら、
-    # 公開済みの記録を使う（#3780）
     filer = Filer(lambda: cfg.main, repo_arg)
-    errors = [row[leftover_decide.Filed.ERROR] for row in leftover.candidates(data) if leftover_decide.Filed.ERROR in row]
-    skipped = _filing_target(data, filer)[1] if errors else None
-    retry = any(error != skipped for error in errors)
-    published = data.get(report_decide.PUBLISHED_KEY) == now and not retry
-    if got.reused and isinstance(previous, str) and published:
+    skipped = None
+    published = got.reused and isinstance(previous, str) and data.get(report_decide.PUBLISHED_KEY) == now
+    # 起票に失敗するか起票を見送った指摘があれば、同じ状態でも公開し直して起票を打ち直す。今も同じ理由で見送るだけなら、
+    # 公開済みの記録を使う。起票先の照合は見送った後だけにする（ほかは公開の中で照合する。#3780）
+    if published and any(leftover_decide.Filed.ERROR in row for row in leftover.candidates(data)):
+        skipped = data.get(leftover.SKIPPED)
+        published = skipped is not None and _filing_target(data, filer)[1] == skipped
+    if published:
         items.append({"kind": "comment", "number": cfg.pr, "url": previous})
         return items, warnings + ([skipped] if skipped else [])
     try:

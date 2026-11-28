@@ -27,6 +27,8 @@ from ndf.domains.crossreview.leftover_decide import PARKED, Filed, Listed
 ACCOUNT_IDS = "issue_account_ids"
 RECORD_ID = "issue_record_id"
 LIST_FULL = "issue_list_full"
+# 起票を見送った理由の状態のキー（打ち直しが、GitHub への起票の失敗と見送りを分ける）
+SKIPPED = "issue_skipped"
 # 起票先を GitHub にする `.ndf/project.json` の `issues.primary` の値
 GITHUB = "github"
 # 起票の記録の URL が指す Issue を、GraphQL でまとめて読むときの欄
@@ -133,9 +135,13 @@ def candidates(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def hold(rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
-    """起票を見送った候補の行に理由を残し、設定か起票先を直した後の打ち直しが公開し直すようにする。`reason` が None
+def hold(data: dict[str, Any], rows: Iterable[dict[str, Any]], reason: Optional[str]) -> None:
+    """起票を見送った理由を状態と候補の行に残し、設定か起票先を直した後の打ち直しが公開し直すようにする。`reason` が None
     （起票先を GitHub にしないと宣言している）なら、打ち直さないので前の理由を消す。"""
+    if reason is None:
+        data.pop(SKIPPED, None)
+    else:
+        data[SKIPPED] = reason
     for row in rows:
         if reason is None:
             row.pop(Filed.ERROR, None)

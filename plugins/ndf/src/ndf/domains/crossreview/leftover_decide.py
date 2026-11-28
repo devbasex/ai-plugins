@@ -33,6 +33,8 @@ _ENTRIES_MARK = f"<!-- {_ENTRY}:cross-review-leftover-entries "
 # 起票の記録に書く識別値（`identity`）と時刻（GitHub の ISO 8601）の形
 _IDENT = re.compile(r"[0-9a-f]{12}")
 _AT = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})")
+# 記録のコメントに載せ、読み戻す起票の URL の形（認証情報・クエリ・断片を持たない）
+_ISSUE_URL = re.compile(r"https://github\.com/(?P<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/[1-9][0-9]*")
 # 本文の先頭の `<名前>:<行>`
 _LOCATION = re.compile(r"^\s*`?([\w./-]+):(\d+)")
 
@@ -147,6 +149,15 @@ class Listed(NamedTuple):
     created_at: str
     is_pull: bool
     author_id: int = 0
+
+
+def issue_url(value: object, repo: Optional[str] = None) -> Optional[str]:
+    """`value` が正規の形の Issue の URL ならその値、違えば None。`repo`（`<所有者>/<リポジトリ>`）を渡せば、そのリポジトリの
+    Issue だけを通す。記録のコメントの一覧は伏せ字を当てずに URL を載せるので、書く側と読む側の両方がこれを通す。"""
+    found = _ISSUE_URL.fullmatch(value) if isinstance(value, str) else None
+    if found is None or (repo and found.group("repo").casefold() != repo.casefold()):
+        return None
+    return found.group(0)
 
 
 def files_issue(row: Mapping[str, Any]) -> bool:

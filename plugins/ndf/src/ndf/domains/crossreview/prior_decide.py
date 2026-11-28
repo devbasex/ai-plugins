@@ -193,15 +193,9 @@ def _recorded_one(item: Mapping[str, Any], judged: Mapping[str, Any]) -> Optiona
         **judged,
         thread=thread if type(thread) is int else None,
         parked=item.get(leftover_decide.PARKED) is True,
-        issue=_issue_url(item.get(leftover_decide.Filed.URL)),
-        prior_issue=_issue_url(item.get(leftover_decide.Filed.PRIOR)),
+        issue=leftover_decide.issue_url(item.get(leftover_decide.Filed.URL)),
+        prior_issue=leftover_decide.issue_url(item.get(leftover_decide.Filed.PRIOR)),
     )
-
-
-def _issue_url(value: object) -> Optional[str]:
-    """一覧の起票の URL（`https://` で始まる 1 語でなければ None）。"""
-    url = _opt_text(value)
-    return url if url and url.startswith("https://") and len(url.split()) == 1 else None
 
 
 def recorded(
@@ -209,7 +203,7 @@ def recorded(
 ) -> tuple[list[Carried], dict[int, Mapping[str, Any]]]:
     """最新の記録のコメント（`MARKER` で始まる PR コメントのうち、書き手が信頼でき、最終更新の時刻が最も新しいもの）に残った
     未解決の指摘のうち、スレッドの無いもの（スレッドのある指摘は `carried` が引き継ぐ）と NDF が機械で確かめて作ったものと、
-    スレッドのある指摘の MVV の判定と保護の種類（スレッドの最初のコメントの id → 判定）。同じ保存先の打ち直しは記録の
+    スレッドのある指摘の MVV の判定と保護の種類と起票の URL（スレッドの最初のコメントの id → 値）。同じ保存先の打ち直しは記録の
     コメントを書き換えるので、作った時刻でなく最終更新の時刻で選ぶ（PR 3944 の r2-5）。
 
     それが今の保存先の書いたコメント（`own` の URL）なら、状態ファイルが持つ指摘（`held` の id）は戻さない。コメントの本文は秘密や
@@ -224,7 +218,8 @@ def recorded(
         if one is None:
             continue
         if one.thread is not None:
-            marks[one.thread] = judged | ({"issue": one.issue} if one.issue else {})
+            urls = {"issue": one.issue, "prior_issue": one.prior_issue}
+            marks[one.thread] = judged | {k: v for k, v in urls.items() if v}
             if one.by != report_decide.BY_NDF:
                 continue
         if _opt_text(item.get("id")) not in known:
