@@ -174,7 +174,7 @@ def _import_documents(st: store.Store, machine_id: str, cwd: Path, hub: Hub) -> 
     commit = _recorded_commit(s)
     if commit is not None:
         tip = _tip(s)
-        if s.git.contained([commit], tip):
+        if s.git.is_ancestor(commit, tip):
             return f"承認した文書は {s.branch} に届いている"
         if s.git.is_ancestor(commit, "HEAD"):
             _ensure_head(s)
@@ -182,7 +182,7 @@ def _import_documents(st: store.Store, machine_id: str, cwd: Path, hub: Hub) -> 
     if s.git.commit_or_none(s.head) is not None and s.git.is_ancestor(s.head, "HEAD"):
         # 手元は古いことがあるので、届いたかは送り先の HEAD で決める
         tip = tip if tip is not None else _tip(s)
-        if s.git.contained([s.head], tip):
+        if s.git.is_ancestor(s.head, tip):
             return f"{s.branch} は承認した HEAD を含むので、反映するものは無い"
     _check_merged(s, hub)
     _ensure_head(s)
@@ -323,6 +323,6 @@ def _push_documents(s: _Sync, files: Sequence[str], tip: str) -> str:
     if done.returncode != 0:
         hint = f"文書のコミットを送り先の {s.branch} のHEADの上へ載せ直して（git rebase。マージのコミットは作らない）打ち直す"
         raise _Stop("precondition", f"{s.branch} への push が拒否された。{hint}: {mask_urls(done.stderr.strip())}")
-    if not s.git.contained([sha], _tip(s)):
+    if not s.git.is_ancestor(sha, _tip(s)):
         raise _Stop("precondition", f"push の後の {s.branch} に文書のコミット {sha} が無い")
     return f"承認した文書を {s.branch} へ反映した（{sha}）"
