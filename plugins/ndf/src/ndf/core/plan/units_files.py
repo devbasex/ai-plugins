@@ -516,6 +516,23 @@ def render_tables(plan: str, views: Sequence[ud.View], file: Optional[str] = Non
     )
 
 
+def item_table(items: Sequence[Mapping[str, Any]]) -> list[str]:
+    """`unit_items` の単位の、承認資料の表の行（「レビューの単位」の表から「実際の行数」の列を除いたもの）。"""
+    rows = [
+        [
+            u["name"],
+            _JOIN.join(f"{t['id']}（#{t['issue']}）" for t in u["tasks"]),
+            "・".join(u[ud.CRITERIA_KEY]) or _NONE,
+            _NONE if u["lines"] is None else str(u["lines"]),
+            str(u["order"]),
+            _JOIN.join(f"{a['unit']}（{a['reason']}）" for a in u["after"]) or _NONE,
+            str(u["merge"]),
+        ]
+        for u in items
+    ]
+    return _markdown_table(_UNITS_HEAD[:-1], rows)
+
+
 def _newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 

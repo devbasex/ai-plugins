@@ -33,6 +33,7 @@ from ndf.contracts import result, worker_paths
 from ndf.contracts.worker_kinds import kind_gaps, kind_values, values_in, work_dir_of, work_kinds
 from ndf.core import route
 from ndf.progress import command, invoke, model, run, store
+from ndf.progress.gate import design
 from ndf.progress.gate.answering import (
     Answer,
     Observe,
@@ -50,10 +51,12 @@ from ndf.progress.gate.answering import (
 from ndf.progress.gate.asking import (
     RELEASE_GATE,
     TOOL,
+    Question,
     Target,
     gate_result,
     present_material,
     question,
+    waiting,
 )
 from ndf.progress.gate.records import answers, approved_head
 from ndf.progress.gate.release import request_release, take_reply
@@ -77,6 +80,9 @@ def present(
     # その head の資料があり、提示した対象も変わっていなければ、書き直さない（#3959）
     first = question(v, m, repo=repo)
     seen = observe(first)
+    why = design.outdated(v, first, seen)
+    if why is not None:
+        return _restart(st, v, first, out, why)
     asked = replace(first, target=replace(seen, material=None))
     # 資料・そのハッシュ・提示の識別子（リリースのリクエストの ID に使う）は、同じ排他の中でまとめて受け取る
     path, sha, held = present_material(st.root, v, asked, private=st.private)
@@ -90,6 +96,21 @@ def present(
     if sent is not None:
         metrics["release_request"] = sent
     return command.with_warnings(gate_result(q, metrics, path), before=warned)
+
+
+def _restart(st: store.Store, v: run.View, q: Question, out: Mapping[str, Any], why: str) -> dict[str, Any]:
+    """承認の記録が今の PR に当てられないので、資料を出さずに工程の先頭へ戻し、`ndf progress next` を案内する（#3702）。
+
+    読んだ後に待ちが変わっていれば何も書かない。"""
+
+    def build(now: run.View) -> list[model.EventDraft]:
+        held = waiting(now)
+        return design.reset(now, held, why) if held is not None and held.id == q.id else []
+
+    run.append(st, v.machine_id, build)
+    summary = f"{why}。承認資料は出さず、{design.RESTARTED}"
+    got = result.result(TOOL, result.OK, summary, metrics=out.get("metrics"), next=result.command("progress", "next", v.machine_id))
+    return command.with_warnings(got, before=list(out["warnings"]) if "warnings" in out else [])
 
 
 # --- サブコマンド ndf answer ----------------------------------------------------------------------------

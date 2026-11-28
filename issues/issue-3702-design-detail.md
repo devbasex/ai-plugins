@@ -52,7 +52,7 @@ contracts/
 | パス | 種類 | 役割 | 依存する先 | 最上位の関数 |
 | --- | --- | --- | --- | --- |
 | `src/ndf/core/plan/units_decide.py` | 新設 | 実行順・導く値・違反・警告・分け方の案を返す | `graphlib` | `parse`・`judge`・`split`・`single` |
-| `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイル・実装計画・上限を読み、表を作る | 上・`inputs_decide`・`git`・`contracts` | `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`differs` |
+| `src/ndf/core/plan/units_files.py` | 新設 | 単位のファイル・実装計画・上限を読み、表を作る | 上・`inputs_decide`・`git`・`contracts` | `find`・`load`・`limits_of`・`collect`・`check`・`render_tables`・`item_table`・`differs` |
 | `src/ndf/core/plan/cli.py` | 変更 | `ndf plan units render`・`check`（`--design-gate`） | `units_files` | `_cmd_units` |
 | `src/ndf/core/plan/inputs_decide.py` | 変更 | 「設計の結果」の表の「扱い」と「統合先」の列を読む。`design_gaps` を消す | — | `design_handlings`（新設） |
 | `src/ndf/core/plan/queue_decide.py` | 変更 | `RESUME_ALWAYS` に `guard` を足す | — | — |
@@ -70,6 +70,9 @@ contracts/
 | `src/ndf/progress/definition.py` | 変更 | そのモードに判定のステップが無い工程の出力から `mvv_gate` を外す | — | `_stage_def`（変更） |
 | `src/ndf/progress/store.py` | 変更 | リポジトリのスプリントの一覧を読む | — | `read_machines`（新設） |
 | `src/ndf/progress/gate/entry.py`・`answering.py` | 変更 | 資料を出す前と回答の確定の前に記録と照らす | `design_record` | `present`・`answer`・`recheck`（変更） |
+| `src/ndf/progress/gate/design.py` | 新設 | 承認ゲートで記録を今の PR と比べ、承認の回答に添える値を作る | `design_record`・`asking` | `outdated`・`reset`・`moved_after_answer`・`answer_extra` |
+| `src/ndf/progress/gate/asking.py` | 変更 | 質問の PR をレビューした PR にし、承認資料に単位の表・警告・省いた課題を載せる | `design_record`・`units_files` | `question`・`material`（変更） |
+| `src/ndf/progress/stage_inputs.py` | 変更 | `ndf records mvv gate --machine` の入力を同じ工程の済んだステップから組む | `folding`・`stages` | `stage_inputs_of`（変更） |
 | `src/ndf/ci_cli.py` | 変更 | `ndf ci merge --verify-merged`・`ndf ci watch --head` | — | `_merge_pull`・`_watch`（変更） |
 | `src/ndf/adapters/git.py` | 変更 | push の URL を読み、解析し、git がもう一度書き換えるかを返す | — | `github_target`・`Git.push_urls`・`Git.rewrites_again` |
 | `src/ndf/adapters/github.py` | 変更 | `pulls` に REST への読み替えを止める指定 | — | `pulls`（変更） |

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ndf.progress import command, invoke, model, store
+from ndf.progress import command, folding, invoke, model, run_view, stages, store
 
 
 def stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]:
@@ -36,4 +36,7 @@ def stage_inputs_of(cwd: Path, machine_id: str, step_id: str) -> dict[str, Any]:
     found = [s for s in current.snapshot.stages if any(step.id == step_id for step in s.steps)]
     if not found:
         raise model.Refused(f"ステートマシンのモード {current.snapshot.mode} は判定のステップ {step_id} を持たない")
-    return invoke.resolve_inputs(found[0], command.machine_context(current))
+    # 同じ工程の済んだステップの値は、プランの判定のステップと同じく文脈でなくステップの記録から渡す
+    view = run_view.View(machine_id, current.rev, current.snapshot, current.raw, current.events)
+    done = folding.step_progress(view, found[0].name).done
+    return invoke.resolve_inputs(found[0], stages.carried_inputs(found[0], command.machine_context(current), done))

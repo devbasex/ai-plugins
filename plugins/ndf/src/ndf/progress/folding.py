@@ -86,6 +86,8 @@ class StepProgress:
         elif p["status"] == stages.RESET:
             self.done.pop(step, None)
             self.resets[step] = (self.resets[step] if step in self.resets else 0) + 1
+            if self.waiting is not None and self.waiting["step"] == step:
+                self.waiting = None
             if isinstance(p.get(stages.REVIEW_AGAIN), dict):
                 self.again.append({"seq": ev.seq, "gate": p.get("gate"), **p[stages.REVIEW_AGAIN]})
         else:
