@@ -62,6 +62,8 @@ class Port(Protocol):
 
     def pr_url(self, pr: int) -> str: ...
 
+    def issues_url(self) -> str: ...
+
     def redact(self, *texts: str) -> list[str]: ...
 
     def comments(self, pr: int) -> Iterable[Comment]: ...
@@ -172,7 +174,7 @@ class _Filing:
         if found is None:
             return
         self.record_id = self.data[RECORD_ID] = found.id
-        self.entries = leftover_decide.record_entries(found.body)
+        self.entries = leftover_decide.record_entries(found.body, self.port.issues_url())
         for entry in self.entries.values():
             entry.setdefault("at", found.updated_at)
 
@@ -309,7 +311,7 @@ class _Filing:
 
     def write(self) -> str:
         """起票の記録を書き、GitHub が記録した更新時刻を返す。"""
-        body = leftover_decide.record_body(self.entries, lambda text: self.port.redact(text)[0])
+        body = leftover_decide.record_body(self.entries, self.port.issues_url(), lambda text: self.port.redact(text)[0])
         if self.record_id is None:
             self.record_id, at = self.port.post(self.ref.origin_pr, body)
         else:
@@ -490,6 +492,10 @@ class GitHubIssues:
     def pr_url(self, pr: int) -> str:
         return f"https://github.com/{self.hub.repo}/pull/{int(pr)}"
 
+    def issues_url(self) -> str:
+        """このリポジトリの Issue の URL の、番号より前。"""
+        return f"https://github.com/{self.hub.repo}/issues/"
+
     def redact(self, *texts: str) -> list[str]:
         return [str(t) for t in self.publisher.guarded(*texts)[0]]
 
@@ -547,7 +553,7 @@ class GitHubIssues:
     def issues(self, urls: Sequence[str]) -> dict[str, Optional[Listed]]:
         """URL ごとに、このリポジトリの Issue ならその中身。別の場所の URL と、無い（消された・Pull Request の）番号は None。
         GraphQL でまとめて読む（`GitHub.nodes`）。"""
-        prefix = f"https://github.com/{self.hub.repo}/issues/".lower()
+        prefix = self.issues_url().lower()
         numbers = {u: int(u[len(prefix) :]) for u in urls if u.lower().startswith(prefix) and u[len(prefix) :].isdecimal()}
         read = self.hub.nodes(numbers.values(), "issue", ISSUE_FIELDS) if numbers else {}
         return {u: _listed_node(read[numbers[u]]) if u in numbers and read[numbers[u]] else None for u in urls}

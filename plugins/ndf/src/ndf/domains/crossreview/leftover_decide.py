@@ -221,16 +221,39 @@ def names_finding(listed: Listed, ident: str) -> bool:
     return not listed.is_pull and issue_mark(ident) in listed.body
 
 
-def record_body(entries: Mapping[str, Mapping[str, Any]], redact: Callable[[str], str] = str) -> str:
-    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at` と Issue の `url`）。`redact`（伏せ字）は中身にだけ当て、
-    目印は当てた後に付ける（伏せると読み戻せない）。"""
-    payload = redact(json.dumps({k: dict(v) for k, v in entries.items()}, sort_keys=True))
+def _issue_number(url: str, issues_url: str) -> Optional[int]:
+    """`issues_url`（このリポジトリの Issue の URL の番号より前）で始まる Issue の URL の番号。違えば None。"""
+    head, tail = url[: len(issues_url)], url[len(issues_url) :]
+    return int(tail) if head.lower() == issues_url.lower() and tail.isdecimal() else None
+
+
+def record_body(entries: Mapping[str, Mapping[str, Any]], issues_url: str, redact: Callable[[str], str] = str) -> str:
+    """起票の記録のコメントの本文（識別値ごとの試みた時刻 `at` と Issue の番号 `number`）。URL は書かず番号にする
+    （URL の所有者名は手元のアカウント名と同じだと伏せられ、読み戻せない）。`redact`（伏せ字）は中身にだけ当て、
+    目印は当てた後に付ける。"""
+    stored: dict[str, dict[str, Any]] = {}
+    for ident, entry in entries.items():
+        stored[ident] = {k: v for k, v in entry.items() if k != "url"}
+        number = _issue_number(entry["url"], issues_url) if "url" in entry else None
+        if number is not None:
+            stored[ident]["number"] = number
+    payload = redact(json.dumps(stored, sort_keys=True))
     note = redact("cross-review が起票を試みた指摘の記録（同じ指摘を 2 件起票しないために読む。書き換えない）。")
     return f"{RECORD_MARK}\n{note}\n\n{_ENTRIES_MARK}{payload} -->"
 
 
-def record_entries(body: str) -> dict[str, dict[str, Any]]:
-    """起票の記録の本文から、識別値ごとの `at` と `url`（どちらも無いことがある）を読む。読めなければ空。"""
+def _entry(stored: Mapping[str, Any], issues_url: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {}
+    if isinstance(stored.get("at"), str):
+        entry["at"] = stored["at"]
+    number = stored.get("number")
+    if type(number) is int and number > 0:
+        entry["url"] = f"{issues_url}{number}"
+    return entry
+
+
+def record_entries(body: str, issues_url: str) -> dict[str, dict[str, Any]]:
+    """起票の記録の本文から、識別値ごとの `at` と `url`（番号から組む。どちらも無いことがある）を読む。読めなければ空。"""
     last = _final_line(body)
     if not (last.startswith(_ENTRIES_MARK) and last.endswith(" -->")):
         return {}
@@ -240,8 +263,4 @@ def record_entries(body: str) -> dict[str, dict[str, Any]]:
         return {}
     if not isinstance(raw, dict):
         return {}
-    return {
-        ident: {k: v for k, v in entry.items() if k in ("at", "url") and isinstance(v, str)}
-        for ident, entry in raw.items()
-        if isinstance(entry, dict)
-    }
+    return {ident: _entry(stored, issues_url) for ident, stored in raw.items() if isinstance(stored, dict)}

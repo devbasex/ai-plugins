@@ -16,6 +16,7 @@ from ndf.domains.crossreview.leftover_decide import Filed, Listed
 
 REPO = "o/r"
 PR_URL = f"https://github.com/{REPO}/pull/7"
+ISSUES = f"https://github.com/{REPO}/issues/"
 # 偽の GitHub の login ごとのアカウント ID
 IDS = {"me": 1, "app[bot]": 2, "human": 3, "x": 4}
 
@@ -209,10 +210,13 @@ def test_trusted_authors(author: str, author_id: int, association: str, permissi
 
 
 def test_the_record_reads_back_what_it_writes_and_a_broken_body_is_empty() -> None:
-    entries = {"abc": {"at": "t", "url": "u"}, "def": {}}
-    assert leftover_decide.record_entries(leftover_decide.record_body(entries)) == entries
-    assert leftover_decide.record_entries(leftover_decide.record_body({})) == {}
-    assert leftover_decide.record_entries(leftover_decide.RECORD_MARK + "\n壊れた本文") == {}
+    entries = {"abc": {"at": "t", "url": f"{ISSUES}7"}, "def": {}}
+    assert leftover_decide.record_entries(leftover_decide.record_body(entries, ISSUES), ISSUES) == entries
+    assert leftover_decide.record_entries(leftover_decide.record_body({}, ISSUES), ISSUES) == {}
+    assert leftover_decide.record_entries(leftover_decide.RECORD_MARK + "\n壊れた本文", ISSUES) == {}
+    # 所有者名を伏せても、番号から URL を組み直せる
+    hidden = leftover_decide.record_body(entries, ISSUES, lambda text: text.replace("/o/", "/x/"))
+    assert leftover_decide.record_entries(hidden, ISSUES) == entries and "github.com" not in hidden
 
 
 # --- 起票 ----------------------------------------------------------------------------------
@@ -289,7 +293,7 @@ def test_a_refused_creation_keeps_the_finding_and_can_be_retried() -> None:
     run = Run(github)
     warnings = run.go()
     assert run.row[Filed.ERROR] and Filed.URL not in run.row and "r2-1" in warnings[0]
-    assert leftover_decide.record_entries(github.records[0]["body"]) == {}
+    assert leftover_decide.record_entries(github.records[0]["body"], ISSUES) == {}
     assert run.go() == [] and run.row[Filed.URL] and Filed.ERROR not in run.row
 
 
@@ -310,7 +314,7 @@ def test_issue_3780_a_lost_result_does_not_create_a_second_issue(current: int, i
     again = Run(github, current=current)
     assert again.go() == [] and again.row[Filed.URL] == github.issues[0]["html_url"]
     assert github.created() == 1
-    assert leftover_decide.record_entries(github.records[0]["body"])[leftover_decide.identity(7, again.row["text"])]["url"]
+    assert leftover_decide.record_entries(github.records[0]["body"], ISSUES)[leftover_decide.identity(7, again.row["text"])]["url"]
 
 
 def test_an_issue_created_at_the_attempted_time_is_found_in_the_list() -> None:
@@ -390,25 +394,21 @@ def test_issue_3780_a_rerun_that_redacts_differently_finds_the_issue() -> None:
 
 
 @pytest.mark.parametrize(
-    "url",
-    [
-        pytest.param("https://example.com/x", id="elsewhere"),
-        pytest.param(f"https://github.com/{REPO}/issues/100", id="unrelated-issue"),
-        pytest.param(f"https://github.com/{REPO}/issues/999", id="missing-issue"),
-    ],
+    "number",
+    [pytest.param(100, id="unrelated-issue"), pytest.param(999, id="missing-issue")],
 )
-def test_a_record_url_that_is_not_the_issue_of_the_finding_is_not_used(url: str) -> None:
+def test_a_record_url_that_is_not_the_issue_of_the_finding_is_not_used(number: int) -> None:
     github = FakeGitHub()
     github.permissions["x"] = "write"
     github.issue("無関係")
     run = Run(github)
     ident = leftover_decide.identity(7, run.row["text"])
-    forged = leftover_decide.record_body({ident: {"url": url}})
+    forged = leftover_decide.record_body({ident: {"url": f"{ISSUES}{number}"}}, ISSUES)
     github.records.append(
         {"id": 500, "pr": 7, "body": forged, "user": {"login": "x", "id": IDS["x"]}, "author_association": "MEMBER", "updated_at": "t"}
     )
     assert run.go() == [] and github.created() == 1
-    assert run.row[Filed.URL] == github.issues[-1]["html_url"] != url
+    assert run.row[Filed.URL] == github.issues[-1]["html_url"] != f"{ISSUES}{number}"
 
 
 def test_a_match_on_a_read_page_is_used_when_the_list_is_over_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
